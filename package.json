@@ -1,0 +1,27 @@
+{
+  "name": "1688-ozon-listing-saas",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "build": "pnpm -r --filter !@saas/extension build",
+    "build:all": "pnpm -r build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "lint": "pnpm -r --if-present lint",
+    "db:generate": "pnpm --filter @saas/db generate",
+    "db:migrate": "pnpm --filter @saas/db migrate",
+    "db:deploy": "pnpm --filter @saas/db deploy",
+    "db:studio": "pnpm --filter @saas/db studio",
+    "dev:web": "pnpm --filter @saas/web dev",
+    "dev:worker": "pnpm --filter @saas/worker dev",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2",
+    "@types/node": "^22.9.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
