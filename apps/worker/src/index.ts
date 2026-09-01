@@ -11,10 +11,20 @@ import {
   checkSubmitGuards,
   compileOzonPayload,
   computeRequestHash,
-  type OzonAttribute,
+  OzonClient,
   type OzonDraftInput,
 } from "@saas/ozon";
 import { XiangjiClient } from "@saas/xiangji";
+import {
+  asRecord,
+  buildRequiredOzonAttributes,
+  firstNumber,
+  firstString,
+  matchOzonCategory,
+  ozonDraftFacts,
+  packageDefaults,
+  type OzonDraftFacts,
+} from "./ozon-draft-facts";
 
 type JsonRecord = Record<string, unknown>;
 type ProductAssetLike = {
@@ -23,84 +33,12 @@ type ProductAssetLike = {
   sourceUrl?: string | null;
 };
 
-function asRecord(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : {};
-}
-
 function asSourceProduct(value: unknown): SourceProductImport | null {
   const data = asRecord(value);
   if (data.source === "1688" && typeof data.offerId === "string") {
     return data as unknown as SourceProductImport;
   }
   return null;
-}
-
-function firstString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
-
-function firstNumber(...values: unknown[]): number | undefined {
-  for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-  return undefined;
-}
-
-function parseOzonAttributes(value: unknown): OzonAttribute[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((rawAttribute) => {
-    const attribute = asRecord(rawAttribute);
-    const id = firstNumber(attribute.id, attribute.attribute_id);
-    const values = Array.isArray(attribute.values) ? attribute.values : [];
-    if (!id || values.length === 0) return [];
-    const parsedValues = values.flatMap((rawValue) => {
-      const item = asRecord(rawValue);
-      const text = firstString(item.value);
-      if (!text) return [];
-      return [{
-        value: text,
-        dictionaryValueId: firstNumber(item.dictionaryValueId, item.dictionary_value_id, item.id),
-      }];
-    });
-    return parsedValues.length > 0 ? [{ id, values: parsedValues }] : [];
-  });
-}
-
-function ozonDraftFacts(raw: unknown) {
-  const root = asRecord(raw);
-  const ozon = asRecord(root.ozon);
-  return {
-    descriptionCategoryId: firstNumber(
-      ozon.descriptionCategoryId,
-      ozon.description_category_id,
-      root.descriptionCategoryId,
-      root.description_category_id,
-      root.ozonCategoryId,
-      root.ozon_category_id,
-    ),
-    typeId: firstNumber(ozon.typeId, ozon.type_id, root.typeId, root.type_id),
-    attributes: parseOzonAttributes(ozon.attributes).length
-      ? parseOzonAttributes(ozon.attributes)
-      : parseOzonAttributes(root.attributes),
-    weightGrams: firstNumber(
-      ozon.weightGrams,
-      ozon.weight_g,
-      root.weightGrams,
-      root.weight_g,
-      root.weight,
-    ),
-    dimensions: {
-      widthMm: firstNumber(ozon.widthMm, ozon.width_mm, root.widthMm, root.width_mm, root.width),
-      heightMm: firstNumber(ozon.heightMm, ozon.height_mm, root.heightMm, root.height_mm, root.height),
-      depthMm: firstNumber(ozon.depthMm, ozon.depth_mm, root.depthMm, root.depth_mm, root.depth),
-    },
-  };
 }
 
 function assertNoChineseBuyerText(values: Record<string, unknown>) {
@@ -127,6 +65,74 @@ function getNormalized(raw: unknown, fallbackTitle?: string | null): NormalizedP
     purchaseCny: { value: 0, estimated: true, confidence: 0 },
     mainImages: [],
     detailImages: [],
+  };
+}
+
+function ozonReadClient(store: {
+  ozonClientId: string | null;
+  ozonApiKey: string | null;
+}): OzonClient {
+  if (!store.ozonClientId || !store.ozonApiKey) {
+    throw new Error("缺少 Ozon 店铺密钥，无法自动匹配类目");
+  }
+  return new OzonClient({
+    clientId: store.ozonClientId,
+    apiKey: decryptSecret(store.ozonApiKey),
+    enableRealSubmit: false,
+  });
+}
+
+async function completeOzonFacts(params: {
+  facts: OzonDraftFacts;
+  fact: NormalizedProductFact;
+  titleRu: string;
+  store: { ozonClientId: string | null; ozonApiKey: string | null };
+}): Promise<OzonDraftFacts> {
+  let facts = params.facts;
+  const client = !facts.descriptionCategoryId || !facts.typeId || facts.attributes.length === 0
+    ? ozonReadClient(params.store)
+    : null;
+
+  if ((!facts.descriptionCategoryId || !facts.typeId) && client) {
+    const matched = matchOzonCategory(await client.getCategoryTree(), params.fact);
+    if (!matched) {
+      throw new Error("无法从 1688 商品信息自动匹配 Ozon 类目，请在 rawJson.ozon 中补 description_category_id 和 type_id");
+    }
+    facts = {
+      ...facts,
+      descriptionCategoryId: facts.descriptionCategoryId ?? matched.descriptionCategoryId,
+      typeId: facts.typeId ?? matched.typeId,
+    };
+  }
+
+  if (!facts.descriptionCategoryId || !facts.typeId) return facts;
+
+  if (facts.attributes.length === 0 && client) {
+    const categoryAttributes = await client.getCategoryAttributes(
+      facts.descriptionCategoryId,
+      facts.typeId,
+    );
+    facts = {
+      ...facts,
+      attributes: await buildRequiredOzonAttributes(
+        params.fact,
+        params.titleRu,
+        categoryAttributes,
+        facts.attributes,
+        (attributeId) => client.getAttributeValues(facts.descriptionCategoryId!, facts.typeId!, attributeId),
+      ),
+    };
+  }
+
+  const defaults = packageDefaults(params.fact);
+  return {
+    ...facts,
+    weightGrams: facts.weightGrams ?? defaults.weightGrams,
+    dimensions: {
+      widthMm: facts.dimensions.widthMm ?? defaults.dimensions.widthMm,
+      heightMm: facts.dimensions.heightMm ?? defaults.dimensions.heightMm,
+      depthMm: facts.dimensions.depthMm ?? defaults.dimensions.depthMm,
+    },
   };
 }
 
@@ -187,7 +193,7 @@ async function processListing(jobId: string) {
   if (!job) throw new Error(`listing job not found: ${jobId}`);
 
   let fact = getNormalized(job.product.rawJson, job.product.title);
-  const ozonFacts = ozonDraftFacts(job.product.rawJson);
+  let ozonFacts = ozonDraftFacts(job.product.rawJson);
   let titleRu = `${fact.title} / RU`;
   let descriptionRu = firstString(fact.descriptionText) ?? fact.title;
   let bulletPointsRu: string[] = [];
@@ -264,6 +270,12 @@ async function processListing(jobId: string) {
     });
 
     const category = await runStep(jobId, "match_ozon_category", async () => {
+      ozonFacts = await completeOzonFacts({
+        facts: ozonFacts,
+        fact,
+        titleRu,
+        store: job.store,
+      });
       if (!ozonFacts.descriptionCategoryId) {
         throw new Error("缺少 Ozon description_category_id，请先由采集脚本或人工匹配类目");
       }

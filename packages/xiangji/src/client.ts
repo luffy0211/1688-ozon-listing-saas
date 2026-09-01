@@ -38,6 +38,13 @@ function mockId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 }
 
+function mockTranslate(texts: string[], opts: TranslateOptions): string[] {
+  const target = (opts.targetLanguage ?? "RUS").toUpperCase();
+  return texts.map((_, i) =>
+    target === "RUS" ? `Тестовый перевод ${i + 1}` : `Mock translation ${i + 1}`,
+  );
+}
+
 const DEFAULT_BASE = "https://api.tosoiot.com";
 const LEGACY_BASE = "http://api.tosoiot.com";
 
@@ -157,7 +164,7 @@ export class XiangjiClient {
     texts: string[],
     opts: TranslateOptions = {},
   ): Promise<string[]> {
-    if (this.textMock) return texts;
+    if (this.textMock) return mockTranslate(texts, opts);
 
     if (this.authMode === "legacy") {
       const translated: string[] = [];

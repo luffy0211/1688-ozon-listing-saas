@@ -106,9 +106,15 @@ export type DeleteProductsRequest = {
 };
 
 export type CategoryNode = {
-  category_id: number;
-  title: string;
-  children: CategoryNode[];
+  category_id?: number;
+  description_category_id?: number;
+  id?: number;
+  type_id?: number;
+  title?: string;
+  name?: string;
+  category_name?: string;
+  type_name?: string;
+  children?: CategoryNode[];
 };
 
 export type CategoryAttribute = {
@@ -121,6 +127,7 @@ export type CategoryAttribute = {
   is_collection: boolean;
   is_required: boolean;
   required?: boolean;
+  dictionary_id?: number;
   allowed_values?: Array<{ id?: number; dictionary_value_id?: number; value: string }>;
 };
 
