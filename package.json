@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "build": "pnpm -r --filter !@saas/extension build",
+    "build": "pnpm -r --if-present build",
     "build:all": "pnpm -r build",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -12,6 +12,8 @@
     "lint": "pnpm -r --if-present lint",
     "db:generate": "pnpm --filter @saas/db generate",
     "db:migrate": "pnpm --filter @saas/db migrate",
+    "db:push": "pnpm --filter @saas/db push",
+    "db:seed": "pnpm --filter @saas/db seed",
     "db:deploy": "pnpm --filter @saas/db deploy",
     "db:studio": "pnpm --filter @saas/db studio",
     "dev:web": "pnpm --filter @saas/web dev",

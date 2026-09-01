@@ -30,13 +30,13 @@ packages/storage S3/MinIO 存储
 
 ### 环境要求
 
-- Node.js 20+、pnpm 9+
+- Node.js 22+、pnpm 9+
 - Docker + Docker Compose（本地跑数据库/缓存/存储/服务）
 
 ### 一键启动
 
 ```bash
-# 1. 准备环境变量
+# 1. 准备环境变量（本机已创建 .env；新机器按需复制）
 cp .env.example .env
 # 生成密钥
 #   SESSION_SECRET:      openssl rand -hex 32
@@ -46,7 +46,7 @@ cp .env.example .env
 pnpm install
 pnpm db:generate
 
-# 3. 启动（含数据库迁移）
+# 3. 启动（web 容器会自动 db push + seed）
 docker compose up --build
 ```
 
@@ -55,14 +55,35 @@ docker compose up --build
 - Web：http://localhost:3000
 - MinIO Console：http://localhost:9001
 
+本地 seed 默认账号：
+
+- 管理员：`admin@example.com`
+- 密码：`Admin123456`
+- 注册邀请码：`dev-invite`
+
 ### 本地开发（不用 Docker 跑 web/worker）
 
 ```bash
 docker compose up -d postgres redis minio   # 只起基础设施
-pnpm db:migrate
+pnpm db:push
+pnpm db:seed
 pnpm dev:web      # 终端 1
 pnpm dev:worker   # 终端 2
 ```
+
+### 浏览器插件
+
+```bash
+pnpm --filter @saas/extension build
+```
+
+在 Chrome/Edge 打开扩展管理页，启用开发者模式，加载：
+
+```text
+apps/extension/dist
+```
+
+插件默认把数据提交到 `http://localhost:3000`，采集前需要先在后台登录。
 
 ### 测试
 
@@ -70,6 +91,20 @@ pnpm dev:worker   # 终端 2
 pnpm test        # 单测
 pnpm test:e2e    # Playwright E2E
 ```
+
+### Ozon 运营 Agent
+
+```bash
+OPENAI_API_KEY=               # 真实调用 OpenAI Agents SDK 时填写
+OPENAI_AGENT_MODEL=           # 为空时使用 Agents SDK 默认模型
+OPENAI_AGENT_MOCK=true        # 本地演示默认走 mock；设为 false 后调用 OpenAI
+OPENAI_AGENT_TRACE_SENSITIVE_DATA=false
+AGENT_MIN_MARGIN_RATE=0.25
+AGENT_MIN_PROFIT_RUB=100
+AGENT_COMPETITOR_CACHE_HOURS=24
+```
+
+后台入口：`/agent`。第一版 Agent 会读取脱敏后的 Ozon 运营快照，生成动作草案和审批项；改价动作必须通过利润 guardrail，补货和广告促销只生成推荐。
 
 ## 关键安全开关
 

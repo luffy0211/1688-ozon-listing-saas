@@ -49,8 +49,8 @@ services:
     environment:
       DATABASE_URL: postgresql://saas:saas@postgres:5432/listing?schema=public
       REDIS_URL: redis://redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-session-secret-please}
-      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-change-me-encryption-key-please}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-before-production}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_BUCKET: listing-assets
@@ -60,9 +60,18 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       OZON_API_BASE: https://api-seller.ozon.ru
       ENABLE_REAL_OZON_SUBMIT: ${ENABLE_REAL_OZON_SUBMIT:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_AGENT_MODEL: ${OPENAI_AGENT_MODEL:-}
+      OPENAI_AGENT_MOCK: ${OPENAI_AGENT_MOCK:-true}
+      OPENAI_AGENT_TRACE_SENSITIVE_DATA: ${OPENAI_AGENT_TRACE_SENSITIVE_DATA:-false}
+      AGENT_MIN_MARGIN_RATE: ${AGENT_MIN_MARGIN_RATE:-0.25}
+      AGENT_MIN_PROFIT_RUB: ${AGENT_MIN_PROFIT_RUB:-100}
+      AGENT_COMPETITOR_CACHE_HOURS: ${AGENT_COMPETITOR_CACHE_HOURS:-24}
       XIANGJI_API_BASE: https://api.tosoiot.com
+      XIANGJI_MOCK: ${XIANGJI_MOCK:-true}
     ports:
-      - "3000:3000"
+      - "3001:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,8 +87,8 @@ services:
     environment:
       DATABASE_URL: postgresql://saas:saas@postgres:5432/listing?schema=public
       REDIS_URL: redis://redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-session-secret-please}
-      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-change-me-encryption-key-please}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-before-production}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       S3_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_BUCKET: listing-assets
@@ -90,6 +99,7 @@ services:
       OZON_API_BASE: https://api-seller.ozon.ru
       ENABLE_REAL_OZON_SUBMIT: ${ENABLE_REAL_OZON_SUBMIT:-false}
       XIANGJI_API_BASE: https://api.tosoiot.com
+      XIANGJI_MOCK: ${XIANGJI_MOCK:-true}
     depends_on:
       postgres:
         condition: service_healthy

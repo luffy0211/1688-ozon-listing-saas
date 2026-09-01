@@ -1,0 +1,774 @@
+// 1688-ozon-listing-saas 数据库 schema
+// 所有业务表必须带 tenantId，所有查询必须按 tenantId 过滤。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  operator
+  admin
+}
+
+enum SupplierCooperationStatus {
+  UNCONTACTED
+  CONTACTED
+  SAMPLING
+  COOPERATING
+  NOT_COOPERATING
+}
+
+enum ShopFollowStatus {
+  NEW
+  KNOWN
+  IMPORTED_TO_PRODUCT_POOL
+  IGNORED
+  NOT_SEEN_IN_LATEST_SYNC
+}
+
+enum StepStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum DraftStatus {
+  DRAFT
+  COMPILED
+  SUBMITTED
+  FAILED
+}
+
+enum AgentSessionStatus {
+  OPEN
+  ARCHIVED
+}
+
+enum AgentMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+enum AgentRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum AgentActionType {
+  UPDATE_PRICE
+  UPDATE_STOCK
+  UPDATE_IMAGES
+  UPDATE_ATTRIBUTES
+  UPDATE_CATEGORY
+  PUBLISH_DRAFT
+  CONTENT_DRAFT
+  ARCHIVE_PRODUCT
+  UNARCHIVE_PRODUCT
+  DELETE_PRODUCT
+  BULK_PRODUCT_UPDATE
+  RESTOCK_RECOMMENDATION
+  PROMO_RECOMMENDATION
+}
+
+enum AgentActionStatus {
+  RECOMMENDED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXECUTED
+  FAILED
+  BLOCKED
+}
+
+enum AgentRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  invites          Invite[]
+  stores           Store[]
+  xiangjiCreds     XiangjiCredential[]
+  source1688Creds  Source1688Credential[]
+  pricingRules     PricingRule[]
+  sourceShops      SourceShop[]
+  suppliers        Supplier[]
+  sourceProducts   SourceProduct[]
+  listingJobs      ListingJob[]
+  auditLogs        AuditLog[]
+  ozonAnalyticsSnapshots OzonAnalyticsSnapshot[]
+  ozonProductSnapshots   OzonProductSnapshot[]
+  competitorStores       CompetitorStore[]
+  competitorProducts     CompetitorProduct[]
+  competitorSnapshots    CompetitorProductSnapshot[]
+  competitorReports      CompetitorContentReport[]
+  agentSessions          AgentSession[]
+  agentMessages          AgentMessage[]
+  agentRuns              AgentRun[]
+  agentActions           AgentAction[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id])
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         Role     @default(operator)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs AuditLog[]
+
+  @@index([tenantId])
+}
+
+model Invite {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  code      String    @unique
+  role      Role      @default(operator)
+  maxUses   Int       @default(1)
+  usedCount Int       @default(0)
+  expiresAt DateTime?
+  createdBy String?
+  createdAt DateTime  @default(now())
+
+  @@index([tenantId])
+}
+
+// Ozon 店铺配置（Client ID / API Key 加密保存）
+model Store {
+  id                String   @id @default(cuid())
+  tenantId          String
+  tenant            Tenant   @relation(fields: [tenantId], references: [id])
+  name              String
+  ozonClientId      String
+  ozonApiKey        String // AES-256-GCM 加密
+  ozonSellerId      String?
+  translationVendor String   @default("DeepL")
+  isDefault         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  pricingRules PricingRule[]
+  listingJobs  ListingJob[]
+  ozonDrafts   OzonDraft[]
+  publishRuns  PublishRun[]
+  ozonAnalyticsSnapshots OzonAnalyticsSnapshot[]
+  ozonProductSnapshots   OzonProductSnapshot[]
+
+  @@index([tenantId])
+}
+
+// 象寄 X-API-Key（加密保存）
+model XiangjiCredential {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String?
+  apiKey    String // AES-256-GCM 加密
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// 1688 登录态（接口采集用，服务端托管，cookie 加密保存）
+model Source1688Credential {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id])
+  name          String?
+  cookieJson    String // AES-256-GCM 加密的 storage_state cookie 数组 JSON
+  status        String    @default("active") // active | expired
+  lastVerifiedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([tenantId])
+}
+
+model PricingRule {
+  id                        String   @id @default(cuid())
+  tenantId                  String
+  tenant                    Tenant   @relation(fields: [tenantId], references: [id])
+  storeId                   String?
+  store                     Store?   @relation(fields: [storeId], references: [id])
+  name                      String
+  domesticShippingCny       Decimal  @default(0)
+  packagingCny              Decimal  @default(0)
+  cnyToRub                  Decimal  @default(12.0)
+  internationalShippingRub   Decimal  @default(0)
+  commissionRate            Decimal  @default(0.15)
+  targetMarginRate          Decimal  @default(0.20)
+  isDefault                 Boolean  @default(false)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([storeId])
+}
+
+// 1688 店铺
+model SourceShop {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  shopId      String? // 1688 shopId
+  shopName    String
+  shopUrl     String?
+  contactName String?
+  wangwang    String?
+  phone       String?
+  location    String?
+  rawJson     Json? // 原始采集，不被覆盖
+  supplierId  String?
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  lastSeenAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  syncRuns      ShopSyncRun[]
+  snapshots     ShopProductSnapshot[]
+  sourceProducts SourceProduct[]
+
+  @@index([tenantId])
+  @@index([shopId])
+}
+
+model Supplier {
+  id               String                   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id])
+  name             String
+  companyName      String?
+  shopUrl          String?
+  contactName      String?
+  wangwang         String?
+  phone            String?
+  address          String?
+  mainCategory     String?
+  cooperationStatus SupplierCooperationStatus @default(UNCONTACTED)
+  notes            String?
+  lastContactedAt  DateTime?
+  nextFollowUpAt   DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  sourceShops SourceShop[]
+
+  @@index([tenantId])
+}
+
+model ShopSyncRun {
+  id         String    @id @default(cuid())
+  tenantId   String
+  shopId     String
+  shop       SourceShop @relation(fields: [shopId], references: [id])
+  status     String    @default("running")
+  totalCount Int       @default(0)
+  newCount   Int       @default(0)
+  error      String?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  snapshots ShopProductSnapshot[]
+
+  @@index([tenantId])
+  @@index([shopId])
+}
+
+// 店铺商品快照：按 offerId 去重，判断新品/变化
+model ShopProductSnapshot {
+  id           String           @id @default(cuid())
+  tenantId     String
+  shopId       String
+  shop         SourceShop       @relation(fields: [shopId], references: [id])
+  offerId      String
+  title        String?
+  url          String?
+  imageUrl     String?
+  priceText    String?
+  soldText     String?
+  snapshotHash String
+  followStatus ShopFollowStatus @default(NEW)
+  firstSeenAt  DateTime         @default(now())
+  lastSeenAt   DateTime         @default(now())
+  syncRunId    String?
+  syncRun      ShopSyncRun?     @relation(fields: [syncRunId], references: [id])
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([shopId, offerId])
+  @@index([tenantId])
+  @@index([followStatus])
+}
+
+// 1688 单商品（商品池条目）
+model SourceProduct {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  offerId    String
+  sourceUrl  String?
+  title      String?
+  shopId     String?
+  shop       SourceShop? @relation(fields: [shopId], references: [id])
+  rawJson    Json? // 原始 1688 采集，不被覆盖
+  capturedAt DateTime?
+  status     String   @default("imported")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  productFacts    ProductFact[]
+  productAssets   ProductAsset[]
+  translationTasks TranslationTask[]
+  xiangjiTasks    XiangjiTask[]
+  listingJobs     ListingJob[]
+  ozonDrafts      OzonDraft[]
+
+  @@unique([tenantId, offerId])
+  @@index([tenantId])
+}
+
+// 标准化商品事实
+model ProductFact {
+  id             String        @id @default(cuid())
+  tenantId       String
+  productId      String
+  product        SourceProduct @relation(fields: [productId], references: [id])
+  normalizedJson Json? // 标准化商品事实，估算字段带 estimated/confidence
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([productId])
+}
+
+model ProductAsset {
+  id         String        @id @default(cuid())
+  tenantId   String
+  productId  String
+  product    SourceProduct @relation(fields: [productId], references: [id])
+  kind       String // main_image | detail_image | sku_image | pdp_image | pdp_fallback
+  sourceUrl  String?
+  storageKey String?
+  publicUrl  String?
+  sortOrder  Int           @default(0)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([productId])
+}
+
+model TranslationTask {
+  id         String        @id @default(cuid())
+  tenantId   String
+  productId  String
+  product    SourceProduct @relation(fields: [productId], references: [id])
+  vendor     String        @default("DeepL")
+  status     String        @default("pending")
+  inputJson  Json?
+  outputJson Json?
+  error      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([productId])
+}
+
+model XiangjiTask {
+  id               String        @id @default(cuid())
+  tenantId         String
+  productId        String
+  product          SourceProduct @relation(fields: [productId], references: [id])
+  kind             String // design | preview | generate | image_translate
+  taskId           String?
+  requestId        String?
+  gcid             String?
+  status           String        @default("pending")
+  costQuota        Int?
+  inputJson        Json?
+  outputJson       Json?
+  resultImageUrls  Json?
+  error            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([productId])
+}
+
+model ListingJob {
+  id          String        @id @default(cuid())
+  tenantId    String
+  tenant      Tenant        @relation(fields: [tenantId], references: [id])
+  productId   String
+  product     SourceProduct @relation(fields: [productId], references: [id])
+  storeId     String
+  store       Store         @relation(fields: [storeId], references: [id])
+  status      JobStatus     @default(PENDING)
+  currentStep Int           @default(0)
+  error       String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  steps      JobStep[]
+  ozonDrafts OzonDraft[]
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([storeId])
+}
+
+model JobStep {
+  id         String     @id @default(cuid())
+  tenantId   String
+  jobId      String
+  job        ListingJob @relation(fields: [jobId], references: [id])
+  stepName   String
+  stepIndex  Int
+  status     StepStatus @default(PENDING)
+  inputJson  Json?
+  outputJson Json?
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime   @default(now())
+
+  @@index([tenantId])
+  @@index([jobId])
+}
+
+// Ozon 上架草稿：payloadJson 为最终请求体
+model OzonDraft {
+  id             String        @id @default(cuid())
+  tenantId       String
+  productId      String
+  product        SourceProduct @relation(fields: [productId], references: [id])
+  storeId        String
+  store          Store         @relation(fields: [storeId], references: [id])
+  jobId          String?
+  job            ListingJob?   @relation(fields: [jobId], references: [id])
+  status         DraftStatus   @default(DRAFT)
+  titleRu        String?
+  priceRub       Decimal?
+  ozonCategoryId String?
+  payloadJson    Json?
+  error          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  publishRuns PublishRun[]
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([storeId])
+}
+
+// 提交记录：requestHash 防重复，ozonTaskId 是 Ozon 返回任务号
+model PublishRun {
+  id           String     @id @default(cuid())
+  tenantId     String
+  draftId      String
+  draft        OzonDraft  @relation(fields: [draftId], references: [id])
+  storeId      String
+  store        Store      @relation(fields: [storeId], references: [id])
+  requestHash  String
+  ozonTaskId   String?
+  status       String     @default("submitted")
+  requestJson  Json?
+  responseJson Json?
+  error        String?
+  submittedAt  DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  @@unique([storeId, requestHash])
+  @@index([tenantId])
+  @@index([draftId])
+}
+
+model OzonAnalyticsSnapshot {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  tenant               Tenant   @relation(fields: [tenantId], references: [id])
+  storeId              String
+  store                Store    @relation(fields: [storeId], references: [id])
+  periodFrom           DateTime
+  periodTo             DateTime
+  productCount         Int      @default(0)
+  visibleProductCount  Int      @default(0)
+  archivedProductCount Int      @default(0)
+  totalStock           Int      @default(0)
+  lowStockCount        Int      @default(0)
+  fbsOrderCount        Int      @default(0)
+  fboOrderCount        Int      @default(0)
+  pendingShipmentCount Int      @default(0)
+  cancelledOrderCount  Int      @default(0)
+  grossRevenueRub      Decimal  @default(0)
+  dailyOrdersJson      Json?
+  rawJson              Json?
+  error                String?
+  syncedAt             DateTime @default(now())
+  createdAt            DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([storeId])
+  @@index([syncedAt])
+}
+
+model OzonProductSnapshot {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  storeId       String
+  store         Store    @relation(fields: [storeId], references: [id])
+  productId     String
+  offerId       String
+  name          String?
+  status        String?
+  visible       Boolean  @default(false)
+  archived      Boolean  @default(false)
+  stock         Int      @default(0)
+  reservedStock Int      @default(0)
+  priceRub      Decimal?
+  imageUrl      String?
+  rawJson       Json?
+  syncedAt      DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([storeId, offerId])
+  @@index([tenantId])
+  @@index([storeId])
+  @@index([stock])
+}
+
+model CompetitorStore {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String?
+  storeUrl  String
+  sellerId  String?
+  rawJson   Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products  CompetitorProduct[]
+
+  @@unique([tenantId, storeUrl])
+  @@index([tenantId])
+}
+
+model CompetitorProduct {
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  competitorStoreId String?
+  competitorStore   CompetitorStore? @relation(fields: [competitorStoreId], references: [id])
+  url               String
+  sku               String?
+  title             String
+  sellerName        String?
+  priceText         String?
+  rating            Decimal?
+  reviewCount       Int?
+  imageUrlsJson     Json?
+  attributesJson    Json?
+  description       String?
+  rawJson           Json?
+  lastCapturedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  snapshots CompetitorProductSnapshot[]
+  reports   CompetitorContentReport[]
+
+  @@unique([tenantId, url])
+  @@index([tenantId])
+  @@index([sku])
+}
+
+model CompetitorProductSnapshot {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  productId      String
+  product        CompetitorProduct @relation(fields: [productId], references: [id])
+  title          String
+  priceText      String?
+  rating         Decimal?
+  reviewCount    Int?
+  imageUrlsJson  Json?
+  attributesJson Json?
+  description    String?
+  rawJson        Json?
+  capturedAt     DateTime          @default(now())
+
+  @@index([tenantId])
+  @@index([productId])
+  @@index([capturedAt])
+}
+
+model CompetitorContentReport {
+  id                  String             @id @default(cuid())
+  tenantId            String
+  tenant              Tenant             @relation(fields: [tenantId], references: [id])
+  competitorProductId String?
+  competitorProduct   CompetitorProduct? @relation(fields: [competitorProductId], references: [id])
+  sourceProductId     String?
+  ozonOfferId         String?
+  title               String
+  reportJson          Json
+  createdBy           String?
+  createdAt           DateTime           @default(now())
+
+  @@index([tenantId])
+  @@index([competitorProductId])
+  @@index([sourceProductId])
+  @@index([ozonOfferId])
+}
+
+model AgentSession {
+  id        String             @id @default(cuid())
+  tenantId  String
+  tenant    Tenant             @relation(fields: [tenantId], references: [id])
+  title     String?
+  status    AgentSessionStatus @default(OPEN)
+  createdBy String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  messages AgentMessage[]
+  runs     AgentRun[]
+  actions  AgentAction[]
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model AgentMessage {
+  id        String           @id @default(cuid())
+  tenantId  String
+  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+  sessionId String
+  session   AgentSession     @relation(fields: [sessionId], references: [id])
+  role      AgentMessageRole
+  content   String
+  metaJson  Json?
+  createdAt DateTime         @default(now())
+
+  @@index([tenantId])
+  @@index([sessionId])
+}
+
+model AgentRun {
+  id           String         @id @default(cuid())
+  tenantId     String
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  sessionId    String
+  session      AgentSession   @relation(fields: [sessionId], references: [id])
+  requestedBy  String?
+  status       AgentRunStatus @default(RUNNING)
+  model        String
+  input        String
+  output       String?
+  error        String?
+  toolCallsJson Json?
+  startedAt    DateTime       @default(now())
+  finishedAt   DateTime?
+  createdAt    DateTime       @default(now())
+
+  actions AgentAction[]
+
+  @@index([tenantId])
+  @@index([sessionId])
+  @@index([status])
+}
+
+model AgentAction {
+  id             String            @id @default(cuid())
+  tenantId       String
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  sessionId      String
+  session        AgentSession      @relation(fields: [sessionId], references: [id])
+  runId          String?
+  run            AgentRun?         @relation(fields: [runId], references: [id])
+  type           AgentActionType
+  status         AgentActionStatus @default(PENDING_APPROVAL)
+  riskLevel      AgentRiskLevel    @default(MEDIUM)
+  storeId        String?
+  offerId        String?
+  productId      String?
+  title          String
+  rationale      String
+  payloadJson    Json?
+  guardrailJson  Json?
+  requestedBy    String?
+  approvedBy     String?
+  rejectedBy     String?
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+  executedAt     DateTime?
+  error          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([tenantId])
+  @@index([sessionId])
+  @@index([runId])
+  @@index([status])
+  @@index([type])
+  @@index([storeId])
+  @@index([offerId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityType String?
+  entityId   String?
+  metaJson   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+}

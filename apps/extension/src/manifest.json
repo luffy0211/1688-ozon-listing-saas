@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "1688 到 Ozon 采集助手",
+  "version": "0.2.0",
+  "description": "从当前 1688 店铺采集最新商品详情，并导入本地商品池。",
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "http://127.0.0.1:3000/*",
+    "https://*.1688.com/*",
+    "http://*.1688.com/*",
+    "https://*.alicdn.com/*"
+  ],
+  "background": {
+    "service_worker": "background/index.js"
+  },
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "采集当前 1688 店铺"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.1688.com/*", "http://*.1688.com/*"],
+      "js": ["content/index.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

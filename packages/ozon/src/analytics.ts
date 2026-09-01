@@ -1,0 +1,258 @@
+import { OzonApiError, type OzonClient } from "./client";
+import type {
+  OzonAnalyticsProduct,
+  OzonAnalyticsSummary,
+  OzonOrderSummary,
+  OzonPostingItem,
+  OzonProductInfoItem,
+  OzonProductListItem,
+  OzonProductStockItem,
+} from "./types";
+
+const LOW_STOCK_THRESHOLD = 5;
+
+function toId(value: string | number | undefined | null): string {
+  return value == null ? "" : String(value);
+}
+
+function toMoney(value: string | number | undefined | null): number {
+  if (value == null || value === "") return 0;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function firstImage(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value;
+  if (Array.isArray(value)) {
+    const image = value.find((item) => typeof item === "string" && item.trim());
+    return typeof image === "string" ? image : null;
+  }
+  return null;
+}
+
+function dayKey(value?: string): string {
+  const d = value ? new Date(value) : new Date();
+  const safe = Number.isNaN(d.getTime()) ? new Date() : d;
+  return safe.toISOString().slice(0, 10);
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function buildDailyOrders(
+  since: Date,
+  to: Date,
+  fbsPostings: OzonPostingItem[],
+  fboPostings: OzonPostingItem[],
+): OzonOrderSummary["dailyOrders"] {
+  const byDate = new Map<string, { date: string; fbs: number; fbo: number }>();
+  for (let d = new Date(since); d <= to; d = addDays(d, 1)) {
+    const key = d.toISOString().slice(0, 10);
+    byDate.set(key, { date: key, fbs: 0, fbo: 0 });
+  }
+  for (const posting of fbsPostings) {
+    const key = dayKey(posting.in_process_at ?? posting.shipment_date);
+    const item = byDate.get(key) ?? { date: key, fbs: 0, fbo: 0 };
+    item.fbs += 1;
+    byDate.set(key, item);
+  }
+  for (const posting of fboPostings) {
+    const key = dayKey(posting.in_process_at ?? posting.shipment_date);
+    const item = byDate.get(key) ?? { date: key, fbs: 0, fbo: 0 };
+    item.fbo += 1;
+    byDate.set(key, item);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function sumPostingRevenue(posting: OzonPostingItem): number {
+  if (posting.financial_data?.products?.length) {
+    return posting.financial_data.products.reduce((sum, p) => {
+      const payout = toMoney(p.payout);
+      if (payout > 0) return sum + payout;
+      return sum + toMoney(p.price) * (p.quantity ?? 1);
+    }, 0);
+  }
+  return (posting.products ?? []).reduce((sum, p) => {
+    return sum + toMoney(p.price) * (p.quantity ?? 1);
+  }, 0);
+}
+
+function summarizeOrders(
+  since: Date,
+  to: Date,
+  fbsPostings: OzonPostingItem[],
+  fboPostings: OzonPostingItem[],
+): OzonOrderSummary {
+  const postings = [...fbsPostings, ...fboPostings];
+  const cancelledOrderCount = postings.filter((p) => p.status?.toLowerCase().includes("cancel")).length;
+  const pendingShipmentCount = postings.filter((p) => {
+    const status = p.status?.toLowerCase() ?? "";
+    return status.includes("await") || status.includes("pending") || status.includes("arbitration");
+  }).length;
+
+  return {
+    orderCount: postings.length,
+    pendingShipmentCount,
+    cancelledOrderCount,
+    grossRevenueRub: postings.reduce((sum, p) => sum + sumPostingRevenue(p), 0),
+    dailyOrders: buildDailyOrders(since, to, fbsPostings, fboPostings),
+  };
+}
+
+function productKey(item: {
+  product_id?: string | number;
+  id?: string | number;
+  offer_id?: string;
+}): string {
+  return toId(item.product_id ?? item.id ?? item.offer_id);
+}
+
+function normalizeProducts(
+  listed: OzonProductListItem[],
+  details: OzonProductInfoItem[],
+  stocks: OzonProductStockItem[],
+): OzonAnalyticsProduct[] {
+  const detailByKey = new Map(details.map((item) => [productKey(item), item]));
+  const stockByKey = new Map(stocks.map((item) => [productKey(item), item]));
+  const keys = new Set<string>();
+
+  for (const item of listed) keys.add(productKey(item));
+  for (const item of details) keys.add(productKey(item));
+  for (const item of stocks) keys.add(productKey(item));
+
+  return [...keys]
+    .filter(Boolean)
+    .map((key) => {
+      const base = listed.find((item) => productKey(item) === key);
+      const detail = detailByKey.get(key);
+      const stockItem = stockByKey.get(key);
+      const stock = (stockItem?.stocks ?? []).reduce((sum, s) => sum + (s.present ?? 0), 0);
+      const reservedStock = (stockItem?.stocks ?? []).reduce((sum, s) => sum + (s.reserved ?? 0), 0);
+      const status = detail?.status?.state_name ?? detail?.status?.state ?? detail?.status?.status ?? base?.visibility ?? null;
+      const archived = Boolean(detail?.archived ?? base?.archived);
+      const visible = Boolean(detail?.visible ?? base?.visibility === "VISIBLE");
+
+      return {
+        productId: key,
+        offerId: detail?.offer_id ?? stockItem?.offer_id ?? base?.offer_id ?? key,
+        name: detail?.name ?? null,
+        status,
+        visible,
+        archived,
+        stock,
+        reservedStock,
+        priceRub: detail?.price ? toMoney(detail.price) : null,
+        imageUrl: firstImage(detail?.primary_image) ?? firstImage(detail?.images) ?? null,
+      };
+    })
+    .sort((a, b) => a.stock - b.stock);
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function warningMessage(error: unknown): string {
+  if (error instanceof OzonApiError) {
+    return `${error.path} 返回 ${error.status}${error.code ? ` / ${error.code}` : ""}`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function optionalOzonCall<T>(
+  label: string,
+  call: Promise<T>,
+  fallback: T,
+  warnings: string[],
+): Promise<T> {
+  try {
+    return await call;
+  } catch (error) {
+    warnings.push(`${label} 同步失败：${warningMessage(error)}`);
+    return fallback;
+  }
+}
+
+export async function getOzonAnalyticsSummary(params: {
+  client: OzonClient;
+  since: Date;
+  to: Date;
+}): Promise<OzonAnalyticsSummary> {
+  const warnings: string[] = [];
+  const productList = await params.client.listProducts(1000);
+  const productIds = productList.items
+    .map((item) => toId(item.product_id))
+    .filter(Boolean)
+    .slice(0, 1000);
+  const offerIds = productList.items
+    .map((item) => toId(item.offer_id))
+    .filter(Boolean)
+    .slice(0, 1000);
+
+  const detailChunks = productIds.length > 0 ? chunk(productIds, 100) : [];
+  const details = (
+    await Promise.all(
+      detailChunks.map((ids) =>
+        optionalOzonCall(
+          "商品详情",
+          params.client.getProductInfoList({ productIds: ids }),
+          [],
+          warnings,
+        ),
+      ),
+    )
+  ).flat();
+
+  const stocks = await optionalOzonCall(
+    "库存",
+    params.client.getProductStocks({
+      productIds,
+      offerIds,
+      limit: Math.max(productIds.length || offerIds.length, 1),
+    }),
+    [],
+    warnings,
+  );
+
+  const [fbsPostings, fboPostings] = await Promise.all([
+    optionalOzonCall(
+      "FBS 订单",
+      params.client.listFbsPostings({ since: params.since, to: params.to }),
+      [],
+      warnings,
+    ),
+    optionalOzonCall(
+      "FBO 订单",
+      params.client.listFboPostings({ since: params.since, to: params.to }),
+      [],
+      warnings,
+    ),
+  ]);
+
+  const products = normalizeProducts(productList.items, details, stocks);
+  const orderSummary = summarizeOrders(params.since, params.to, fbsPostings, fboPostings);
+
+  return {
+    productCount: productList.total ?? products.length,
+    visibleProductCount: products.filter((p) => p.visible && !p.archived).length,
+    archivedProductCount: products.filter((p) => p.archived).length,
+    totalStock: products.reduce((sum, p) => sum + p.stock, 0),
+    lowStockCount: products.filter((p) => p.stock <= LOW_STOCK_THRESHOLD).length,
+    fbsOrderCount: fbsPostings.length,
+    fboOrderCount: fboPostings.length,
+    pendingShipmentCount: orderSummary.pendingShipmentCount,
+    cancelledOrderCount: orderSummary.cancelledOrderCount,
+    grossRevenueRub: orderSummary.grossRevenueRub,
+    dailyOrders: orderSummary.dailyOrders,
+    products,
+    warnings,
+  };
+}

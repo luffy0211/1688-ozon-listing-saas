@@ -13,6 +13,7 @@
 - `packages/core` — 商品标准化、定价、校验（纯函数，无副作用）。
 - `packages/ozon` — Ozon API client、payload 编译、mock、提交门禁。
 - `packages/xiangji` — 象寄文本翻译 + PDP 详情图 client。
+- `packages/1688` — 1688 接口采集（mtop 签名、扫码登录、店铺列表、商品详情）。
 - `packages/storage` — S3/MinIO 对象存储。
 
 ## 常用命令
@@ -40,6 +41,7 @@ docker compose up --build    # 本地一键起 postgres/redis/minio/web/worker
 8. **响应格式**：成功 `{ "data": {} }`，失败 `{ "error": { "code", "message", "details" } }`。
 9. 环境变量命名见 `.env.example`；`.env` 不入库。
 10. 新增表先改 `packages/db/prisma/schema.prisma` 再 `pnpm db:generate`。
+11. 1688 采集走服务端接口（`packages/1688`）：登录态加密存 `source1688_credentials`，cookie 不落日志、API 不返回明文；店铺采集 `POST /api/v1/shops/import-by-url`、单商品 `POST /api/v1/products/import-by-url`，采集合同复用 `SourceShopImport`/`SourceProductImport`（不新增合同类型）。
 
 ## 测试
 
