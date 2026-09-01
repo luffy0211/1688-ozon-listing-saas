@@ -25,6 +25,7 @@ import {
   packageDefaults,
   type OzonDraftFacts,
 } from "./ozon-draft-facts";
+import { translateWithOpenAiCompatible } from "./translate-text";
 
 type JsonRecord = Record<string, unknown>;
 type ProductAssetLike = {
@@ -49,6 +50,21 @@ function assertNoChineseBuyerText(values: Record<string, unknown>) {
   });
   if (badFields.length > 0) {
     throw new Error(`俄语文案仍含中文: ${badFields.join(", ")}`);
+  }
+}
+
+async function translateProductText(params: {
+  client: XiangjiClient;
+  texts: string[];
+  vendor?: string;
+}): Promise<string[]> {
+  try {
+    return await params.client.translateText(params.texts, { vendor: params.vendor });
+  } catch (error) {
+    console.warn(
+      `象寄文本翻译失败，改用模型翻译兜底: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return translateWithOpenAiCompatible(params.texts);
   }
 }
 
@@ -248,10 +264,11 @@ async function processListing(jobId: string) {
         .slice(0, 5)
         .map((p) => `${p.name}: ${p.value}`);
       const descriptionSource = descriptionRu;
-      const [translatedTitle, translatedDesc, ...translatedBullets] = await client.translateText(
-        [fact.title, descriptionSource, ...bulletPointSource],
-        { vendor: job.store.translationVendor },
-      );
+      const [translatedTitle, translatedDesc, ...translatedBullets] = await translateProductText({
+        client,
+        texts: [fact.title, descriptionSource, ...bulletPointSource],
+        vendor: job.store.translationVendor,
+      });
       titleRu = translatedTitle ?? titleRu;
       descriptionRu = translatedDesc ?? descriptionRu;
       bulletPointsRu = translatedBullets.length > 0 ? translatedBullets : bulletPointSource;

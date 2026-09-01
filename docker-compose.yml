@@ -70,6 +70,11 @@ services:
       AGENT_COMPETITOR_CACHE_HOURS: ${AGENT_COMPETITOR_CACHE_HOURS:-24}
       XIANGJI_API_BASE: https://api.tosoiot.com
       XIANGJI_MOCK: ${XIANGJI_MOCK:-true}
+      XIANGJI_AUTH_MODE: ${XIANGJI_AUTH_MODE:-x-api-key}
+      XIANGJI_TEXT_MOCK: ${XIANGJI_TEXT_MOCK:-true}
+      XIANGJI_PDP_MOCK: ${XIANGJI_PDP_MOCK:-true}
+      XIANGJI_USER_KEY: ${XIANGJI_USER_KEY:-}
+      XIANGJI_TEXT_TRANS_KEY: ${XIANGJI_TEXT_TRANS_KEY:-}
     ports:
       - "3001:3000"
     depends_on:
@@ -98,8 +103,18 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       OZON_API_BASE: https://api-seller.ozon.ru
       ENABLE_REAL_OZON_SUBMIT: ${ENABLE_REAL_OZON_SUBMIT:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_AGENT_MODEL: ${OPENAI_AGENT_MODEL:-}
+      OPENAI_AGENT_MOCK: ${OPENAI_AGENT_MOCK:-true}
+      OPENAI_AGENT_TRACE_SENSITIVE_DATA: ${OPENAI_AGENT_TRACE_SENSITIVE_DATA:-false}
       XIANGJI_API_BASE: https://api.tosoiot.com
       XIANGJI_MOCK: ${XIANGJI_MOCK:-true}
+      XIANGJI_AUTH_MODE: ${XIANGJI_AUTH_MODE:-x-api-key}
+      XIANGJI_TEXT_MOCK: ${XIANGJI_TEXT_MOCK:-true}
+      XIANGJI_PDP_MOCK: ${XIANGJI_PDP_MOCK:-true}
+      XIANGJI_USER_KEY: ${XIANGJI_USER_KEY:-}
+      XIANGJI_TEXT_TRANS_KEY: ${XIANGJI_TEXT_TRANS_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
