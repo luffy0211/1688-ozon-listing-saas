@@ -151,9 +151,10 @@ function contentDraftImportPayload(action: {
     stringField(product.offerId) ??
     stringField(rawInfo.offer_id) ??
     action.offerId;
-  const categoryId =
-    numberField(rawInfo.category_id) ??
-    numberField(rawInfo.description_category_id);
+  const descriptionCategoryId =
+    numberField(rawInfo.description_category_id) ??
+    numberField(rawInfo.category_id);
+  const typeId = numberField(rawInfo.type_id);
   const price =
     stringField(rawInfo.price) ??
     stringField(product.priceRub);
@@ -178,7 +179,8 @@ function contentDraftImportPayload(action: {
     !offerId ? "offer_id" : "",
     !name ? "name" : "",
     !description ? "description" : "",
-    !categoryId ? "category_id" : "",
+    !descriptionCategoryId ? "description_category_id" : "",
+    !typeId ? "type_id" : "",
     !price ? "price" : "",
     !images.length ? "images" : "",
     !attributes ? "attributes" : "",
@@ -200,7 +202,8 @@ function contentDraftImportPayload(action: {
           offer_id: offerId!,
           name: name!,
           description: description!,
-          category_id: categoryId!,
+          description_category_id: descriptionCategoryId!,
+          type_id: typeId!,
           price: price!,
           old_price: oldPrice!,
           vat: stringField(rawInfo.vat) ?? "0",

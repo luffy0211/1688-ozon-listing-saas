@@ -1,7 +1,7 @@
 /** Ozon 类目属性（编译 payload 时由类目匹配步骤填充真实 id）。 */
 export type OzonAttribute = {
   id: number;
-  values: Array<{ value: string; dictionaryValueId?: number }>;
+  values: Array<{ value: string; dictionaryValueId?: number; dictionary_value_id?: number }>;
 };
 
 /** Ozon 草稿编译输入（方案.md 第 17 节输出字段）。 */
@@ -11,13 +11,14 @@ export type OzonDraftInput = {
   bulletPointsRu: string[];
   descriptionRu: string;
   searchKeywordsRu: string;
-  categoryId: number;
+  descriptionCategoryId: number;
+  typeId: number;
   attributes: OzonAttribute[];
   priceRub: number;
   mainImages: string[];
   detailImages: string[];
-  weightGrams?: number;
-  dimensions?: { widthMm?: number; heightMm?: number; depthMm?: number };
+  weightGrams: number;
+  dimensions: { widthMm: number; heightMm: number; depthMm: number };
 };
 
 /**
@@ -28,7 +29,8 @@ export type OzonProductPayload = {
   offer_id: string;
   name: string;
   description: string;
-  category_id: number;
+  description_category_id: number;
+  type_id: number;
   price: string;
   old_price: string;
   vat: string;
@@ -111,11 +113,15 @@ export type CategoryNode = {
 
 export type CategoryAttribute = {
   id: number;
+  attribute_id?: number;
   name: string;
+  attribute_name?: string;
   description: string;
   type: string;
   is_collection: boolean;
   is_required: boolean;
+  required?: boolean;
+  allowed_values?: Array<{ id?: number; dictionary_value_id?: number; value: string }>;
 };
 
 export type OzonListProductsRequest = {

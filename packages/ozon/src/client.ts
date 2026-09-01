@@ -183,13 +183,14 @@ export class OzonClient {
 
   async getCategoryAttributes(
     categoryId: number,
+    typeId: number,
   ): Promise<CategoryAttribute[]> {
     const res = await this.request<{ result: CategoryAttribute[] }>(
       "/v1/description-category/attribute",
       {
         description_category_id: categoryId,
+        type_id: typeId,
         language: "RU",
-        type: "ALL",
       },
     );
     return res.result;
@@ -197,18 +198,32 @@ export class OzonClient {
 
   async getAttributeValues(
     categoryId: number,
+    typeId: number,
     attributeId: number,
   ): Promise<Array<{ id: number; value: string }>> {
-    const res = await this.request<{
-      result: Array<{ id: number; value: string }>;
-    }>("/v1/description-category/attribute/values", {
-      description_category_id: categoryId,
-      attribute_id: attributeId,
-      language: "RU",
-      limit: 100,
-      last_value_id: 0,
-    });
-    return res.result;
+    const values: Array<{ id: number; value: string }> = [];
+    let lastValueId = 0;
+    for (let page = 0; page < 10; page++) {
+      const res = await this.request<{
+        result: Array<{ id: number; value: string }>;
+        has_next?: boolean;
+      }>("/v1/description-category/attribute/values", {
+        description_category_id: categoryId,
+        type_id: typeId,
+        attribute_id: attributeId,
+        language: "RU",
+        limit: 5000,
+        last_value_id: lastValueId,
+      });
+      values.push(...res.result);
+      if (!res.has_next) return values;
+      const nextId = res.result.at(-1)?.id;
+      if (!nextId || nextId <= lastValueId) {
+        throw new Error("Ozon attribute values pagination did not advance");
+      }
+      lastValueId = nextId;
+    }
+    return values;
   }
 
   async listProducts(limit = 1000): Promise<OzonListProductsResult> {

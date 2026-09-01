@@ -48,7 +48,8 @@ describe("OzonClient", () => {
           offer_id: "offer-1",
           name: "Product",
           description: "Description",
-          category_id: 1,
+          description_category_id: 1,
+          type_id: 2,
           price: "100",
           old_price: "120",
           vat: "0",
@@ -206,5 +207,59 @@ describe("OzonClient", () => {
           baseUrl: "https://example.test",
         }),
     ).toThrow("Ozon Client ID must be a positive integer");
+  });
+
+  it("passes type_id when reading category attributes", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await client.getCategoryAttributes(17027904, 93337);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1].body));
+    expect(body).toMatchObject({
+      description_category_id: 17027904,
+      type_id: 93337,
+      language: "RU",
+    });
+  });
+
+  it("paginates category attribute values with type_id", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: [{ id: 10, value: "A" }], has_next: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: [{ id: 20, value: "B" }], has_next: false }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await expect(client.getAttributeValues(17027904, 93337, 85)).resolves.toEqual([
+      { id: 10, value: "A" },
+      { id: 20, value: "B" },
+    ]);
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]![1].body));
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]![1].body));
+    expect(firstBody).toMatchObject({ type_id: 93337, limit: 5000, last_value_id: 0 });
+    expect(secondBody).toMatchObject({ type_id: 93337, limit: 5000, last_value_id: 10 });
   });
 });

@@ -11,11 +11,17 @@ import {
   checkSubmitGuards,
   compileOzonPayload,
   computeRequestHash,
+  type OzonAttribute,
   type OzonDraftInput,
 } from "@saas/ozon";
 import { XiangjiClient } from "@saas/xiangji";
 
 type JsonRecord = Record<string, unknown>;
+type ProductAssetLike = {
+  kind: string;
+  publicUrl?: string | null;
+  sourceUrl?: string | null;
+};
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -33,6 +39,79 @@ function asSourceProduct(value: unknown): SourceProductImport | null {
 
 function firstString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function parseOzonAttributes(value: unknown): OzonAttribute[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((rawAttribute) => {
+    const attribute = asRecord(rawAttribute);
+    const id = firstNumber(attribute.id, attribute.attribute_id);
+    const values = Array.isArray(attribute.values) ? attribute.values : [];
+    if (!id || values.length === 0) return [];
+    const parsedValues = values.flatMap((rawValue) => {
+      const item = asRecord(rawValue);
+      const text = firstString(item.value);
+      if (!text) return [];
+      return [{
+        value: text,
+        dictionaryValueId: firstNumber(item.dictionaryValueId, item.dictionary_value_id, item.id),
+      }];
+    });
+    return parsedValues.length > 0 ? [{ id, values: parsedValues }] : [];
+  });
+}
+
+function ozonDraftFacts(raw: unknown) {
+  const root = asRecord(raw);
+  const ozon = asRecord(root.ozon);
+  return {
+    descriptionCategoryId: firstNumber(
+      ozon.descriptionCategoryId,
+      ozon.description_category_id,
+      root.descriptionCategoryId,
+      root.description_category_id,
+      root.ozonCategoryId,
+      root.ozon_category_id,
+    ),
+    typeId: firstNumber(ozon.typeId, ozon.type_id, root.typeId, root.type_id),
+    attributes: parseOzonAttributes(ozon.attributes).length
+      ? parseOzonAttributes(ozon.attributes)
+      : parseOzonAttributes(root.attributes),
+    weightGrams: firstNumber(
+      ozon.weightGrams,
+      ozon.weight_g,
+      root.weightGrams,
+      root.weight_g,
+      root.weight,
+    ),
+    dimensions: {
+      widthMm: firstNumber(ozon.widthMm, ozon.width_mm, root.widthMm, root.width_mm, root.width),
+      heightMm: firstNumber(ozon.heightMm, ozon.height_mm, root.heightMm, root.height_mm, root.height),
+      depthMm: firstNumber(ozon.depthMm, ozon.depth_mm, root.depthMm, root.depth_mm, root.depth),
+    },
+  };
+}
+
+function assertNoChineseBuyerText(values: Record<string, unknown>) {
+  const cjk = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+  const badFields = Object.entries(values).flatMap(([key, value]) => {
+    const items = Array.isArray(value) ? value : [value];
+    return items.some((item) => typeof item === "string" && cjk.test(item)) ? [key] : [];
+  });
+  if (badFields.length > 0) {
+    throw new Error(`俄语文案仍含中文: ${badFields.join(", ")}`);
+  }
 }
 
 function getNormalized(raw: unknown, fallbackTitle?: string | null): NormalizedProductFact {
@@ -108,17 +187,18 @@ async function processListing(jobId: string) {
   if (!job) throw new Error(`listing job not found: ${jobId}`);
 
   let fact = getNormalized(job.product.rawJson, job.product.title);
+  const ozonFacts = ozonDraftFacts(job.product.rawJson);
   let titleRu = `${fact.title} / RU`;
   let descriptionRu = firstString(fact.descriptionText) ?? fact.title;
   let bulletPointsRu: string[] = [];
   const detailImages = job.product.productAssets
-    .filter((asset) => asset.kind === "detail_image")
-    .map((asset) => asset.publicUrl ?? asset.sourceUrl)
-    .filter((url): url is string => Boolean(url));
+    .filter((asset: ProductAssetLike) => asset.kind === "detail_image")
+    .map((asset: ProductAssetLike) => asset.publicUrl ?? asset.sourceUrl)
+    .filter((url: string | null | undefined): url is string => Boolean(url));
   const mainImages = job.product.productAssets
-    .filter((asset) => asset.kind === "main_image" || asset.kind === "sku_image")
-    .map((asset) => asset.publicUrl ?? asset.sourceUrl)
-    .filter((url): url is string => Boolean(url));
+    .filter((asset: ProductAssetLike) => asset.kind === "main_image" || asset.kind === "sku_image")
+    .map((asset: ProductAssetLike) => asset.publicUrl ?? asset.sourceUrl)
+    .filter((url: string | null | undefined): url is string => Boolean(url));
 
   try {
     await runStep(jobId, "validate_import", async () => {
@@ -169,6 +249,7 @@ async function processListing(jobId: string) {
       titleRu = translatedTitle ?? titleRu;
       descriptionRu = translatedDesc ?? descriptionRu;
       bulletPointsRu = translatedBullets.length > 0 ? translatedBullets : bulletPointSource;
+      assertNoChineseBuyerText({ titleRu, descriptionRu, bulletPointsRu });
       await prisma.translationTask.create({
         data: {
           tenantId: job.tenantId,
@@ -182,18 +263,28 @@ async function processListing(jobId: string) {
       return { titleRu, descriptionRu, bulletPointsRu };
     });
 
-    const categoryId = await runStep(jobId, "match_ozon_category", async () => ({
-      ozonCategoryId: "unknown",
-      strategy: "v1_manual_fallback",
-    }));
+    const category = await runStep(jobId, "match_ozon_category", async () => {
+      if (!ozonFacts.descriptionCategoryId) {
+        throw new Error("缺少 Ozon description_category_id，请先由采集脚本或人工匹配类目");
+      }
+      if (!ozonFacts.typeId) {
+        throw new Error("缺少 Ozon type_id，请先由采集脚本或人工匹配商品类型");
+      }
+      return {
+        descriptionCategoryId: ozonFacts.descriptionCategoryId,
+        typeId: ozonFacts.typeId,
+        strategy: "source_json_or_manual",
+      };
+    });
 
     const content = await runStep(jobId, "generate_ozon_content", async () => ({
       titleRu,
       bulletPointsRu,
       descriptionRu,
       searchKeywordsRu: fact.categoryPath.join(", "),
-      ozonCategoryId: categoryId.ozonCategoryId,
-      ozonAttributes: [],
+      descriptionCategoryId: category.descriptionCategoryId,
+      typeId: category.typeId,
+      ozonAttributes: ozonFacts.attributes,
     }));
 
     const priceRub = await runStep(jobId, "generate_pricing", async () => {
@@ -222,13 +313,18 @@ async function processListing(jobId: string) {
       bulletPointsRu: content.bulletPointsRu,
       descriptionRu: content.descriptionRu,
       searchKeywordsRu: content.searchKeywordsRu,
-      categoryId: 0,
-      attributes: [],
+      descriptionCategoryId: content.descriptionCategoryId,
+      typeId: content.typeId,
+      attributes: content.ozonAttributes,
       priceRub: priceRub.priceRub,
       mainImages,
       detailImages,
-      weightGrams: 0,
-      dimensions: { widthMm: 0, heightMm: 0, depthMm: 0 },
+      weightGrams: ozonFacts.weightGrams ?? 0,
+      dimensions: {
+        widthMm: ozonFacts.dimensions.widthMm ?? 0,
+        heightMm: ozonFacts.dimensions.heightMm ?? 0,
+        depthMm: ozonFacts.dimensions.depthMm ?? 0,
+      },
     };
     const payload = compileOzonPayload(draftInput);
 
@@ -260,7 +356,7 @@ async function processListing(jobId: string) {
           status: "COMPILED",
           titleRu: draftInput.titleRu,
           priceRub: draftInput.priceRub,
-          ozonCategoryId: String(draftInput.categoryId),
+          ozonCategoryId: String(draftInput.descriptionCategoryId),
           payloadJson: { items: [payload] } as never,
         },
       });
