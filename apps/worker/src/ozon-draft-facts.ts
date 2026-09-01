@@ -214,6 +214,7 @@ function attrName(attribute: CategoryAttribute): string {
 
 function desiredValue(attribute: CategoryAttribute, fact: NormalizedProductFact, titleRu: string): string {
   const name = attrName(attribute);
+  if (/объединить|combine/i.test(name)) return `listing-${fact.skus[0]?.skuId ?? titleRu}`;
   if (/бренд|brand|торговая марка/i.test(name)) return "Нет бренда";
   if (/цвет|color/i.test(name)) return ruColor(propertyValue(fact, /цвет|颜色/i));
   if (/материал|состав|material/i.test(name)) return ruMaterial(propertyValue(fact, /面料|材质|成分/i));

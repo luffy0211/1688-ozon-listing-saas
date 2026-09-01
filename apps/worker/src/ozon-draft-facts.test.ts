@@ -52,6 +52,7 @@ describe("ozon draft facts", () => {
       { id: 85, name: "Бренд", description: "", type: "Dictionary", is_collection: false, is_required: true },
       { id: 10096, name: "Цвет", description: "", type: "Dictionary", is_collection: false, is_required: true },
       { id: 8229, name: "Материал", description: "", type: "String", is_collection: false, is_required: true },
+      { id: 8292, name: "Объединить на одной карточке", description: "", type: "String", is_collection: false, is_required: true },
     ];
 
     const result = await buildRequiredOzonAttributes(
@@ -70,6 +71,7 @@ describe("ozon draft facts", () => {
       { id: 85, values: [{ value: "Нет бренда", dictionaryValueId: 1 }] },
       { id: 10096, values: [{ value: "черный", dictionaryValueId: 2 }] },
       { id: 8229, values: [{ value: "полиэстер" }] },
+      { id: 8292, values: [{ value: "listing-1" }] },
     ]);
     expect(JSON.stringify(result)).not.toMatch(/[\u3400-\u4dbf\u4e00-\u9fff]/);
   });

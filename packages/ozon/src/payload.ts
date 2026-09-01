@@ -60,7 +60,7 @@ export function compileOzonPayload(input: OzonDraftInput): OzonProductPayload {
     price: String(input.priceRub),
     old_price: String(input.priceRub),
     vat: "0",
-    currency_code: "RUB",
+    currency_code: input.currencyCode ?? "RUB",
     images,
     attributes: wireAttributes(input.attributes),
     weight: positiveInt(input.weightGrams, "weight"),

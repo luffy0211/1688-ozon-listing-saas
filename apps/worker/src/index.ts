@@ -84,6 +84,15 @@ function getNormalized(raw: unknown, fallbackTitle?: string | null): NormalizedP
   };
 }
 
+function ozonCurrencyCode(): string {
+  return (process.env.OZON_PRICE_CURRENCY_CODE ?? "RUB").trim().toUpperCase() || "RUB";
+}
+
+function priceForCurrency(priceRub: number, cnyToRub: number, currencyCode: string): number {
+  if (currencyCode !== "CNY") return priceRub;
+  return Math.ceil(priceRub / Math.max(cnyToRub, 1) / 10) * 10;
+}
+
 function ozonReadClient(store: {
   ozonClientId: string | null;
   ozonApiKey: string | null;
@@ -333,7 +342,11 @@ async function processListing(jobId: string) {
         commissionRate: Number(rule?.commissionRate ?? 0.15),
         targetMarginRate: Number(rule?.targetMarginRate ?? 0.2),
       });
-      return { priceRub: price };
+      const currencyCode = ozonCurrencyCode();
+      return {
+        priceRub: priceForCurrency(price, Number(rule?.cnyToRub ?? 12), currencyCode),
+        currencyCode,
+      };
     });
 
     const draftInput: OzonDraftInput = {
@@ -346,6 +359,7 @@ async function processListing(jobId: string) {
       typeId: content.typeId,
       attributes: content.ozonAttributes,
       priceRub: priceRub.priceRub,
+      currencyCode: priceRub.currencyCode,
       mainImages,
       detailImages,
       weightGrams: ozonFacts.weightGrams ?? 0,

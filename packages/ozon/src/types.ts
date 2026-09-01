@@ -15,6 +15,7 @@ export type OzonDraftInput = {
   typeId: number;
   attributes: OzonAttribute[];
   priceRub: number;
+  currencyCode?: string;
   mainImages: string[];
   detailImages: string[];
   weightGrams: number;
@@ -34,7 +35,7 @@ export type OzonProductPayload = {
   price: string;
   old_price: string;
   vat: string;
-  currency_code: "RUB";
+  currency_code: string;
   images: string[];
   attributes: OzonAttribute[];
   weight: number;
@@ -55,7 +56,7 @@ export type ImportPricesRequest = {
     offer_id: string;
     price: string;
     old_price?: string;
-    currency_code: "RUB";
+    currency_code: string;
     vat?: string;
   }>;
 };
