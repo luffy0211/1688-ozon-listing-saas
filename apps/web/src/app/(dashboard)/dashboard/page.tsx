@@ -1,10 +1,8 @@
 import Link from "next/link";
 import {
   AlertTriangle,
-  ArrowRight,
   Boxes,
-  CheckCircle2,
-  ClipboardList,
+  GitBranch,
   PackageCheck,
   Store,
 } from "lucide-react";
@@ -77,9 +75,13 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="工作台"
-        description="从这里处理每日上架任务：采集新品、生成草稿、确认发布和排查失败任务。"
+        title="上架工作台"
+        description="先看今天需要处理什么；具体操作进入自动化工作流。"
       >
+        <Link className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href="/workflow">
+          <GitBranch className="h-4 w-4" aria-hidden="true" />
+          自动化工作流
+        </Link>
         <Link className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700" href="/shops">
           <Store className="h-4 w-4" aria-hidden="true" />
           去采集选品
@@ -92,7 +94,7 @@ export default async function DashboardPage() {
             <div>
               <div className="font-medium text-amber-950">系统还差一点配置才能完整上架</div>
               <div className="mt-1 text-sm text-amber-800">
-                配置集中在设置页；完成后，运营人员主要使用采集选品、商品池和待发布页面。
+                配置集中在设置页；完成后，运营人员主要使用自动化工作流。
               </div>
             </div>
             <Link className="inline-flex h-9 items-center rounded-md bg-amber-600 px-3 text-sm font-medium text-white hover:bg-amber-700" href="/settings">
@@ -107,31 +109,6 @@ export default async function DashboardPage() {
         <MetricCard title="待生成草稿" value={productsWithoutDraftCount} description="商品池中还未生成草稿" icon={<Boxes className="h-4 w-4" />} tone="violet" />
         <MetricCard title="待发布草稿" value={compiledDraftCount} description="已生成，等人工确认" icon={<PackageCheck className="h-4 w-4" />} tone="green" />
         <MetricCard title="失败任务" value={failedJobCount} description="需要处理或重试" icon={<AlertTriangle className="h-4 w-4" />} tone={failedJobCount > 0 ? "red" : "gray"} />
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { href: "/shops", title: "采集选品", desc: "导入 1688 店铺新品，勾选要上架的商品。", icon: Store },
-          { href: "/products", title: "商品池", desc: "查看已选商品，批量生成 Ozon 草稿。", icon: Boxes },
-          { href: "/drafts", title: "待发布", desc: "集中确认已经编译好的 Ozon 草稿。", icon: PackageCheck },
-          { href: "/jobs", title: "任务记录", desc: "查看生成进度、失败原因和历史记录。", icon: ClipboardList },
-        ].map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link key={item.href} href={item.href} className="group">
-              <Card className="h-full p-4 transition-shadow group-hover:shadow-md">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="rounded-md bg-blue-50 p-2 text-blue-700">
-                    <Icon className="h-4 w-4" aria-hidden="true" />
-                  </div>
-                  <ArrowRight className="h-4 w-4 text-gray-400 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
-                </div>
-                <h2 className="mt-4 font-semibold text-gray-950">{item.title}</h2>
-                <p className="mt-1 text-sm leading-6 text-gray-500">{item.desc}</p>
-              </Card>
-            </Link>
-          );
-        })}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">

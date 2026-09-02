@@ -6,28 +6,21 @@ import type { ReactNode } from "react";
 import {
   BarChart3,
   Bot,
-  Boxes,
-  ClipboardList,
+  GitBranch,
   LayoutDashboard,
-  PackageCheck,
   PackageSearch,
   Settings,
-  Store,
-  Truck,
 } from "lucide-react";
 import type { SessionPayload } from "@/lib/auth";
 import { LogoutButton } from "./logout-button";
 import { Badge, cn } from "./ui";
 
 const navItems = [
-  { href: "/dashboard", label: "工作台", icon: LayoutDashboard },
-  { href: "/analytics", label: "数据看板", icon: BarChart3 },
-  { href: "/agent/content", label: "Ozon Agent", icon: Bot },
-  { href: "/shops", label: "采集选品", icon: Store },
-  { href: "/products", label: "商品池", icon: Boxes },
-  { href: "/drafts", label: "待发布", icon: PackageCheck },
-  { href: "/jobs", label: "任务记录", icon: ClipboardList },
-  { href: "/suppliers", label: "供应商", icon: Truck },
+  { href: "/dashboard", label: "上架工作台", icon: LayoutDashboard },
+  { href: "/workflow", label: "自动化工作流", icon: GitBranch },
+  { href: "/analytics", label: "BI 看板", icon: BarChart3 },
+  { href: "/agent/content", label: "运营 Agent", icon: Bot },
+  { href: "/settings", label: "设置", icon: Settings },
 ];
 
 export function AppShell({
@@ -42,13 +35,13 @@ export function AppShell({
   return (
     <div className="min-h-screen bg-gray-50 text-gray-950">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-gray-200 bg-white lg:flex lg:flex-col">
-        <Link href="/products" className="flex h-16 items-center gap-3 border-b border-gray-200 px-5">
+        <Link href="/dashboard" className="flex h-16 items-center gap-3 border-b border-gray-200 px-5">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
             OZ
           </span>
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-gray-950">1688 到 Ozon</span>
-            <span className="block text-xs text-gray-500">商品上架工作台</span>
+            <span className="block text-xs text-gray-500">跨境上架系统</span>
           </span>
         </Link>
 
@@ -86,7 +79,7 @@ export function AppShell({
       <div className="lg:pl-64">
         <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur">
           <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-6">
-            <Link href="/products" className="flex items-center gap-2 lg:hidden">
+            <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
               <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-xs font-bold text-white">
                 OZ
               </span>
@@ -94,7 +87,7 @@ export function AppShell({
             </Link>
             <div className="hidden items-center gap-2 text-sm text-gray-500 lg:flex">
               <PackageSearch className="h-4 w-4" />
-              今天要处理的商品、草稿和失败任务
+              采集、翻译、上架、复盘
             </div>
             <div className="flex min-w-0 items-center gap-2">
               <div className="hidden min-w-0 text-right sm:block">

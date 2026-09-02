@@ -45,7 +45,7 @@ export default async function AnalyticsPage({
 }) {
   const user = await requireUser();
   if (!user.tenantId) {
-    return <PageHeader title="数据看板" description="管理员账号请进入平台管理。" />;
+    return <PageHeader title="BI 看板" description="管理员账号请进入平台管理。" />;
   }
 
   const view = await getOzonAnalyticsView({
@@ -60,8 +60,8 @@ export default async function AnalyticsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="数据看板"
-        description="把 Ozon 店铺数据和本系统上架流程放在一个页面，优先看商品、库存、订单和待处理风险。"
+        title="BI 看板"
+        description="看 Ozon 销售、库存风险和本系统上架转化。"
       >
         <OzonAnalyticsControls storeId={view.store?.id ?? null} stores={view.stores} />
       </PageHeader>
