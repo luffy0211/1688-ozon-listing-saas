@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma, decryptSecret } from "@saas/db";
-import { computeRequestHash, OzonClient } from "@saas/ozon";
+import { computeRequestHash, mockImportProducts, OzonClient } from "@saas/ozon";
 import { ok, fail, unauthorized, forbidden, notFound } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 
@@ -47,11 +47,13 @@ export async function POST(
   }
 
   try {
-    const client = new OzonClient({
-      clientId: draft.store.ozonClientId,
-      apiKey: decryptSecret(draft.store.ozonApiKey),
-    });
-    const response = await client.importProducts(request as never);
+    const response =
+      process.env.ENABLE_REAL_OZON_SUBMIT === "true"
+        ? await new OzonClient({
+            clientId: draft.store.ozonClientId,
+            apiKey: decryptSecret(draft.store.ozonApiKey),
+          }).importProducts(request as never)
+        : mockImportProducts(request as never);
     const run = await prisma.publishRun.create({
       data: {
         tenantId,
