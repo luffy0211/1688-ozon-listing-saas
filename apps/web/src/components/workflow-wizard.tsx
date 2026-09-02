@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
@@ -14,9 +16,8 @@ import {
   Store,
 } from "lucide-react";
 import { PublishDraftButton } from "./api-actions";
-import { RunButton } from "./run-button";
 import { StatusBadge } from "./status";
-import { Badge, Button, Card, EmptyState, Table, cn } from "./ui";
+import { Badge, Button, Card, EmptyState, Input, Select, Table, cn } from "./ui";
 
 type Snapshot = {
   id: string;
@@ -63,6 +64,11 @@ type Job = {
   error: string | null;
 };
 
+type Credential = {
+  id: string;
+  name: string;
+};
+
 const steps = [
   { id: 1, title: "选品", subtitle: "1688 采集", icon: Store },
   { id: 2, title: "审核", subtitle: "商品筛选", icon: ClipboardCheck },
@@ -80,19 +86,159 @@ function ProductImage({ src }: { src: string | null }) {
   );
 }
 
+async function postJson(path: string, payload: unknown = {}) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error?.message ?? "请求失败");
+  return json.data;
+}
+
+function CollectPanel({
+  credentials,
+  onDone,
+}: {
+  credentials: Credential[];
+  onDone: () => void;
+}) {
+  const [mode, setMode] = useState<"product" | "shop">("product");
+  const [url, setUrl] = useState("");
+  const [limit, setLimit] = useState("20");
+  const [credentialId, setCredentialId] = useState(credentials[0]?.id ?? "");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    try {
+      const data = await postJson(
+        mode === "product" ? "/api/v1/products/import-by-url" : "/api/v1/shops/import-by-url",
+        mode === "product"
+          ? { url, credentialId: credentialId || undefined }
+          : { shopUrl: url, limit: Number(limit), credentialId: credentialId || undefined },
+      );
+      setMessage(mode === "product" ? "商品已采集到商品池。" : `已采集 ${data?.collectedCount ?? 0} 个商品。`);
+      setUrl("");
+      onDone();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+      <div className="mb-3 flex flex-wrap gap-2">
+        {[
+          ["product", "单品链接"],
+          ["shop", "店铺链接"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setMode(id as "product" | "shop")}
+            className={cn(
+              "h-9 rounded-md border px-3 text-sm font-medium",
+              mode === id ? "border-blue-500 bg-white text-blue-700" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className={cn("grid gap-3", mode === "shop" ? "md:grid-cols-[minmax(0,1fr)_150px_200px_auto]" : "md:grid-cols-[minmax(0,1fr)_200px_auto]")}>
+        <Input
+          label={mode === "product" ? "1688 商品链接 / offerId" : "1688 店铺链接"}
+          value={url}
+          onChange={setUrl}
+          placeholder={mode === "product" ? "https://detail.1688.com/offer/..." : "https://...1688.com/"}
+          required
+        />
+        {mode === "shop" ? <Input label="采集数量" type="number" value={limit} onChange={setLimit} required /> : null}
+        <Select label="登录信息" value={credentialId} onChange={setCredentialId}>
+          <option value="">使用最新登录态</option>
+          {credentials.map((cred) => (
+            <option key={cred.id} value={cred.id}>
+              {cred.name}
+            </option>
+          ))}
+        </Select>
+        <div className="flex items-end">
+          <Button type="submit" disabled={loading || !url.trim()} className="w-full">
+            <PackageSearch className="h-4 w-4" />
+            {loading ? "采集中..." : "采集"}
+          </Button>
+        </div>
+      </div>
+      {message ? <div className="mt-3 text-sm text-gray-600">{message}</div> : null}
+    </form>
+  );
+}
+
+function InlineRunButton({
+  productId,
+  onDone,
+}: {
+  productId: string;
+  onDone: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [jobId, setJobId] = useState("");
+  const [error, setError] = useState("");
+
+  async function run() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await postJson(`/api/v1/products/${productId}/run`);
+      setJobId(data?.jobId ?? "");
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <Button onClick={run} disabled={loading}>
+        <PackageCheck className="h-4 w-4" />
+        {loading ? "生成中..." : "生成草稿"}
+      </Button>
+      {jobId ? <div className="text-xs text-emerald-700">任务已创建：{jobId}</div> : null}
+      {error ? <div className="text-xs text-red-600">{error}</div> : null}
+    </div>
+  );
+}
+
 export function WorkflowWizard({
+  credentials,
   snapshots,
   products,
   drafts,
   jobs,
 }: {
+  credentials: Credential[];
   snapshots: Snapshot[];
   products: Product[];
   drafts: Draft[];
   jobs: Job[];
 }) {
+  const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [monitorTab, setMonitorTab] = useState<"listed" | "pending" | "failed">("listed");
+
+  function refreshOnStep(step: number) {
+    setCurrentStep(step);
+    router.refresh();
+  }
 
   useEffect(() => {
     const saved = Number(window.sessionStorage.getItem("ozon_workflow_step"));
@@ -157,13 +303,8 @@ export function WorkflowWizard({
               <h2 className="text-base font-semibold text-gray-950">从 1688 采集商品</h2>
               <p className="mt-1 text-sm text-gray-500">先看店铺新品，再把要上架的商品放进商品池。</p>
             </div>
-            <Link href="/shops">
-              <Button>
-                <PackageSearch className="h-4 w-4" />
-                去采集
-              </Button>
-            </Link>
           </div>
+          <CollectPanel credentials={credentials} onDone={() => refreshOnStep(2)} />
           {snapshots.length ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {snapshots.map((item) => (
@@ -208,9 +349,8 @@ export function WorkflowWizard({
                     <Badge tone="gray">{product.assetCount} 张图</Badge>
                     <StatusBadge status={product.latestDraftStatus ?? product.latestJobStatus ?? "PENDING"} />
                   </div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <RunButton productId={product.id} />
-                    <Link href={`/products/${product.id}`} className="text-sm font-medium text-blue-700 hover:underline">详情</Link>
+                  <div className="mt-3">
+                    <InlineRunButton productId={product.id} onDone={() => refreshOnStep(4)} />
                   </div>
                 </div>
               ))}
@@ -300,7 +440,7 @@ export function WorkflowWizard({
                     <td className="px-4 py-3">{job.storeName}</td>
                     <td className="px-4 py-3"><StatusBadge status={job.status} /></td>
                     <td className="max-w-md truncate px-4 py-3 text-red-700">{job.error ?? job.stepName ?? "-"}</td>
-                    <td className="px-4 py-3"><Link href={`/jobs/${job.id}`} className="text-sm font-medium text-blue-700 hover:underline">查看任务</Link></td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{job.id}</td>
                   </tr>
                 ))}
               </Table>

@@ -11,7 +11,12 @@ export default async function WorkflowPage() {
     return <PageHeader title="自动化工作流" description="管理员账号请进入平台管理。" />;
   }
 
-  const [snapshots, products, drafts, jobs] = await Promise.all([
+  const [credentials, snapshots, products, drafts, jobs] = await Promise.all([
+    prisma.source1688Credential.findMany({
+      where: { tenantId, status: "active" },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, name: true },
+    }),
     prisma.shopProductSnapshot.findMany({
       where: { tenantId, followStatus: "NEW" },
       orderBy: { lastSeenAt: "desc" },
@@ -62,6 +67,10 @@ export default async function WorkflowPage() {
         description="按选品、审核、上架、监控四步处理商品，运营人员不用在多个页面之间来回找。"
       />
       <WorkflowWizard
+        credentials={credentials.map((cred) => ({
+          id: cred.id,
+          name: cred.name ?? cred.id,
+        }))}
         snapshots={snapshots.map((item) => ({
           id: item.id,
           title: item.title ?? item.offerId,
