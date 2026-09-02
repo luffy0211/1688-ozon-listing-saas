@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -9,7 +8,6 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
-  ExternalLink,
   PackageCheck,
   PackageSearch,
   RefreshCw,
@@ -315,16 +313,12 @@ export function WorkflowWizard({
                     <span className="truncate">{item.shopName}</span>
                     <span>{item.priceText ?? "-"}</span>
                   </div>
-                  {item.url ? (
-                    <a href={item.url} target="_blank" className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-700">
-                      查看来源 <ExternalLink className="h-3 w-3" />
-                    </a>
-                  ) : null}
+                  <div className="mt-3 text-xs text-gray-500">{item.offerId}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <EmptyState title="暂无待选新品" description="先进入采集页面，同步 1688 店铺商品。" />
+            <EmptyState title="暂无待选新品" description="在上方输入 1688 商品或店铺链接开始采集。" />
           )}
         </Card>
       ) : null}
@@ -336,7 +330,6 @@ export function WorkflowWizard({
               <h2 className="text-base font-semibold text-gray-950">审核商品并生成草稿</h2>
               <p className="mt-1 text-sm text-gray-500">商品确认后，点击生成草稿进入翻译、定价、详情图和 Ozon payload 编译。</p>
             </div>
-            <Link href="/products" className="text-sm font-medium text-blue-700 hover:underline">商品池</Link>
           </div>
           {products.length ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -368,7 +361,6 @@ export function WorkflowWizard({
               <h2 className="text-base font-semibold text-gray-950">确认发布到 Ozon</h2>
               <p className="mt-1 text-sm text-gray-500">只有待发布草稿会显示确认上架按钮。</p>
             </div>
-            <Link href="/drafts" className="text-sm font-medium text-blue-700 hover:underline">待发布列表</Link>
           </div>
           {drafts.length ? (
             <Table head={["商品", "店铺", "状态", "价格", "操作"]}>
@@ -378,7 +370,7 @@ export function WorkflowWizard({
                     <div className="flex min-w-[280px] items-center gap-3">
                       {draft.imageUrl ? <img src={draft.imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-gray-100" />}
                       <div className="min-w-0">
-                        <Link href={`/products/${draft.productId}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">{draft.title}</Link>
+                        <div className="line-clamp-2 font-medium text-gray-950">{draft.title}</div>
                         <div className="text-xs text-gray-500">{draft.offerId}</div>
                       </div>
                     </div>
@@ -387,7 +379,7 @@ export function WorkflowWizard({
                   <td className="px-4 py-3"><StatusBadge status={draft.status} /></td>
                   <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub} RUB` : "-"}</td>
                   <td className="px-4 py-3">
-                    {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : <Link href={`/products/${draft.productId}`} className="text-sm font-medium text-blue-700 hover:underline">查看</Link>}
+                    {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : <span className="text-sm text-gray-500">已处理</span>}
                   </td>
                 </tr>
               ))}
@@ -405,12 +397,10 @@ export function WorkflowWizard({
               <h2 className="text-base font-semibold text-gray-950">上架监控</h2>
               <p className="mt-1 text-sm text-gray-500">看已提交商品、待发布草稿和失败任务。</p>
             </div>
-            <Link href="/jobs">
-              <Button variant="outline">
-                <RefreshCw className="h-4 w-4" />
-                任务记录
-              </Button>
-            </Link>
+            <Button variant="outline" onClick={() => router.refresh()}>
+              <RefreshCw className="h-4 w-4" />
+              刷新状态
+            </Button>
           </div>
           <div className="mb-4 flex flex-wrap gap-2">
             {([
@@ -433,7 +423,7 @@ export function WorkflowWizard({
           </div>
           {monitorTab === "failed" ? (
             failedJobs.length ? (
-              <Table head={["商品", "店铺", "状态", "错误", "操作"]}>
+              <Table head={["商品", "店铺", "状态", "错误", "记录"]}>
                 {failedJobs.map((job) => (
                   <tr key={job.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">{job.title}<div className="text-xs text-gray-500">{job.offerId}</div></td>
@@ -446,14 +436,14 @@ export function WorkflowWizard({
               </Table>
             ) : <EmptyState title="没有失败任务" />
           ) : (
-            <Table head={["商品", "店铺", "状态", "价格", "操作"]}>
+            <Table head={["商品", "店铺", "状态", "价格", "记录"]}>
               {(monitorTab === "listed" ? submittedDrafts : compiledDrafts).map((draft) => (
                 <tr key={draft.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">{draft.title}<div className="text-xs text-gray-500">{draft.offerId}</div></td>
                   <td className="px-4 py-3">{draft.storeName}</td>
                   <td className="px-4 py-3"><StatusBadge status={draft.status} /></td>
                   <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub} RUB` : "-"}</td>
-                  <td className="px-4 py-3"><Link href={`/products/${draft.productId}`} className="text-sm font-medium text-blue-700 hover:underline">查看商品</Link></td>
+                  <td className="px-4 py-3 text-xs text-gray-500">{draft.id}</td>
                 </tr>
               ))}
             </Table>
