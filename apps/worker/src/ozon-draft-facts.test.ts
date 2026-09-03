@@ -75,4 +75,37 @@ describe("ozon draft facts", () => {
     ]);
     expect(JSON.stringify(result)).not.toMatch(/[\u3400-\u4dbf\u4e00-\u9fff]/);
   });
+
+  it("adds safe generated live-listing attributes when the Ozon category supports them", async () => {
+    const attributes: CategoryAttribute[] = [
+      { id: 23171, name: "#Хештеги", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 4191, name: "Аннотация", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 11254, name: "Rich-контент JSON", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 9024, name: "Код продавца", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 9533, name: "Размер производителя", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 4389, name: "Страна-изготовитель", description: "", type: "Dictionary", is_collection: false, is_required: false },
+    ];
+
+    const result = await buildRequiredOzonAttributes(
+      dressFact,
+      "Женское летнее платье без рукавов",
+      attributes,
+      [],
+      async (attributeId) => attributeId === 4389 ? [{ id: 1, value: "Россия" }] : [],
+      {
+        descriptionRu: "Легкое платье для летнего образа.",
+        bulletPointsRu: ["Свободный крой"],
+        searchKeywordsRu: "#платье #летнееплатье",
+        detailImages: ["https://example.test/detail.jpg"],
+      },
+    );
+
+    expect(result).toEqual([
+      { id: 23171, values: [{ value: "#платье #летнееплатье" }] },
+      { id: 4191, values: [{ value: "Легкое платье для летнего образа.<br/><br/>Свободный крой" }] },
+      { id: 11254, values: [{ value: expect.stringContaining("https://example.test/detail.jpg") }] },
+      { id: 9024, values: [{ value: "1" }] },
+      { id: 9533, values: [{ value: "L" }] },
+    ]);
+  });
 });

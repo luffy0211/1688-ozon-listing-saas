@@ -19,13 +19,13 @@ import { XiangjiClient } from "@saas/xiangji";
 import {
   asRecord,
   buildRequiredOzonAttributes,
-  firstNumber,
   firstString,
   matchOzonCategory,
   ozonDraftFacts,
   packageDefaults,
   type OzonDraftFacts,
 } from "./ozon-draft-facts";
+import { generateRussianListingContent } from "./listing-content";
 import { translateWithOpenAiCompatible } from "./translate-text";
 
 type JsonRecord = Record<string, unknown>;
@@ -112,15 +112,21 @@ async function completeOzonFacts(params: {
   facts: OzonDraftFacts;
   fact: NormalizedProductFact;
   titleRu: string;
+  descriptionRu?: string;
+  bulletPointsRu?: string[];
+  searchKeywordsRu?: string;
+  detailImages?: string[];
   store: { ozonClientId: string | null; ozonApiKey: string | null };
 }): Promise<OzonDraftFacts> {
   let facts = params.facts;
-  const client = !facts.descriptionCategoryId || !facts.typeId || facts.attributes.length === 0
-    ? ozonReadClient(params.store)
-    : null;
+  let client: OzonClient | null = null;
+  const getClient = () => {
+    client ??= ozonReadClient(params.store);
+    return client;
+  };
 
-  if ((!facts.descriptionCategoryId || !facts.typeId) && client) {
-    const matched = matchOzonCategory(await client.getCategoryTree(), params.fact);
+  if (!facts.descriptionCategoryId || !facts.typeId) {
+    const matched = matchOzonCategory(await getClient().getCategoryTree(), params.fact);
     if (!matched) {
       throw new Error("无法从 1688 商品信息自动匹配 Ozon 类目，请在 rawJson.ozon 中补 description_category_id 和 type_id");
     }
@@ -133,8 +139,9 @@ async function completeOzonFacts(params: {
 
   if (!facts.descriptionCategoryId || !facts.typeId) return facts;
 
-  if (facts.attributes.length === 0 && client) {
-    const categoryAttributes = await client.getCategoryAttributes(
+  {
+    const ozonClient = getClient();
+    const categoryAttributes = await ozonClient.getCategoryAttributes(
       facts.descriptionCategoryId,
       facts.typeId,
     );
@@ -145,7 +152,13 @@ async function completeOzonFacts(params: {
         params.titleRu,
         categoryAttributes,
         facts.attributes,
-        (attributeId) => client.getAttributeValues(facts.descriptionCategoryId!, facts.typeId!, attributeId),
+        (attributeId) => ozonClient.getAttributeValues(facts.descriptionCategoryId!, facts.typeId!, attributeId),
+        {
+          descriptionRu: params.descriptionRu,
+          bulletPointsRu: params.bulletPointsRu,
+          searchKeywordsRu: params.searchKeywordsRu,
+          detailImages: params.detailImages,
+        },
       ),
     };
   }
@@ -296,6 +309,7 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
   let titleRu = `${fact.title} / RU`;
   let descriptionRu = firstString(fact.descriptionText) ?? fact.title;
   let bulletPointsRu: string[] = [];
+  let searchKeywordsRu = "";
   const detailImages = job.product.productAssets
     .filter((asset: ProductAssetLike) => asset.kind === "detail_image")
     .map((asset: ProductAssetLike) => asset.publicUrl ?? asset.sourceUrl)
@@ -338,35 +352,49 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
     });
 
     await runStep(jobId, "translate_product_info", async () => {
-      if (!xiangjiCredential) throw new Error("缺少象寄 X-API-Key");
-      const client = new XiangjiClient({
-        apiKey: decryptSecret(xiangjiCredential.apiKey),
-        mock: process.env.XIANGJI_MOCK !== "false",
-      });
       const bulletPointSource = fact.properties
         .slice(0, 5)
         .map((p) => `${p.name}: ${p.value}`);
       const descriptionSource = descriptionRu;
-      const [translatedTitle, translatedDesc, ...translatedBullets] = await translateProductText({
-        client,
-        texts: [fact.title, descriptionSource, ...bulletPointSource],
-        vendor: job.store.translationVendor,
-      });
-      titleRu = translatedTitle ?? titleRu;
-      descriptionRu = translatedDesc ?? descriptionRu;
-      bulletPointsRu = translatedBullets.length > 0 ? translatedBullets : bulletPointSource;
-      assertNoChineseBuyerText({ titleRu, descriptionRu, bulletPointsRu });
+      let vendor = "deepseek";
+      try {
+        const content = await generateRussianListingContent(fact);
+        titleRu = content.titleRu;
+        descriptionRu = content.descriptionRu;
+        bulletPointsRu = content.bulletPointsRu;
+        searchKeywordsRu = content.hashtagsRu;
+      } catch (error) {
+        console.warn(
+          `DeepSeek 商品文案失败，改用象寄文本翻译兜底: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        if (!xiangjiCredential) throw new Error("缺少象寄 X-API-Key");
+        const client = new XiangjiClient({
+          apiKey: decryptSecret(xiangjiCredential.apiKey),
+          mock: process.env.XIANGJI_MOCK !== "false",
+        });
+        const [translatedTitle, translatedDesc, ...translatedBullets] = await translateProductText({
+          client,
+          texts: [fact.title, descriptionSource, ...bulletPointSource],
+          vendor: job.store.translationVendor,
+        });
+        vendor = job.store.translationVendor;
+        titleRu = translatedTitle ?? titleRu;
+        descriptionRu = translatedDesc ?? descriptionRu;
+        bulletPointsRu = translatedBullets.length > 0 ? translatedBullets : bulletPointSource;
+        searchKeywordsRu = "";
+      }
+      assertNoChineseBuyerText({ titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu });
       await prisma.translationTask.create({
         data: {
           tenantId: job.tenantId,
           productId: job.productId,
-          vendor: job.store.translationVendor,
+          vendor,
           status: "done",
           inputJson: { title: fact.title, description: descriptionSource, bulletPoints: bulletPointSource } as never,
-          outputJson: { titleRu, descriptionRu, bulletPointsRu } as never,
+          outputJson: { titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu } as never,
         },
       });
-      return { titleRu, descriptionRu, bulletPointsRu };
+      return { titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu, vendor };
     });
 
     const category = await runStep(jobId, "match_ozon_category", async () => {
@@ -374,6 +402,10 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
         facts: ozonFacts,
         fact,
         titleRu,
+        descriptionRu,
+        bulletPointsRu,
+        searchKeywordsRu,
+        detailImages,
         store: job.store,
       });
       if (!ozonFacts.descriptionCategoryId) {
@@ -393,7 +425,7 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
       titleRu,
       bulletPointsRu,
       descriptionRu,
-      searchKeywordsRu: fact.categoryPath.join(", "),
+      searchKeywordsRu,
       descriptionCategoryId: category.descriptionCategoryId,
       typeId: category.typeId,
       ozonAttributes: ozonFacts.attributes,
