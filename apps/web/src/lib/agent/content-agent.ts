@@ -100,24 +100,63 @@ const productMutationActionTypeSchema = z.enum([
   "DELETE_PRODUCT",
   "BULK_PRODUCT_UPDATE",
 ]);
+const attributeValueSchema = z.object({
+  value: z.string().nullable(),
+  dictionaryValueId: z.number().nullable(),
+  dictionary_value_id: z.number().nullable(),
+});
+const attributeSchema = z.object({
+  id: z.number().nullable(),
+  values: z.array(attributeValueSchema).nullable(),
+});
+const payloadItemSchema = z.object({
+  type: productMutationActionTypeSchema.nullable(),
+  offerId: z.string().nullable(),
+  productId: z.string().nullable(),
+  proposedPriceRub: z.number().nullable(),
+  stock: z.number().nullable(),
+  warehouseId: z.number().nullable(),
+  images: z.array(z.string()).nullable(),
+  attributes: z.array(attributeSchema).nullable(),
+});
+const productMutationPayloadSchema = z.object({
+  offerId: z.string().nullable(),
+  productId: z.string().nullable(),
+  currentPriceRub: z.number().nullable(),
+  proposedPriceRub: z.number().nullable(),
+  oldPriceRub: z.string().nullable(),
+  vat: z.string().nullable(),
+  costRub: z.number().nullable(),
+  purchaseCostCny: z.number().nullable(),
+  cnyToRub: z.number().nullable(),
+  commissionRate: z.number().nullable(),
+  stock: z.number().nullable(),
+  warehouseId: z.number().nullable(),
+  quantSize: z.number().nullable(),
+  images: z.array(z.string()).nullable(),
+  images360: z.array(z.string()).nullable(),
+  colorImage: z.string().nullable(),
+  attributes: z.array(attributeSchema).nullable(),
+  items: z.array(payloadItemSchema).nullable(),
+});
 
 const contentSuggestionSchema = z.object({
   field: contentFieldSchema,
-  current: z.string().optional(),
+  current: z.string().nullable(),
   suggestedRu: z.string().min(1).max(3000),
   reasonZh: z.string().min(1).max(1000),
-  sourceTag: sourceTagSchema.optional(),
-  confidence: z.number().min(0).max(1).optional(),
+  sourceTag: sourceTagSchema.nullable(),
+  confidence: z.number().min(0).max(1).nullable(),
 });
 
 const productMutationActionSchema = z.object({
   type: productMutationActionTypeSchema,
   title: z.string().min(1).max(240),
   rationale: z.string().min(1).max(2000),
-  riskLevel: riskLevelSchema.optional(),
-  offerId: z.string().nullable().optional(),
-  productId: z.string().nullable().optional(),
-  payload: z.record(z.string(), z.unknown()).optional(),
+  riskLevel: riskLevelSchema.nullable(),
+  offerId: z.string().nullable(),
+  productId: z.string().nullable(),
+  payload: productMutationPayloadSchema.nullable(),
 });
 
 function titleFromPrompt(prompt: string) {
@@ -475,7 +514,7 @@ export async function runOzonContentAgent(params: {
       description:
         "Read a live own-store Ozon operations snapshot. Use this before answering questions about own store products, inventory, orders, drafts, or status.",
       parameters: z.object({
-        storeId: z.string().nullable().optional(),
+        storeId: z.string().nullable(),
       }),
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
@@ -528,7 +567,7 @@ export async function runOzonContentAgent(params: {
         "Read one own-store Ozon product by offerId from the live Ozon Seller API. It never returns API keys or secrets.",
       parameters: z.object({
         offerId: z.string().min(1).max(120),
-        storeId: z.string().nullable().optional(),
+        storeId: z.string().nullable(),
       }),
       execute: async ({ offerId: toolOfferId, storeId }) => {
         const at = new Date().toISOString();
@@ -585,7 +624,7 @@ export async function runOzonContentAgent(params: {
       parameters: z.object({
         title: z.string().min(1).max(240),
         rationale: z.string().min(1).max(2000),
-        riskLevel: riskLevelSchema.optional(),
+        riskLevel: riskLevelSchema.nullable(),
         offerId: z.string().min(1).max(120),
         summaryZh: z.string().min(1).max(2000),
         suggestions: z.array(contentSuggestionSchema).min(1).max(8),
