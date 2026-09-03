@@ -9,7 +9,8 @@ describe("parseRussianListingContent", () => {
       '  "titleRu": "Женское летнее платье",',
       '  "descriptionRu": "Легкое платье для летнего образа.",',
       '  "bulletPointsRu": ["Легкая ткань", "Свободный крой"],',
-      '  "hashtagsRu": "#платье #летнееплатье"',
+      '  "hashtagsRu": "#платье #летнееплатье",',
+      '  "attributesRu": { "material": "полиэстер", "style": "Повседневный", "country": "Китай" }',
       "}",
       "```",
     ].join("\n");
@@ -19,6 +20,24 @@ describe("parseRussianListingContent", () => {
       descriptionRu: "Легкое платье для летнего образа.",
       bulletPointsRu: ["Легкая ткань", "Свободный крой"],
       hashtagsRu: "#платье #летнееплатье",
+      attributesRu: {
+        material: "полиэстер",
+        style: "Повседневный",
+        country: "Китай",
+        season: "",
+        packageType: "",
+        warranty: "",
+        pattern: "",
+        neckline: "",
+        sleeveType: "",
+        purpose: "",
+        colorName: "",
+        packageQuantity: "",
+        factoryPackageQuantity: "",
+        markingRequired: "",
+        unitQuantity: "",
+        type: "",
+      },
     });
   });
 });

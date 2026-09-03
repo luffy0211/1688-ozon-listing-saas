@@ -166,4 +166,56 @@ describe("ozon draft facts", () => {
 
     expect(result).toEqual([{ id: 9024, values: [{ value: "1" }] }]);
   });
+
+  it("fills common clothing template attributes from structured Russian values", async () => {
+    const attributes: CategoryAttribute[] = [
+      { id: 4496, name: "Материал", description: "", type: "Dictionary", is_collection: false, is_required: false },
+      { id: 4309, name: "Материал подкладки", description: "", type: "Dictionary", is_collection: false, is_required: false },
+      { id: 4389, name: "Страна-изготовитель", description: "", type: "Dictionary", is_collection: false, is_required: false },
+      { id: 4300, name: "Тип упаковки одежды", description: "", type: "Dictionary", is_collection: false, is_required: false },
+      { id: 4501, name: "Стиль", description: "", type: "Dictionary", is_collection: false, is_required: false },
+      { id: 4503, name: "Коллекция", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 9168, name: "Назначение", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 10097, name: "Название цвета", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 10400, name: "Гарантия", description: "", type: "Dictionary", is_collection: false, is_required: false },
+    ];
+
+    const result = await buildRequiredOzonAttributes(
+      dressFact,
+      "Женское летнее платье без рукавов",
+      attributes,
+      [],
+      async (attributeId) => {
+        if (attributeId === 4496) return [{ id: 10, value: "полиэстер" }];
+        if (attributeId === 4389) return [{ id: 20, value: "Китай" }];
+        if (attributeId === 4300) return [{ id: 30, value: "Пакет" }];
+        if (attributeId === 4501) return [{ id: 40, value: "Повседневный" }];
+        if (attributeId === 10400) return [{ id: 50, value: "Без гарантии" }];
+        return [];
+      },
+      {
+        attributesRu: {
+          material: "полиэстер",
+          country: "Китай",
+          packageType: "Пакет",
+          style: "Повседневный",
+          season: "Весна-лето",
+          purpose: "для повседневной носки",
+          colorName: "черный",
+          warranty: "Без гарантии",
+        },
+      },
+    );
+
+    expect(result).toEqual([
+      { id: 4496, values: [{ value: "полиэстер", dictionaryValueId: 10 }] },
+      { id: 4389, values: [{ value: "Китай", dictionaryValueId: 20 }] },
+      { id: 4300, values: [{ value: "Пакет", dictionaryValueId: 30 }] },
+      { id: 4501, values: [{ value: "Повседневный", dictionaryValueId: 40 }] },
+      { id: 4503, values: [{ value: "Весна-лето" }] },
+      { id: 9168, values: [{ value: "для повседневной носки" }] },
+      { id: 10097, values: [{ value: "черный" }] },
+      { id: 10400, values: [{ value: "Без гарантии", dictionaryValueId: 50 }] },
+    ]);
+  });
 });

@@ -5,6 +5,26 @@ export type RussianListingContent = {
   descriptionRu: string;
   bulletPointsRu: string[];
   hashtagsRu: string;
+  attributesRu: RussianClothingAttributes;
+};
+
+export type RussianClothingAttributes = {
+  material?: string;
+  style?: string;
+  season?: string;
+  country?: string;
+  packageType?: string;
+  warranty?: string;
+  pattern?: string;
+  neckline?: string;
+  sleeveType?: string;
+  purpose?: string;
+  colorName?: string;
+  packageQuantity?: string;
+  factoryPackageQuantity?: string;
+  markingRequired?: string;
+  unitQuantity?: string;
+  type?: string;
 };
 
 function parseJsonObject(content: string): Record<string, unknown> {
@@ -28,6 +48,35 @@ function stringArrayField(data: Record<string, unknown>, key: string): string[] 
     : [];
 }
 
+function objectField(data: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = data[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function clothingAttributesField(data: Record<string, unknown>): RussianClothingAttributes {
+  const source = objectField(data, "attributesRu");
+  return {
+    material: stringField(source, "material"),
+    style: stringField(source, "style"),
+    season: stringField(source, "season"),
+    country: stringField(source, "country"),
+    packageType: stringField(source, "packageType"),
+    warranty: stringField(source, "warranty"),
+    pattern: stringField(source, "pattern"),
+    neckline: stringField(source, "neckline"),
+    sleeveType: stringField(source, "sleeveType"),
+    purpose: stringField(source, "purpose"),
+    colorName: stringField(source, "colorName"),
+    packageQuantity: stringField(source, "packageQuantity"),
+    factoryPackageQuantity: stringField(source, "factoryPackageQuantity"),
+    markingRequired: stringField(source, "markingRequired"),
+    unitQuantity: stringField(source, "unitQuantity"),
+    type: stringField(source, "type"),
+  };
+}
+
 export function parseRussianListingContent(content: string): RussianListingContent {
   const data = parseJsonObject(content);
   const result = {
@@ -35,6 +84,7 @@ export function parseRussianListingContent(content: string): RussianListingConte
     descriptionRu: stringField(data, "descriptionRu"),
     bulletPointsRu: stringArrayField(data, "bulletPointsRu"),
     hashtagsRu: stringField(data, "hashtagsRu"),
+    attributesRu: clothingAttributesField(data),
   };
   if (!result.titleRu || !result.descriptionRu || result.bulletPointsRu.length === 0) {
     throw new Error("模型商品文案缺少 titleRu/descriptionRu/bulletPointsRu");
@@ -72,9 +122,11 @@ export async function generateRussianListingContent(
           role: "system",
           content: [
             "You write Russian Ozon fashion listings from Chinese 1688 product facts.",
-            "Return only JSON with keys: titleRu, descriptionRu, bulletPointsRu, hashtagsRu.",
+            "Return only JSON with keys: titleRu, descriptionRu, bulletPointsRu, hashtagsRu, attributesRu.",
+            "attributesRu keys: material, style, season, country, packageType, warranty, pattern, neckline, sleeveType, purpose, colorName, packageQuantity, factoryPackageQuantity, markingRequired, unitQuantity, type.",
+            "Prefer Ozon-like values: country Китай, packageType Пакет, warranty Без гарантии, packageQuantity 1, markingRequired false, style Деловой/Повседневный/Романтический, season with source year when present.",
             "No Chinese buyer-facing text. Do not invent brand, certification, or material not present in facts.",
-            "Use natural ecommerce Russian, concise title, 4-6 selling bullets, and hashtag string.",
+            "Use Russian Ozon dictionary-like values where possible, concise title, 4-6 selling bullets, and hashtag string.",
           ].join(" "),
         },
         {

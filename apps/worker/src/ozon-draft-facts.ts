@@ -1,5 +1,6 @@
 import type { CategoryAttribute, CategoryNode, OzonAttribute } from "@saas/ozon";
 import type { NormalizedProductFact } from "@saas/core";
+import type { RussianClothingAttributes } from "./listing-content";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -19,6 +20,7 @@ export type OzonAttributeContent = {
   descriptionRu?: string;
   bulletPointsRu?: string[];
   searchKeywordsRu?: string;
+  attributesRu?: RussianClothingAttributes;
   detailImages?: string[];
 };
 
@@ -207,9 +209,12 @@ function ruColor(value: string): string {
 }
 
 function ruMaterial(value: string): string {
+  if (/羊绒/.test(value)) return "кашемир";
+  if (/羊毛/.test(value)) return "шерсть";
   if (/涤纶|聚酯/.test(value)) return "полиэстер";
   if (/棉/.test(value)) return "хлопок";
   if (/麻/.test(value)) return "лен";
+  if (/醋酯/.test(value)) return "ацетат";
   if (/粘纤|人棉/.test(value)) return "вискоза";
   return "полиэстер";
 }
@@ -275,7 +280,66 @@ function primaryAttrName(attribute: CategoryAttribute): string {
 
 function isSafeOptionalListingAttribute(attribute: CategoryAttribute): boolean {
   const name = primaryAttrName(attribute);
-  return /хештег|аннотац|rich|код продавца|размер производител/i.test(name) || name === "название";
+  return (
+    /хештег|аннотац|rich|код продавца|размер производител|тип упаковки одежды|страна-изготовитель|вес с упаковкой|стиль|коллекция|назначение|количество в упаковке|название цвета|гарантия|количество заводских упаковок|нужен код маркировки|тип рукава|рисунок|вырез горловины|количество товара в уеи/i.test(name) ||
+    ["название", "материал", "состав материала"].includes(name)
+  );
+}
+
+function templateValue(
+  content: OzonAttributeContent,
+  key: keyof RussianClothingAttributes,
+  fallback: string,
+): string {
+  return content.attributesRu?.[key] || fallback;
+}
+
+function seasonValue(fact: NormalizedProductFact): string {
+  const season = propertyValue(fact, /上市年份\/季节|季节|season/i);
+  const year = season.match(/20\d{2}/)?.[0];
+  if (/春|夏/.test(season)) return year ? `Весна-лето ${year}` : "Весна-лето";
+  if (/秋|冬/.test(season)) return year ? `Осень-зима ${year}` : "Осень-зима";
+  return "Всесезон";
+}
+
+function seasonTemplateValue(content: OzonAttributeContent, fact: NormalizedProductFact): string {
+  const value = content.attributesRu?.season ?? "";
+  const fallback = seasonValue(fact);
+  if (/\d/.test(value)) return value;
+  if (/\d/.test(fallback)) return fallback;
+  return value || fallback;
+}
+
+function styleValue(fact: NormalizedProductFact): string {
+  const style = propertyValue(fact, /风格|style/i);
+  if (/通勤|气质|简约|ol/i.test(style)) return "Деловой";
+  if (/休闲|日常/i.test(style)) return "Повседневный";
+  if (/优雅|淑女/i.test(style)) return "Романтический";
+  return "Повседневный";
+}
+
+function patternValue(fact: NormalizedProductFact): string {
+  const pattern = propertyValue(fact, /图案|pattern/i);
+  if (/纯色/.test(pattern)) return "Однотонный";
+  if (/花|碎花/.test(pattern)) return "Цветочный";
+  if (/条纹/.test(pattern)) return "Полоска";
+  return "";
+}
+
+function sleeveValue(fact: NormalizedProductFact): string {
+  const sleeve = propertyValue(fact, /袖长|袖型|sleeve/i);
+  if (/长袖/.test(sleeve)) return "Длинный рукав";
+  if (/短袖/.test(sleeve)) return "Короткий рукав";
+  if (/无袖/.test(sleeve)) return "Без рукавов";
+  return "";
+}
+
+function necklineValue(fact: NormalizedProductFact): string {
+  const neckline = propertyValue(fact, /领型|领口|neck/i);
+  if (/翻领/.test(neckline)) return "Отложной воротник";
+  if (/v|V/.test(neckline)) return "V-образный";
+  if (/圆/.test(neckline)) return "Круглый";
+  return "";
 }
 
 function desiredValue(
@@ -292,24 +356,29 @@ function desiredValue(
   if (/код продавца/i.test(primary)) return fact.skus[0]?.skuId ?? titleRu;
   if (/размер производител/i.test(primary)) return manufacturerSize(fact);
   if (primary === "название" || /модель|model/i.test(primary)) return titleRu;
-  if (/тип упаков/i.test(primary)) return "Пакет";
+  if (/тип упаков/i.test(primary)) return templateValue(content, "packageType", "Пакет");
   if (primary === "тип" || /(^|\s)(тип|вид)($|\s)/i.test(primary)) return /пальто|大衣|外套|羊毛|羊绒|coat/i.test(productText(fact, titleRu)) ? "пальто" : /裙|dress/i.test(textOfFact(fact)) ? "платье" : titleRu;
   if (/пол|gender/i.test(primary)) return "женский";
   if (/объединить|combine/i.test(name)) return `listing-${fact.skus[0]?.skuId ?? titleRu}`;
   if (/бренд|brand|торговая марка/i.test(name)) return "Нет бренда";
   if (/российский размер/i.test(name)) return russianSize(manufacturerSize(fact));
   if (/цвет|color/i.test(name)) return ruColor(propertyValue(fact, /цвет|颜色/i));
-  if (/материал|состав|material/i.test(name)) return ruMaterial(propertyValue(fact, /面料|材质|成分/i));
+  if (/название цвета/i.test(primary)) return templateValue(content, "colorName", ruColor(propertyValue(fact, /цвет|颜色/i)));
+  if (/материал|состав|material/i.test(name)) return templateValue(content, "material", ruMaterial(propertyValue(fact, /面料|材质|成分|毛种类/i)));
   if (/размер|size/i.test(name)) return manufacturerSize(fact);
-  if (/страна/i.test(name)) return "Китай";
-  if (/коллекц|сезон/i.test(name)) return /лет|夏|summer/i.test(productText(fact, titleRu)) ? "Весна-лето 2027" : "Всесезон";
-  if (/стиль/i.test(name)) return /плать|жен|女|dress/i.test(productText(fact, titleRu)) ? "Повседневный" : "Деловой";
-  if (/назначен/i.test(name)) return "для повседневной носки";
-  if (/тип рукава/i.test(name)) return /без рукав|无袖/i.test(productText(fact, titleRu)) ? "Без рукавов" : "Короткий рукав";
-  if (/рисунок/i.test(name)) return /цвет|花|принт/i.test(productText(fact, titleRu)) ? "Цветочный" : "Однотонный";
-  if (/вырез/i.test(name)) return /v-?neck|v领|v-образ/i.test(productText(fact, titleRu)) ? "V-образный" : "Круглый";
+  if (/страна/i.test(name)) return templateValue(content, "country", "Китай");
+  if (/коллекц|сезон/i.test(name)) return seasonTemplateValue(content, fact);
+  if (/стиль/i.test(name)) return templateValue(content, "style", styleValue(fact));
+  if (/назначен/i.test(name)) return templateValue(content, "purpose", "для повседневной носки");
+  if (/тип рукава/i.test(name)) return templateValue(content, "sleeveType", sleeveValue(fact));
+  if (/рисунок/i.test(name)) return templateValue(content, "pattern", patternValue(fact));
+  if (/вырез/i.test(name)) return templateValue(content, "neckline", necklineValue(fact));
   if (/вес с упаковкой/i.test(name)) return String(packageDefaults(fact).weightGrams);
-  if (/количество|упаков|маркиров/i.test(name)) return /маркиров/i.test(name) ? "false" : "1";
+  if (/гарантия/i.test(name)) return templateValue(content, "warranty", "Без гарантии");
+  if (/нужен код маркировки|маркиров/i.test(name)) return templateValue(content, "markingRequired", "false");
+  if (/количество заводских упаковок/i.test(name)) return templateValue(content, "factoryPackageQuantity", "1");
+  if (/количество товара в уеи/i.test(name)) return templateValue(content, "unitQuantity", "1");
+  if (/количество|упаков/i.test(name)) return templateValue(content, "packageQuantity", "1");
   return titleRu;
 }
 

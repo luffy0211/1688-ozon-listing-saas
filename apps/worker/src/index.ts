@@ -26,6 +26,7 @@ import {
   type OzonDraftFacts,
 } from "./ozon-draft-facts";
 import { generateRussianListingContent } from "./listing-content";
+import type { RussianClothingAttributes } from "./listing-content";
 import { translateWithOpenAiCompatible } from "./translate-text";
 
 type JsonRecord = Record<string, unknown>;
@@ -45,10 +46,15 @@ function asSourceProduct(value: unknown): SourceProductImport | null {
 
 function assertNoChineseBuyerText(values: Record<string, unknown>) {
   const cjk = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
-  const badFields = Object.entries(values).flatMap(([key, value]) => {
-    const items = Array.isArray(value) ? value : [value];
-    return items.some((item) => typeof item === "string" && cjk.test(item)) ? [key] : [];
-  });
+  const badFields: string[] = [];
+  const visit = (value: unknown, path: string) => {
+    if (typeof value === "string" && cjk.test(value)) badFields.push(path);
+    else if (Array.isArray(value)) value.forEach((item, index) => visit(item, `${path}[${index}]`));
+    else if (value && typeof value === "object") {
+      Object.entries(value).forEach(([key, item]) => visit(item, path ? `${path}.${key}` : key));
+    }
+  };
+  Object.entries(values).forEach(([key, value]) => visit(value, key));
   if (badFields.length > 0) {
     throw new Error(`俄语文案仍含中文: ${badFields.join(", ")}`);
   }
@@ -115,6 +121,7 @@ async function completeOzonFacts(params: {
   descriptionRu?: string;
   bulletPointsRu?: string[];
   searchKeywordsRu?: string;
+  attributesRu?: RussianClothingAttributes;
   detailImages?: string[];
   store: { ozonClientId: string | null; ozonApiKey: string | null };
 }): Promise<OzonDraftFacts> {
@@ -157,6 +164,7 @@ async function completeOzonFacts(params: {
           descriptionRu: params.descriptionRu,
           bulletPointsRu: params.bulletPointsRu,
           searchKeywordsRu: params.searchKeywordsRu,
+          attributesRu: params.attributesRu,
           detailImages: params.detailImages,
         },
       ),
@@ -310,6 +318,7 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
   let descriptionRu = firstString(fact.descriptionText) ?? fact.title;
   let bulletPointsRu: string[] = [];
   let searchKeywordsRu = "";
+  let attributesRu: RussianClothingAttributes = {};
   const detailImages = job.product.productAssets
     .filter((asset: ProductAssetLike) => asset.kind === "detail_image")
     .map((asset: ProductAssetLike) => asset.publicUrl ?? asset.sourceUrl)
@@ -363,6 +372,7 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
         descriptionRu = content.descriptionRu;
         bulletPointsRu = content.bulletPointsRu;
         searchKeywordsRu = content.hashtagsRu;
+        attributesRu = content.attributesRu;
       } catch (error) {
         console.warn(
           `DeepSeek 商品文案失败，改用象寄文本翻译兜底: ${error instanceof Error ? error.message : String(error)}`,
@@ -382,8 +392,9 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
         descriptionRu = translatedDesc ?? descriptionRu;
         bulletPointsRu = translatedBullets.length > 0 ? translatedBullets : bulletPointSource;
         searchKeywordsRu = "";
+        attributesRu = {};
       }
-      assertNoChineseBuyerText({ titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu });
+      assertNoChineseBuyerText({ titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu, attributesRu });
       await prisma.translationTask.create({
         data: {
           tenantId: job.tenantId,
@@ -391,10 +402,10 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
           vendor,
           status: "done",
           inputJson: { title: fact.title, description: descriptionSource, bulletPoints: bulletPointSource } as never,
-          outputJson: { titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu } as never,
+          outputJson: { titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu, attributesRu } as never,
         },
       });
-      return { titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu, vendor };
+      return { titleRu, descriptionRu, bulletPointsRu, searchKeywordsRu, attributesRu, vendor };
     });
 
     const category = await runStep(jobId, "match_ozon_category", async () => {
@@ -405,6 +416,7 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
         descriptionRu,
         bulletPointsRu,
         searchKeywordsRu,
+        attributesRu,
         detailImages,
         store: job.store,
       });
