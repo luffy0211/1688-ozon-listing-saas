@@ -45,6 +45,8 @@ type Product = {
   latestDraftId: string | null;
   latestDraftStatus: string | null;
   priceRub: string | null;
+  attributes: Array<{ name: string; value: string }>;
+  skus: Array<{ name: string; priceCny: string | null; stockText: string | null }>;
 };
 
 type Draft = {
@@ -58,6 +60,8 @@ type Draft = {
   storeName: string;
   priceRub: string | null;
   status: string;
+  attributes: Array<{ name: string; value: string }>;
+  skus: Array<{ name: string; priceCny: string | null; stockText: string | null }>;
 };
 
 type Job = {
@@ -90,6 +94,8 @@ type DetailItem = {
   draftId: string | null;
   draftStatus: string | null;
   priceRub: string | null;
+  attributes: Array<{ name: string; value: string }>;
+  skus: Array<{ name: string; priceCny: string | null; stockText: string | null }>;
 };
 
 const steps = [
@@ -344,6 +350,39 @@ function ProductDetailModal({
               <div className="text-xs text-gray-500">售价</div>
               <div className="mt-1 text-lg font-semibold text-gray-950">{item.priceRub ? `${item.priceRub} RUB` : "-"}</div>
             </div>
+            <div className="rounded-md border border-gray-200 p-3">
+              <div className="mb-2 text-xs font-medium text-gray-500">商品属性</div>
+              {item.attributes.length ? (
+                <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                  {item.attributes.map((attr) => (
+                    <div key={`${attr.name}-${attr.value}`} className="min-w-0">
+                      <dt className="truncate text-gray-400">{attr.name}</dt>
+                      <dd className="mt-0.5 truncate font-medium text-gray-800" title={attr.value}>{attr.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : (
+                <div className="text-xs text-gray-400">暂无属性</div>
+              )}
+            </div>
+            <div className="rounded-md border border-gray-200 p-3">
+              <div className="mb-2 text-xs font-medium text-gray-500">规格</div>
+              {item.skus.length ? (
+                <div className="space-y-2">
+                  {item.skus.map((sku) => (
+                    <div key={`${sku.name}-${sku.priceCny ?? ""}-${sku.stockText ?? ""}`} className="rounded-md bg-gray-50 px-2 py-1.5 text-xs">
+                      <div className="truncate font-medium text-gray-800" title={sku.name}>{sku.name}</div>
+                      <div className="mt-1 flex gap-2 text-gray-500">
+                        {sku.priceCny ? <span>{sku.priceCny} CNY</span> : null}
+                        {sku.stockText ? <span>{sku.stockText}</span> : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400">暂无规格</div>
+              )}
+            </div>
             <div className="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
               {item.sourceUrl ? (
                 <a
@@ -431,6 +470,8 @@ export function WorkflowWizard({
             draftId: product.latestDraftId,
             draftStatus: product.latestDraftStatus,
             priceRub: product.priceRub,
+            attributes: product.attributes,
+            skus: product.skus,
           },
         ]),
       ),
@@ -582,6 +623,8 @@ export function WorkflowWizard({
                             draftId: draft.id,
                             draftStatus: draft.status,
                             priceRub: draft.priceRub,
+                            attributes: draft.attributes,
+                            skus: draft.skus,
                           })
                         }
                       >

@@ -11,6 +11,61 @@ function productImageUrls(assets: Array<{ publicUrl: string | null; sourceUrl: s
     .map(displayProductImageUrl);
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function text(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+function productAttributes(product: { rawJson: unknown; productFacts: Array<{ normalizedJson: unknown }> }) {
+  const fact = asRecord(product.productFacts[0]?.normalizedJson);
+  const raw = asRecord(product.rawJson);
+  const rows: Array<{ name: string; value: string }> = [];
+  const add = (name: string, value: unknown) => {
+    const v = text(value);
+    if (v && !rows.some((row) => row.name === name && row.value === v)) rows.push({ name, value: v });
+  };
+
+  const categoryPath = Array.isArray(fact.categoryPath) ? fact.categoryPath.map(text).filter(Boolean).join(" / ") : null;
+  add("类目", categoryPath);
+  add("品牌", asRecord(fact.brand).value);
+  add("采购价", text(asRecord(fact.purchaseCny).value) ? `${text(asRecord(fact.purchaseCny).value)} CNY` : null);
+  const logistics = asRecord(fact.logistics);
+  add("起批量", logistics.minOrderQuantity);
+  add("发货地", logistics.shipFrom);
+
+  const properties = Array.isArray(fact.properties) ? fact.properties : Array.isArray(raw.properties) ? raw.properties : [];
+  for (const property of properties) {
+    const item = asRecord(property);
+    add(text(item.name) ?? "属性", item.value);
+  }
+
+  const priceTiers = Array.isArray(fact.priceTiers) ? fact.priceTiers : [];
+  for (const tier of priceTiers.slice(0, 3)) {
+    const item = asRecord(tier);
+    add(`价格 ${text(item.minQuantity) ?? 1}件起`, text(item.priceCny) ? `${text(item.priceCny)} CNY` : null);
+  }
+
+  const skus = Array.isArray(fact.skus) ? fact.skus : Array.isArray(raw.skus) ? raw.skus : [];
+  return {
+    attributes: rows.slice(0, 24),
+    skus: skus.slice(0, 8).map((sku) => {
+      const item = asRecord(sku);
+      const attrs = asRecord(item.attributes);
+      const nameFromAttrs = Object.values(attrs).map(text).filter(Boolean).join(" / ");
+      return {
+        name: text(item.name) ?? (nameFromAttrs || "默认规格"),
+        priceCny: text(item.priceCny),
+        stockText: text(item.stockText),
+      };
+    }),
+  };
+}
+
 export default async function WorkflowPage() {
   const user = await requireUser();
   const tenantId = user.tenantId;
@@ -38,6 +93,7 @@ export default async function WorkflowPage() {
       include: {
         shop: true,
         productAssets: { orderBy: [{ sortOrder: "asc" }] },
+        productFacts: { orderBy: { createdAt: "desc" }, take: 1 },
         listingJobs: { orderBy: { createdAt: "desc" }, take: 1 },
         ozonDrafts: { orderBy: { createdAt: "desc" }, take: 1 },
         _count: { select: { productAssets: true } },
@@ -51,6 +107,7 @@ export default async function WorkflowPage() {
         product: {
           include: {
             productAssets: { orderBy: [{ sortOrder: "asc" }] },
+            productFacts: { orderBy: { createdAt: "desc" }, take: 1 },
           },
         },
         store: true,
@@ -92,6 +149,7 @@ export default async function WorkflowPage() {
         products={products.map((product) => {
           const latestJob = product.listingJobs[0];
           const latestDraft = product.ozonDrafts[0];
+          const info = productAttributes(product);
           return {
             id: product.id,
             title: product.title ?? product.offerId,
@@ -106,9 +164,12 @@ export default async function WorkflowPage() {
             latestDraftId: latestDraft?.id ?? null,
             latestDraftStatus: latestDraft?.status ?? null,
             priceRub: latestDraft?.priceRub?.toString() ?? null,
+            attributes: info.attributes,
+            skus: info.skus,
           };
         })}
         drafts={drafts.map((draft) => {
+          const info = productAttributes(draft.product);
           return {
             id: draft.id,
             productId: draft.productId,
@@ -120,6 +181,8 @@ export default async function WorkflowPage() {
             storeName: draft.store.name,
             priceRub: draft.priceRub?.toString() ?? null,
             status: draft.status,
+            attributes: info.attributes,
+            skus: info.skus,
           };
         })}
         jobs={jobs.map((job) => ({
