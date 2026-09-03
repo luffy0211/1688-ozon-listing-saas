@@ -40,6 +40,28 @@ describe("ozon draft facts", () => {
     });
   });
 
+  it("matches wool outerwear products to a coat category/type", () => {
+    const tree: CategoryNode[] = [
+      {
+        description_category_id: 10,
+        category_name: "Одежда",
+        children: [
+          { type_id: 20, type_name: "Кардиган", children: [] },
+          { type_id: 30, type_name: "Пальто", children: [] },
+        ],
+      },
+    ];
+
+    expect(matchOzonCategory(tree, {
+      ...dressFact,
+      title: "大图轮播",
+      properties: [{ name: "主面料成分", value: "羊绒", estimated: false, confidence: 1 }],
+    })).toMatchObject({
+      descriptionCategoryId: 10,
+      typeId: 30,
+    });
+  });
+
   it("uses clothing package defaults when dimensions are missing", () => {
     expect(packageDefaults(dressFact)).toEqual({
       weightGrams: 500,
@@ -84,6 +106,8 @@ describe("ozon draft facts", () => {
       { id: 9024, name: "Код продавца", description: "", type: "String", is_collection: false, is_required: false },
       { id: 9533, name: "Размер производителя", description: "", type: "String", is_collection: false, is_required: false },
       { id: 4389, name: "Страна-изготовитель", description: "", type: "Dictionary", is_collection: false, is_required: false },
+      { id: 8789, name: "Название файла PDF", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 21837, name: "Озон.Видео: название", description: "", type: "String", is_collection: false, is_required: false },
     ];
 
     const result = await buildRequiredOzonAttributes(
@@ -107,5 +131,39 @@ describe("ozon draft facts", () => {
       { id: 9024, values: [{ value: "1" }] },
       { id: 9533, values: [{ value: "L" }] },
     ]);
+  });
+
+  it("does not use arbitrary dictionary fallback values", async () => {
+    const result = await buildRequiredOzonAttributes(
+      dressFact,
+      "Женское летнее платье без рукавов",
+      [{ id: 23171, name: "#Хештеги", description: "", type: "Dictionary", is_collection: false, is_required: false }],
+      [],
+      async () => [{ id: 1, value: "Нет бренда" }],
+      { searchKeywordsRu: "#платье #летнееплатье" },
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it("uses the primary attribute name before long Ozon descriptions", async () => {
+    const result = await buildRequiredOzonAttributes(
+      dressFact,
+      "Женское летнее платье без рукавов",
+      [
+        {
+          id: 9024,
+          name: "Код продавца",
+          description: "Пол, бренд и другие поисковые характеристики",
+          type: "String",
+          is_collection: false,
+          is_required: false,
+        },
+      ],
+      [],
+      async () => [],
+    );
+
+    expect(result).toEqual([{ id: 9024, values: [{ value: "1" }] }]);
   });
 });

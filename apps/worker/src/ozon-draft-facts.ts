@@ -132,6 +132,9 @@ function childrenOf(node: CategoryNode): CategoryNode[] {
 function searchTerms(fact: NormalizedProductFact): string[] {
   const text = textOfFact(fact);
   if (/连衣裙|女裙|裙子|dress/i.test(text)) return ["плать", "сарафан"];
+  if (/大衣|外套|风衣|毛呢|羊毛|羊绒|coat|overcoat/i.test(text)) return ["пальто"];
+  if (/开衫|cardigan/i.test(text)) return ["кардиган"];
+  if (/毛衣|sweater/i.test(text)) return ["свитер"];
   if (/裤|pants|trousers/i.test(text)) return ["брюк", "штан"];
   if (/上衣|衬衫|shirt|blouse/i.test(text)) return ["блуз", "рубаш"];
   return [];
@@ -266,9 +269,13 @@ function attrName(attribute: CategoryAttribute): string {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
+function primaryAttrName(attribute: CategoryAttribute): string {
+  return String(attribute.name ?? attribute.attribute_name ?? "").toLowerCase();
+}
+
 function isSafeOptionalListingAttribute(attribute: CategoryAttribute): boolean {
-  const name = attrName(attribute);
-  return /хештег|аннотац|rich|название|код продавца|размер производител/i.test(name);
+  const name = primaryAttrName(attribute);
+  return /хештег|аннотац|rich|код продавца|размер производител/i.test(name) || name === "название";
 }
 
 function desiredValue(
@@ -277,18 +284,23 @@ function desiredValue(
   titleRu: string,
   content: OzonAttributeContent = {},
 ): string {
+  const primary = primaryAttrName(attribute);
   const name = attrName(attribute);
+  if (/хештег/i.test(primary)) return content.searchKeywordsRu || `#одежда #мода #${titleRu.split(" ")[0] ?? "fashion"}`;
+  if (/аннотац/i.test(primary)) return [content.descriptionRu, ...(content.bulletPointsRu ?? [])].filter(Boolean).join("<br/><br/>") || titleRu;
+  if (/rich/i.test(primary)) return richContentJson(content.detailImages ?? fact.detailImages);
+  if (/код продавца/i.test(primary)) return fact.skus[0]?.skuId ?? titleRu;
+  if (/размер производител/i.test(primary)) return manufacturerSize(fact);
+  if (primary === "название" || /модель|model/i.test(primary)) return titleRu;
+  if (/тип упаков/i.test(primary)) return "Пакет";
+  if (primary === "тип" || /(^|\s)(тип|вид)($|\s)/i.test(primary)) return /пальто|大衣|外套|羊毛|羊绒|coat/i.test(productText(fact, titleRu)) ? "пальто" : /裙|dress/i.test(textOfFact(fact)) ? "платье" : titleRu;
+  if (/пол|gender/i.test(primary)) return "женский";
   if (/объединить|combine/i.test(name)) return `listing-${fact.skus[0]?.skuId ?? titleRu}`;
   if (/бренд|brand|торговая марка/i.test(name)) return "Нет бренда";
-  if (/хештег/i.test(name)) return content.searchKeywordsRu || `#одежда #мода #${titleRu.split(" ")[0] ?? "fashion"}`;
-  if (/аннотац/i.test(name)) return [content.descriptionRu, ...(content.bulletPointsRu ?? [])].filter(Boolean).join("<br/><br/>") || titleRu;
-  if (/rich/i.test(name)) return richContentJson(content.detailImages ?? fact.detailImages);
   if (/российский размер/i.test(name)) return russianSize(manufacturerSize(fact));
-  if (/размер производител/i.test(name)) return manufacturerSize(fact);
   if (/цвет|color/i.test(name)) return ruColor(propertyValue(fact, /цвет|颜色/i));
   if (/материал|состав|material/i.test(name)) return ruMaterial(propertyValue(fact, /面料|材质|成分/i));
   if (/размер|size/i.test(name)) return manufacturerSize(fact);
-  if (/пол|gender/i.test(name)) return "женский";
   if (/страна/i.test(name)) return "Китай";
   if (/коллекц|сезон/i.test(name)) return /лет|夏|summer/i.test(productText(fact, titleRu)) ? "Весна-лето 2027" : "Всесезон";
   if (/стиль/i.test(name)) return /плать|жен|女|dress/i.test(productText(fact, titleRu)) ? "Повседневный" : "Деловой";
@@ -297,32 +309,24 @@ function desiredValue(
   if (/рисунок/i.test(name)) return /цвет|花|принт/i.test(productText(fact, titleRu)) ? "Цветочный" : "Однотонный";
   if (/вырез/i.test(name)) return /v-?neck|v领|v-образ/i.test(productText(fact, titleRu)) ? "V-образный" : "Круглый";
   if (/вес с упаковкой/i.test(name)) return String(packageDefaults(fact).weightGrams);
-  if (/код продавца/i.test(name)) return fact.skus[0]?.skuId ?? titleRu;
-  if (/тип упаков/i.test(name)) return "Пакет";
   if (/количество|упаков|маркиров/i.test(name)) return /маркиров/i.test(name) ? "false" : "1";
-  if (/модель|model|название/i.test(name)) return titleRu;
-  if (/тип|вид|type/i.test(name)) return /裙|dress/i.test(textOfFact(fact)) ? "платье" : titleRu;
   return titleRu;
 }
 
 function bestDictionaryValue(
   values: Array<{ id?: number; dictionary_value_id?: number; value: string }>,
   desired: string,
-  allowFallback = true,
 ): { value: string; dictionaryValueId?: number } | null {
   if (values.length === 0) return null;
   const normalized = desired.toLowerCase();
-  const fallback = values[0];
-  if (!fallback) return null;
   const match =
     values.find((item) => item.value.toLowerCase() === normalized) ??
     values.find((item) => item.value.toLowerCase().includes(normalized)) ??
     values.find((item) => normalized.includes(item.value.toLowerCase()));
-  if (!match && !allowFallback) return null;
-  const selected = match ?? fallback;
+  if (!match) return null;
   return {
-    value: selected.value,
-    dictionaryValueId: firstNumber(selected.dictionary_value_id, selected.id),
+    value: match.value,
+    dictionaryValueId: firstNumber(match.dictionary_value_id, match.id),
   };
 }
 
@@ -344,10 +348,10 @@ export async function buildRequiredOzonAttributes(
     if (!desired) continue;
     const localValues = attribute.allowed_values ?? [];
     let remoteValues: Array<{ id: number; value: string }> = [];
-    let value = bestDictionaryValue(localValues, desired, required);
+    let value = bestDictionaryValue(localValues, desired);
     if (!value) {
       remoteValues = await loadValues(id).catch(() => []);
-      value = bestDictionaryValue(remoteValues, desired, required);
+      value = bestDictionaryValue(remoteValues, desired);
     }
     if (!required && !value && (localValues.length > 0 || remoteValues.length > 0)) continue;
     byId.set(id, {

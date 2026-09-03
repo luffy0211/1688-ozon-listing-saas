@@ -6,6 +6,7 @@ import {
   prisma,
 } from "@saas/db";
 import {
+  checkSubmitGuards,
   computeRequestHash,
   OzonClient,
   type ImportProductsRequest,
@@ -458,7 +459,7 @@ async function executePublishDraftAction(params: {
 
   const draft = await prisma.ozonDraft.findFirst({
     where: { id: draftId, tenantId: params.tenantId },
-    include: { store: true },
+    include: { product: { include: { productAssets: true } }, store: true },
   });
   if (!draft) throw new Error("ozon_draft_not_found");
   if (draft.status !== "COMPILED") throw new Error("ozon_draft_not_compiled");
@@ -475,6 +476,19 @@ async function executePublishDraftAction(params: {
     where: { storeId_requestHash: { storeId: draft.storeId, requestHash } },
   });
   if (duplicate) throw new Error("duplicate_submission");
+
+  const xiangjiCredentialCount = await prisma.xiangjiCredential.count({ where: { tenantId: params.tenantId } });
+  const hasPrice = request.items.every((item) => Number(asRecord(item).price) > 0);
+  const guard = checkSubmitGuards({
+    hasOzonCredentials: Boolean(draft.store.ozonClientId && draft.store.ozonApiKey),
+    hasXiangjiKey: xiangjiCredentialCount > 0,
+    hasMainImage: draft.product.productAssets.some((asset) => asset.kind === "main_image" || asset.kind === "sku_image"),
+    hasDetailImage: draft.product.productAssets.some((asset) => asset.kind === "detail_image"),
+    hasPrice,
+    payload: request,
+    duplicateSubmission: false,
+  });
+  if (!guard.ok) throw new Error(`submit_guard_failed: ${guard.failures.join("; ")}`);
 
   const client = ozonClientForStore(draft.store);
   const response = await client.importProducts(request as never);

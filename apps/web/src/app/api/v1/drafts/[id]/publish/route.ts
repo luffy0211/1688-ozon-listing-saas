@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma, decryptSecret } from "@saas/db";
-import { computeRequestHash, mockImportProducts, OzonClient } from "@saas/ozon";
+import { checkSubmitGuards, computeRequestHash, mockImportProducts, OzonClient } from "@saas/ozon";
 import { ok, fail, unauthorized, forbidden, notFound } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 
@@ -21,7 +21,7 @@ export async function POST(
 
   const draft = await prisma.ozonDraft.findFirst({
     where: { tenantId, id: params.id },
-    include: { store: true },
+    include: { product: { include: { productAssets: true } }, store: true },
   });
   if (!draft) return notFound("草稿不存在");
   if (draft.status !== "COMPILED") {
@@ -44,6 +44,24 @@ export async function POST(
   });
   if (duplicate) {
     return fail("duplicate_submission", "同一店铺同一草稿已提交过，禁止重复上架", [], 409);
+  }
+
+  const xiangjiCredentialCount = await prisma.xiangjiCredential.count({ where: { tenantId } });
+  const hasPrice = request.items.every((item) => {
+    const price = asRecord(item).price;
+    return Number(price) > 0;
+  });
+  const guard = checkSubmitGuards({
+    hasOzonCredentials: Boolean(draft.store.ozonClientId && draft.store.ozonApiKey),
+    hasXiangjiKey: xiangjiCredentialCount > 0,
+    hasMainImage: draft.product.productAssets.some((asset) => asset.kind === "main_image" || asset.kind === "sku_image"),
+    hasDetailImage: draft.product.productAssets.some((asset) => asset.kind === "detail_image"),
+    hasPrice,
+    payload: request,
+    duplicateSubmission: false,
+  });
+  if (!guard.ok) {
+    return fail("submit_guard_failed", guard.failures.join("; "), guard.failures, 422);
   }
 
   try {
