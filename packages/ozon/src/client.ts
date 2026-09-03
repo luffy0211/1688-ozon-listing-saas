@@ -279,7 +279,8 @@ export class OzonClient {
     to: Date;
     limit?: number;
   }): Promise<OzonPostingItem[]> {
-    const res = await this.request<{ result?: { postings?: OzonPostingItem[] } }>(
+    const limit = Math.min(Math.max(params.limit ?? 100, 1), 100);
+    const res = await this.request<{ postings?: OzonPostingItem[]; result?: { postings?: OzonPostingItem[] } }>(
       "/v4/posting/fbs/list",
       {
         dir: "ASC",
@@ -287,7 +288,7 @@ export class OzonClient {
           since: params.since.toISOString(),
           to: params.to.toISOString(),
         },
-        limit: params.limit ?? 1000,
+        limit,
         offset: 0,
         with: {
           analytics_data: false,
@@ -296,7 +297,7 @@ export class OzonClient {
         },
       },
     );
-    return res.result?.postings ?? [];
+    return res.postings ?? res.result?.postings ?? [];
   }
 
   async listFboPostings(params: {

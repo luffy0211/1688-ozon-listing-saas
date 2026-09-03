@@ -31,6 +31,56 @@ describe("OzonClient", () => {
     );
   });
 
+  it("reads FBS postings from the v4 response shape", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ postings: [{ posting_number: "fbs-1" }], has_next: false }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await expect(
+      client.listFbsPostings({
+        since: new Date("2026-09-01T00:00:00.000Z"),
+        to: new Date("2026-09-03T00:00:00.000Z"),
+      }),
+    ).resolves.toEqual([{ posting_number: "fbs-1" }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/v4/posting/fbs/list",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("clamps FBS posting limit to the Ozon v4 maximum", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ postings: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await client.listFbsPostings({
+      since: new Date("2026-09-01T00:00:00.000Z"),
+      to: new Date("2026-09-03T00:00:00.000Z"),
+      limit: 1000,
+    });
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]![1].body));
+    expect(body.limit).toBe(100);
+  });
+
   it("rejects submit requests when real submit is disabled", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

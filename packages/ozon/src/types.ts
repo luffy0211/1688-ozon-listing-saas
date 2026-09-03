@@ -203,6 +203,9 @@ export type OzonPostingItem = {
   }>;
   financial_data?: {
     products?: Array<{
+      offer_id?: string;
+      product_id?: number;
+      name?: string;
       price?: string;
       quantity?: number;
       payout?: string;
@@ -234,6 +237,12 @@ export type OzonOrderSummary = {
     fbs: number;
     fbo: number;
   }>;
+  topProducts: Array<{
+    offerId: string;
+    name: string | null;
+    quantity: number;
+    revenueRub: number;
+  }>;
 };
 
 export type OzonAnalyticsSummary = {
@@ -248,6 +257,7 @@ export type OzonAnalyticsSummary = {
   cancelledOrderCount: number;
   grossRevenueRub: number;
   dailyOrders: OzonOrderSummary["dailyOrders"];
+  topProducts: OzonOrderSummary["topProducts"];
   products: OzonAnalyticsProduct[];
   warnings?: string[];
 };

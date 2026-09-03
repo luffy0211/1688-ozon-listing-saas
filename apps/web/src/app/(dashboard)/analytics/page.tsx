@@ -165,6 +165,28 @@ export default async function AnalyticsPage({
       </div>
 
       <Card>
+        <SectionHeader title="近 7 天热销商品" description="按 Ozon 订单商品数量排序，优先看能补货和能复投的款。" />
+        {snapshot?.topProducts.length ? (
+          <Table head={["商品", "销量", "销售额"]}>
+            {snapshot.topProducts.map((product) => (
+              <tr key={product.offerId} className="hover:bg-gray-50">
+                <td className="px-4 py-3">
+                  <div className="min-w-[280px]">
+                    <div className="line-clamp-2 font-medium text-gray-950">{product.name ?? product.offerId}</div>
+                    <div className="text-xs text-gray-500">{product.offerId}</div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-semibold text-gray-950">{formatNumber(product.quantity)}</td>
+                <td className="px-4 py-3">{formatRub(product.revenueRub)}</td>
+              </tr>
+            ))}
+          </Table>
+        ) : (
+          <EmptyState title="暂无热销商品" description="同步到近 7 天订单后会显示商品销量排行。" />
+        )}
+      </Card>
+
+      <Card>
         <SectionHeader title="库存风险商品" description="库存小于等于 5 的 Ozon 商品，优先补货或下架处理。" />
         {riskyProducts.length === 0 ? (
           <EmptyState title="暂无库存风险" description="没有低库存商品，或还没有同步商品库存。" />

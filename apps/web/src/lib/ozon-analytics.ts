@@ -35,6 +35,12 @@ export type OzonAnalyticsView = {
     cancelledOrderCount: number;
     grossRevenueRub: string;
     dailyOrders: Array<{ date: string; fbs: number; fbo: number }>;
+    topProducts: Array<{
+      offerId: string;
+      name: string | null;
+      quantity: number;
+      revenueRub: number;
+    }>;
     error: string | null;
   } | null;
   products: Array<{
@@ -153,6 +159,26 @@ function serializeDailyOrders(value: Prisma.JsonValue | null | undefined) {
     .filter((item): item is { date: string; fbs: number; fbo: number } => Boolean(item?.date));
 }
 
+function serializeTopProducts(value: Prisma.JsonValue | null | undefined) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const topProducts = (value as Record<string, Prisma.JsonValue>).topProducts;
+  if (!Array.isArray(topProducts)) return [];
+  return topProducts
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const data = item as Record<string, Prisma.JsonValue>;
+      return {
+        offerId: typeof data.offerId === "string" ? data.offerId : "",
+        name: typeof data.name === "string" ? data.name : null,
+        quantity: typeof data.quantity === "number" ? data.quantity : 0,
+        revenueRub: typeof data.revenueRub === "number" ? data.revenueRub : 0,
+      };
+    })
+    .filter((item): item is { offerId: string; name: string | null; quantity: number; revenueRub: number } =>
+      Boolean(item?.offerId),
+    );
+}
+
 export async function getOzonAnalyticsView(params: {
   tenantId: string;
   storeId?: string | null;
@@ -207,6 +233,7 @@ export async function getOzonAnalyticsView(params: {
           cancelledOrderCount: snapshot.cancelledOrderCount,
           grossRevenueRub: snapshot.grossRevenueRub.toString(),
           dailyOrders: serializeDailyOrders(snapshot.dailyOrdersJson),
+          topProducts: serializeTopProducts(snapshot.rawJson),
           error: snapshot.error,
         }
       : null,
