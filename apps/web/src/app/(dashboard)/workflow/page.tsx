@@ -1,8 +1,15 @@
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
-import { preferredProductImageUrl } from "@/lib/product-image";
+import { displayProductImageUrl, preferredProductImageUrl } from "@/lib/product-image";
 import { WorkflowWizard } from "@/components/workflow-wizard";
 import { PageHeader } from "@/components/ui";
+
+function productImageUrls(assets: Array<{ publicUrl: string | null; sourceUrl: string | null }>) {
+  return assets
+    .map((asset) => asset.publicUrl ?? asset.sourceUrl)
+    .filter((url): url is string => Boolean(url))
+    .map(displayProductImageUrl);
+}
 
 export default async function WorkflowPage() {
   const user = await requireUser();
@@ -89,12 +96,16 @@ export default async function WorkflowPage() {
             id: product.id,
             title: product.title ?? product.offerId,
             offerId: product.offerId,
+            sourceUrl: product.sourceUrl,
             imageUrl: preferredProductImageUrl(product.productAssets),
+            imageUrls: productImageUrls(product.productAssets),
             shopName: product.shop?.shopName ?? "-",
             assetCount: product._count.productAssets,
             latestJobId: latestJob?.id ?? null,
             latestJobStatus: latestJob?.status ?? null,
+            latestDraftId: latestDraft?.id ?? null,
             latestDraftStatus: latestDraft?.status ?? null,
+            priceRub: latestDraft?.priceRub?.toString() ?? null,
           };
         })}
         drafts={drafts.map((draft) => {
@@ -103,7 +114,9 @@ export default async function WorkflowPage() {
             productId: draft.productId,
             title: draft.titleRu ?? draft.product.title ?? draft.product.offerId,
             offerId: draft.product.offerId,
+            sourceUrl: draft.product.sourceUrl,
             imageUrl: preferredProductImageUrl(draft.product.productAssets),
+            imageUrls: productImageUrls(draft.product.productAssets),
             storeName: draft.store.name,
             priceRub: draft.priceRub?.toString() ?? null,
             status: draft.status,

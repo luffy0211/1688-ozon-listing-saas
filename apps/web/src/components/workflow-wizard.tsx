@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -10,10 +9,12 @@ import {
   ChevronRight,
   ClipboardCheck,
   Eye,
+  ExternalLink,
   PackageCheck,
   PackageSearch,
   RefreshCw,
   Store,
+  X,
 } from "lucide-react";
 import { PublishDraftButton } from "./api-actions";
 import { StatusBadge } from "./status";
@@ -34,12 +35,16 @@ type Product = {
   id: string;
   title: string;
   offerId: string;
+  sourceUrl: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
   shopName: string;
   assetCount: number;
   latestJobId: string | null;
   latestJobStatus: string | null;
+  latestDraftId: string | null;
   latestDraftStatus: string | null;
+  priceRub: string | null;
 };
 
 type Draft = {
@@ -47,7 +52,9 @@ type Draft = {
   productId: string;
   title: string;
   offerId: string;
+  sourceUrl: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
   storeName: string;
   priceRub: string | null;
   status: string;
@@ -67,6 +74,22 @@ type Job = {
 type Credential = {
   id: string;
   name: string;
+};
+
+type DetailItem = {
+  id: string;
+  productId: string;
+  title: string;
+  offerId: string;
+  sourceUrl: string | null;
+  imageUrl: string | null;
+  imageUrls: string[];
+  shopName: string;
+  assetCount: number;
+  jobStatus: string | null;
+  draftId: string | null;
+  draftStatus: string | null;
+  priceRub: string | null;
 };
 
 const steps = [
@@ -218,6 +241,134 @@ function InlineRunButton({
   );
 }
 
+function ProductDetailModal({
+  item,
+  onClose,
+  onRunDone,
+}: {
+  item: DetailItem | null;
+  onClose: () => void;
+  onRunDone: () => void;
+}) {
+  const [activeImage, setActiveImage] = useState<string | null>(null);
+  const images = item?.imageUrls.length ? item.imageUrls : item?.imageUrl ? [item.imageUrl] : [];
+  const currentImage = activeImage && images.includes(activeImage) ? activeImage : images[0] ?? null;
+
+  useEffect(() => {
+    setActiveImage(null);
+  }, [item?.id]);
+
+  useEffect(() => {
+    if (!item) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [item, onClose]);
+
+  if (!item) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 p-4" role="dialog" aria-modal="true">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-semibold text-gray-950">{item.title}</h3>
+            <p className="mt-1 text-xs text-gray-500">Offer ID: {item.offerId}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+            aria-label="关闭详情"
+            title="关闭详情"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="grid max-h-[calc(90vh-73px)] gap-5 overflow-auto p-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-3">
+            <div className="flex aspect-square max-h-[58vh] items-center justify-center rounded-md border border-gray-200 bg-white">
+              {currentImage ? (
+                <img src={currentImage} alt="" className="max-h-full max-w-full object-contain" />
+              ) : (
+                <span className="text-sm text-gray-400">无图片</span>
+              )}
+            </div>
+            {images.length > 1 ? (
+              <div className="grid grid-cols-5 gap-2 sm:grid-cols-8">
+                {images.slice(0, 16).map((src, index) => (
+                  <button
+                    key={`${src}-${index}`}
+                    type="button"
+                    onClick={() => setActiveImage(src)}
+                    className={cn(
+                      "aspect-square rounded-md border bg-white p-1",
+                      src === currentImage ? "border-blue-500 ring-2 ring-blue-100" : "border-gray-200 hover:border-gray-300",
+                    )}
+                    aria-label={`查看第 ${index + 1} 张图片`}
+                  >
+                    <img src={src} alt="" className="h-full w-full object-contain" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <aside className="space-y-4">
+            <div>
+              <div className="text-xs font-medium text-gray-500">商品标题</div>
+              <div className="mt-1 text-sm font-medium leading-6 text-gray-950">{item.title}</div>
+            </div>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-md border border-gray-200 p-3">
+                <dt className="text-xs text-gray-500">店铺</dt>
+                <dd className="mt-1 truncate font-medium text-gray-950">{item.shopName}</dd>
+              </div>
+              <div className="rounded-md border border-gray-200 p-3">
+                <dt className="text-xs text-gray-500">图片</dt>
+                <dd className="mt-1 font-medium text-gray-950">{item.assetCount} 张</dd>
+              </div>
+              <div className="rounded-md border border-gray-200 p-3">
+                <dt className="text-xs text-gray-500">任务</dt>
+                <dd className="mt-1"><StatusBadge status={item.jobStatus ?? "PENDING"} /></dd>
+              </div>
+              <div className="rounded-md border border-gray-200 p-3">
+                <dt className="text-xs text-gray-500">草稿</dt>
+                <dd className="mt-1"><StatusBadge status={item.draftStatus ?? "PENDING"} /></dd>
+              </div>
+            </dl>
+            <div className="rounded-md border border-gray-200 p-3">
+              <div className="text-xs text-gray-500">售价</div>
+              <div className="mt-1 text-lg font-semibold text-gray-950">{item.priceRub ? `${item.priceRub} RUB` : "-"}</div>
+            </div>
+            <div className="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
+              {item.sourceUrl ? (
+                <a
+                  href={item.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  打开 1688
+                </a>
+              ) : null}
+              {item.draftId && item.draftStatus === "COMPILED" ? (
+                <PublishDraftButton draftId={item.draftId} />
+              ) : (
+                <InlineRunButton productId={item.productId} onDone={onRunDone} />
+              )}
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WorkflowWizard({
   credentials,
   snapshots,
@@ -234,6 +385,7 @@ export function WorkflowWizard({
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [monitorTab, setMonitorTab] = useState<"listed" | "pending" | "failed">("listed");
+  const [detailItem, setDetailItem] = useState<DetailItem | null>(null);
 
   function refreshOnStep(step: number) {
     setCurrentStep(step);
@@ -260,6 +412,30 @@ export function WorkflowWizard({
   const submittedDrafts = drafts.filter((draft) => draft.status === "SUBMITTED");
   const compiledDrafts = drafts.filter((draft) => draft.status === "COMPILED");
   const failedJobs = jobs.filter((job) => job.status === "FAILED");
+  const productDetails = useMemo(
+    () =>
+      new Map(
+        products.map((product) => [
+          product.id,
+          {
+            id: product.id,
+            productId: product.id,
+            title: product.title,
+            offerId: product.offerId,
+            sourceUrl: product.sourceUrl,
+            imageUrl: product.imageUrl,
+            imageUrls: product.imageUrls,
+            shopName: product.shopName,
+            assetCount: product.assetCount,
+            jobStatus: product.latestJobStatus,
+            draftId: product.latestDraftId,
+            draftStatus: product.latestDraftStatus,
+            priceRub: product.priceRub,
+          },
+        ]),
+      ),
+    [products],
+  );
 
   return (
     <div className="space-y-5">
@@ -345,13 +521,13 @@ export function WorkflowWizard({
                     <StatusBadge status={product.latestDraftStatus ?? product.latestJobStatus ?? "PENDING"} />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Link
-                      href={`/products/${product.id}`}
-                      className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    <Button
+                      variant="outline"
+                      onClick={() => setDetailItem(productDetails.get(product.id) ?? null)}
                     >
                       <Eye className="h-4 w-4" aria-hidden="true" />
                       详情
-                    </Link>
+                    </Button>
                     <InlineRunButton productId={product.id} onDone={() => refreshOnStep(4)} />
                   </div>
                 </div>
@@ -389,13 +565,29 @@ export function WorkflowWizard({
                   <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub} RUB` : "-"}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
-                      <Link
-                        href={`/products/${draft.productId}`}
-                        className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          setDetailItem({
+                            id: draft.id,
+                            productId: draft.productId,
+                            title: draft.title,
+                            offerId: draft.offerId,
+                            sourceUrl: draft.sourceUrl,
+                            imageUrl: draft.imageUrl,
+                            imageUrls: draft.imageUrls,
+                            shopName: draft.storeName,
+                            assetCount: draft.imageUrls.length,
+                            jobStatus: null,
+                            draftId: draft.id,
+                            draftStatus: draft.status,
+                            priceRub: draft.priceRub,
+                          })
+                        }
                       >
                         <Eye className="h-4 w-4" aria-hidden="true" />
                         详情
-                      </Link>
+                      </Button>
                       {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : <span className="text-sm text-gray-500">已处理</span>}
                     </div>
                   </td>
@@ -468,6 +660,7 @@ export function WorkflowWizard({
           )}
         </Card>
       ) : null}
+      <ProductDetailModal item={detailItem} onClose={() => setDetailItem(null)} onRunDone={() => refreshOnStep(4)} />
     </div>
   );
 }
