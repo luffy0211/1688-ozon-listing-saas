@@ -24,4 +24,12 @@ describe("preferredProductImageUrl", () => {
       "https://img.test/any.jpg",
     );
   });
+
+  it("proxies alicdn images for browser display", () => {
+    expect(
+      preferredProductImageUrl([
+        { kind: "main_image", sourceUrl: "https://cbu01.alicdn.com/img/ibank/main.jpg" },
+      ]),
+    ).toBe("/api/v1/image-proxy?url=https%3A%2F%2Fcbu01.alicdn.com%2Fimg%2Fibank%2Fmain.jpg");
+  });
 });
