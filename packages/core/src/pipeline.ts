@@ -12,6 +12,7 @@ export const PIPELINE_STEPS = [
   "generate_pricing",
   "qc_check",
   "compile_ozon_payload",
+  "submit_ozon",
 ] as const;
 
 export type PipelineStep = (typeof PIPELINE_STEPS)[number];

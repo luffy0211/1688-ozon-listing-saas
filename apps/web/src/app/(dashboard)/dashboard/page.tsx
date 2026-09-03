@@ -4,7 +4,6 @@ import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
 import { preferredProductImageUrl } from "@/lib/product-image";
 import { Badge, Card, EmptyState, MetricCard, PageHeader, SectionHeader, Table } from "@/components/ui";
-import { PublishDraftButton } from "@/components/api-actions";
 import { RunButton } from "@/components/run-button";
 import { StatusBadge } from "@/components/status";
 
@@ -101,16 +100,16 @@ export default async function DashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="待选新品" value={newSnapshotCount} description="从 1688 店铺采集后待确认" icon={<Store className="h-4 w-4" />} tone="blue" />
-        <MetricCard title="待生成草稿" value={productsWithoutDraftCount} description="商品池中还未生成草稿" icon={<Boxes className="h-4 w-4" />} tone="violet" />
-        <MetricCard title="待发布草稿" value={compiledDraftCount} description="已生成，等人工确认" icon={<PackageCheck className="h-4 w-4" />} tone="green" />
+        <MetricCard title="待上架商品" value={productsWithoutDraftCount} description="商品池中还未提交 Ozon" icon={<Boxes className="h-4 w-4" />} tone="violet" />
+        <MetricCard title="待提交记录" value={compiledDraftCount} description="后台提交中或历史停留记录" icon={<PackageCheck className="h-4 w-4" />} tone="green" />
         <MetricCard title="失败任务" value={failedJobCount} description="需要处理或重试" icon={<AlertTriangle className="h-4 w-4" />} tone={failedJobCount > 0 ? "red" : "gray"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
-          <SectionHeader title="先处理这些商品" description="商品池中还没有草稿的商品，建议先生成草稿。" />
+          <SectionHeader title="先处理这些商品" description="商品确认后直接转换并提交到 Ozon。" />
           {productsWithoutDraft.length === 0 ? (
-            <EmptyState title="没有待生成草稿的商品" description="去采集选品页导入更多商品，或查看待发布草稿。" />
+            <EmptyState title="没有待上架商品" description="去采集选品页导入更多商品，或查看自动化工作流。" />
           ) : (
             <Table head={["商品", "店铺", "操作"]}>
               {productsWithoutDraft.map((product) => {
@@ -147,14 +146,13 @@ export default async function DashboardPage() {
 
         <Card>
           <SectionHeader
-            title="待确认发布"
-            description="草稿已经生成，确认后才会提交；真实发布仍受安全开关控制。"
-            children={<Link href="/drafts" className="text-sm font-medium text-blue-700 hover:underline">查看全部</Link>}
+            title="待提交记录"
+            description="正常流程会自动提交；这里用于查看历史或异常停留记录。"
           />
           {draftsToPublish.length === 0 ? (
-            <EmptyState title="暂无待发布草稿" description="生成草稿后会出现在这里。" />
+            <EmptyState title="暂无待提交记录" description="选择商品立即上架后，结果会进入监控。" />
           ) : (
-            <Table head={["草稿商品", "店铺", "价格", "操作"]}>
+            <Table head={["商品", "店铺", "价格", "状态"]}>
               {draftsToPublish.map((draft) => {
                 const imageUrl = preferredProductImageUrl(draft.product.productAssets);
                 return (
@@ -172,7 +170,7 @@ export default async function DashboardPage() {
                     </td>
                     <td className="px-4 py-3">{draft.store.name}</td>
                     <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub.toString()} RUB` : "-"}</td>
-                    <td className="px-4 py-3"><PublishDraftButton draftId={draft.id} /></td>
+                    <td className="px-4 py-3"><StatusBadge status={draft.status} /></td>
                   </tr>
                 );
               })}

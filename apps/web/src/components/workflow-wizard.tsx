@@ -16,7 +16,6 @@ import {
   Store,
   X,
 } from "lucide-react";
-import { PublishDraftButton } from "./api-actions";
 import { StatusBadge } from "./status";
 import { Badge, Button, Card, EmptyState, Input, Select, Table, cn } from "./ui";
 
@@ -210,7 +209,7 @@ function CollectPanel({
   );
 }
 
-function InlineRunButton({
+function InlinePublishButton({
   productId,
   onDone,
 }: {
@@ -225,7 +224,7 @@ function InlineRunButton({
     setLoading(true);
     setError("");
     try {
-      const data = await postJson(`/api/v1/products/${productId}/run`);
+      const data = await postJson(`/api/v1/products/${productId}/run`, { autoPublish: true });
       setJobId(data?.jobId ?? "");
       onDone();
     } catch (err) {
@@ -239,9 +238,9 @@ function InlineRunButton({
     <div className="space-y-2">
       <Button onClick={run} disabled={loading}>
         <PackageCheck className="h-4 w-4" />
-        {loading ? "生成中..." : "生成草稿"}
+        {loading ? "上架中..." : "立即上架"}
       </Button>
-      {jobId ? <div className="text-xs text-emerald-700">任务已创建：{jobId}</div> : null}
+      {jobId ? <div className="text-xs text-emerald-700">已开始上架：{jobId}</div> : null}
       {error ? <div className="text-xs text-red-600">{error}</div> : null}
     </div>
   );
@@ -342,7 +341,7 @@ function ProductDetailModal({
                 <dd className="mt-1"><StatusBadge status={item.jobStatus ?? "PENDING"} /></dd>
               </div>
               <div className="rounded-md border border-gray-200 p-3">
-                <dt className="text-xs text-gray-500">草稿</dt>
+                <dt className="text-xs text-gray-500">发布</dt>
                 <dd className="mt-1"><StatusBadge status={item.draftStatus ?? "PENDING"} /></dd>
               </div>
             </dl>
@@ -395,10 +394,10 @@ function ProductDetailModal({
                   打开 1688
                 </a>
               ) : null}
-              {item.draftId && item.draftStatus === "COMPILED" ? (
-                <PublishDraftButton draftId={item.draftId} />
+              {item.draftStatus === "SUBMITTED" ? (
+                <span className="inline-flex h-9 items-center rounded-md bg-emerald-50 px-3 text-sm font-medium text-emerald-700">已提交</span>
               ) : (
-                <InlineRunButton productId={item.productId} onDone={onRunDone} />
+                <InlinePublishButton productId={item.productId} onDone={onRunDone} />
               )}
             </div>
           </aside>
@@ -546,8 +545,8 @@ export function WorkflowWizard({
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-gray-950">审核商品并生成草稿</h2>
-              <p className="mt-1 text-sm text-gray-500">商品确认后，点击生成草稿进入翻译、定价、详情图和 Ozon payload 编译。</p>
+              <h2 className="text-base font-semibold text-gray-950">审核商品并立即上架</h2>
+              <p className="mt-1 text-sm text-gray-500">选择商品后，系统自动翻译、定价、生成 Ozon 数据并提交。</p>
             </div>
           </div>
           {products.length ? (
@@ -569,7 +568,7 @@ export function WorkflowWizard({
                       <Eye className="h-4 w-4" aria-hidden="true" />
                       详情
                     </Button>
-                    <InlineRunButton productId={product.id} onDone={() => refreshOnStep(4)} />
+                    <InlinePublishButton productId={product.id} onDone={() => refreshOnStep(4)} />
                   </div>
                 </div>
               ))}
@@ -584,8 +583,8 @@ export function WorkflowWizard({
         <Card>
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-base font-semibold text-gray-950">确认发布到 Ozon</h2>
-              <p className="mt-1 text-sm text-gray-500">只有待发布草稿会显示确认上架按钮。</p>
+              <h2 className="text-base font-semibold text-gray-950">发布结果</h2>
+              <p className="mt-1 text-sm text-gray-500">查看系统自动提交后的 Ozon 状态。</p>
             </div>
           </div>
           {drafts.length ? (
@@ -631,14 +630,14 @@ export function WorkflowWizard({
                         <Eye className="h-4 w-4" aria-hidden="true" />
                         详情
                       </Button>
-                      {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : <span className="text-sm text-gray-500">已处理</span>}
+                      <span className="text-sm text-gray-500">{draft.status === "COMPILED" ? "待后台提交" : "已处理"}</span>
                     </div>
                   </td>
                 </tr>
               ))}
             </Table>
           ) : (
-            <EmptyState title="暂无 Ozon 草稿" description="先在审核步骤生成草稿。" />
+            <EmptyState title="暂无发布结果" description="先在审核步骤选择商品立即上架。" />
           )}
         </Card>
       ) : null}
@@ -648,7 +647,7 @@ export function WorkflowWizard({
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-base font-semibold text-gray-950">上架监控</h2>
-              <p className="mt-1 text-sm text-gray-500">看已提交商品、待发布草稿和失败任务。</p>
+              <p className="mt-1 text-sm text-gray-500">看已提交商品、处理中记录和失败任务。</p>
             </div>
             <Button variant="outline" onClick={() => router.refresh()}>
               <RefreshCw className="h-4 w-4" />
@@ -658,7 +657,7 @@ export function WorkflowWizard({
           <div className="mb-4 flex flex-wrap gap-2">
             {([
               ["listed", `已提交 ${submittedDrafts.length}`],
-              ["pending", `待发布 ${compiledDrafts.length}`],
+              ["pending", `处理中 ${compiledDrafts.length}`],
               ["failed", `失败 ${failedJobs.length}`],
             ] as const).map(([id, label]) => (
               <button

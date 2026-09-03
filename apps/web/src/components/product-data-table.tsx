@@ -12,7 +12,6 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowUpDown, Eye, Play, Search } from "lucide-react";
-import { PublishDraftButton } from "./api-actions";
 import { RunButton } from "./run-button";
 import { StatusBadge } from "./status";
 import { Button, EmptyState, Select, cn } from "./ui";
@@ -35,7 +34,11 @@ export type ProductTableRow = {
 };
 
 async function postRun(productId: string) {
-  const res = await fetch(`/api/v1/products/${productId}/run`, { method: "POST" });
+  const res = await fetch(`/api/v1/products/${productId}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ autoPublish: true }),
+  });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error?.message ?? "启动失败");
   return json.data?.jobId as string | undefined;
@@ -146,7 +149,7 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
       },
       {
         id: "draft",
-        header: "草稿",
+        header: "发布",
         cell: ({ row }) => <StatusBadge status={row.original.latestDraftStatus} />,
       },
       {
@@ -179,9 +182,6 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
                 详情
               </Link>
               <RunButton productId={item.id} />
-              {item.latestDraftId && item.latestDraftStatus === "COMPILED" ? (
-                <PublishDraftButton draftId={item.latestDraftId} />
-              ) : null}
             </div>
           );
         },
@@ -242,12 +242,12 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           <option value="RUNNING">处理中</option>
           <option value="FAILED">失败</option>
           <option value="SUCCEEDED">已完成</option>
-          <option value="COMPILED">待发布</option>
+          <option value="COMPILED">待提交</option>
           <option value="SUBMITTED">已提交</option>
         </Select>
         <Button onClick={runSelected} disabled={selectedIds.length === 0 || bulkLoading} className="w-full md:w-auto">
           <Play className="h-4 w-4" aria-hidden="true" />
-          {bulkLoading ? "批量生成中..." : `批量生成${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
+          {bulkLoading ? "批量上架中..." : `批量上架${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
         </Button>
       </div>
 

@@ -11,6 +11,7 @@ import {
   checkSubmitGuards,
   compileOzonPayload,
   computeRequestHash,
+  mockImportProducts,
   OzonClient,
   type OzonDraftInput,
 } from "@saas/ozon";
@@ -197,7 +198,80 @@ async function runStep<T>(
   }
 }
 
-async function processListing(jobId: string) {
+async function submitDraft(params: {
+  tenantId: string;
+  productId: string;
+  draftId: string;
+  storeId: string;
+  store: { ozonClientId: string | null; ozonApiKey: string | null };
+  request: JsonRecord;
+}) {
+  if (!Array.isArray(params.request.items) || params.request.items.length === 0) {
+    throw new Error("草稿 payload 为空，无法提交");
+  }
+  if (!params.store.ozonClientId || !params.store.ozonApiKey) {
+    throw new Error("请先配置 Ozon 店铺密钥");
+  }
+
+  const requestHash = computeRequestHash(params.storeId, params.request);
+  const duplicate = await prisma.publishRun.findUnique({
+    where: { storeId_requestHash: { storeId: params.storeId, requestHash } },
+  });
+  if (duplicate) {
+    throw new Error("同一店铺同一草稿已提交过，禁止重复上架");
+  }
+
+  try {
+    const response =
+      process.env.ENABLE_REAL_OZON_SUBMIT === "true"
+        ? await new OzonClient({
+            clientId: params.store.ozonClientId,
+            apiKey: decryptSecret(params.store.ozonApiKey),
+          }).importProducts(params.request as never)
+        : mockImportProducts(params.request as never);
+    const run = await prisma.publishRun.create({
+      data: {
+        tenantId: params.tenantId,
+        draftId: params.draftId,
+        storeId: params.storeId,
+        requestHash,
+        ozonTaskId: String(response.task_id),
+        status: "submitted",
+        requestJson: params.request as never,
+        responseJson: response as never,
+      },
+    });
+    await prisma.ozonDraft.update({
+      where: { id: params.draftId },
+      data: { status: "SUBMITTED" },
+    });
+    await prisma.sourceProduct.update({
+      where: { id: params.productId },
+      data: { status: "submitted" },
+    });
+    return { publishRunId: run.id, ozonTaskId: run.ozonTaskId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await prisma.publishRun.create({
+      data: {
+        tenantId: params.tenantId,
+        draftId: params.draftId,
+        storeId: params.storeId,
+        requestHash,
+        status: "failed",
+        requestJson: params.request as never,
+        error: message,
+      },
+    });
+    await prisma.ozonDraft.update({
+      where: { id: params.draftId },
+      data: { status: "FAILED", error: message },
+    });
+    throw error;
+  }
+}
+
+async function processListing(jobId: string, options: { autoPublish?: boolean } = {}) {
   await prisma.listingJob.update({
     where: { id: jobId },
     data: { status: "RUNNING", startedAt: new Date(), error: null },
@@ -389,7 +463,7 @@ async function processListing(jobId: string) {
       return guard;
     });
 
-    await runStep(jobId, "compile_ozon_payload", async () => {
+    const draft = await runStep(jobId, "compile_ozon_payload", async () => {
       const draft = await prisma.ozonDraft.create({
         data: {
           tenantId: job.tenantId,
@@ -410,6 +484,23 @@ async function processListing(jobId: string) {
       return draft;
     });
 
+    if (options.autoPublish) {
+      await runStep(jobId, "submit_ozon", async () =>
+        submitDraft({
+          tenantId: job.tenantId,
+          productId: job.productId,
+          draftId: draft.id,
+          storeId: job.storeId,
+          store: job.store,
+          request: { items: [payload] },
+        }),
+      );
+    } else {
+      await markStep(jobId, "submit_ozon", "SKIPPED", {
+        outputJson: { reason: "autoPublish disabled" },
+      });
+    }
+
     await prisma.listingJob.update({
       where: { id: jobId },
       data: { status: "SUCCEEDED", finishedAt: new Date(), currentStep: PIPELINE_STEPS.length },
@@ -429,7 +520,7 @@ const worker = new Worker(
   async (job) => {
     const jobId = job.data?.jobId;
     if (typeof jobId !== "string") throw new Error("BullMQ job missing jobId");
-    await processListing(jobId);
+    await processListing(jobId, { autoPublish: job.data?.autoPublish === true });
   },
   {
     connection: { url: process.env.REDIS_URL ?? "redis://localhost:6379" },

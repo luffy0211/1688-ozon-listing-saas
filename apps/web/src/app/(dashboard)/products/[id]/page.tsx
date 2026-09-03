@@ -4,7 +4,6 @@ import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
 import { displayProductImageUrl } from "@/lib/product-image";
 import { Badge, Card, EmptyState, MetricCard, PageHeader, ProgressBar, SectionHeader, Table } from "@/components/ui";
-import { PublishDraftButton } from "@/components/api-actions";
 import { RunButton } from "@/components/run-button";
 import { StatusBadge, stepLabel } from "@/components/status";
 
@@ -52,14 +51,14 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
             打开 1688
           </a>
         ) : null}
-        {latestDraft?.status === "COMPILED" ? <PublishDraftButton draftId={latestDraft.id} /> : <RunButton productId={product.id} />}
+        {latestDraft?.status === "SUBMITTED" ? null : <RunButton productId={product.id} />}
       </PageHeader>
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard title="来源店铺" value={product.shop?.shopName ?? "-"} description={product.capturedAt?.toLocaleString("zh-CN") ?? "未记录采集时间"} />
-        <MetricCard title="图片" value={product.productAssets.length} description="可用于草稿的图片资产" icon={<Images className="h-4 w-4" />} tone="violet" />
-        <MetricCard title="任务状态" value={latestJob ? latestJob.status : "-"} description={latestJob ? `${progress}% 完成` : "尚未生成草稿"} tone={latestJob?.status === "FAILED" ? "red" : "blue"} />
-        <MetricCard title="草稿状态" value={latestDraft ? latestDraft.status : "-"} description={latestDraft?.priceRub ? `${latestDraft.priceRub.toString()} RUB` : "暂无售价"} icon={<PackageCheck className="h-4 w-4" />} tone={latestDraft?.status === "COMPILED" ? "green" : "gray"} />
+        <MetricCard title="图片" value={product.productAssets.length} description="可用于上架的图片资产" icon={<Images className="h-4 w-4" />} tone="violet" />
+        <MetricCard title="任务状态" value={latestJob ? latestJob.status : "-"} description={latestJob ? `${progress}% 完成` : "尚未上架"} tone={latestJob?.status === "FAILED" ? "red" : "blue"} />
+        <MetricCard title="发布状态" value={latestDraft ? latestDraft.status : "-"} description={latestDraft?.priceRub ? `${latestDraft.priceRub.toString()} RUB` : "暂无售价"} icon={<PackageCheck className="h-4 w-4" />} tone={latestDraft?.status === "COMPILED" ? "green" : "gray"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -84,11 +83,11 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
           </Card>
 
           <Card>
-            <SectionHeader title="Ozon 草稿" description="待发布草稿可以直接确认上架；其他状态先查看任务记录。" />
+            <SectionHeader title="Ozon 提交记录" description="系统生成 Ozon 数据后会自动提交；异常时先查看任务记录。" />
             {product.ozonDrafts.length === 0 ? (
-              <EmptyState title="还没有草稿" description="点击生成草稿后，系统会翻译、定价并生成 Ozon 提交数据。" />
+              <EmptyState title="还没有提交记录" description="点击立即上架后，系统会翻译、定价、生成 Ozon 数据并提交。" />
             ) : (
-              <Table head={["店铺", "状态", "俄文标题", "价格", "发布记录", "操作"]}>
+              <Table head={["店铺", "状态", "俄文标题", "价格", "发布记录"]}>
                 {product.ozonDrafts.map((draft) => (
                   <tr key={draft.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">{draft.store.name}</td>
@@ -96,9 +95,6 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
                     <td className="max-w-md px-4 py-3">{draft.titleRu ?? "-"}</td>
                     <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub.toString()} RUB` : "-"}</td>
                     <td className="px-4 py-3">{draft.publishRuns.length}</td>
-                    <td className="px-4 py-3">
-                      {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : "-"}
-                    </td>
                   </tr>
                 ))}
               </Table>
@@ -106,7 +102,7 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
           </Card>
 
           <Card>
-            <SectionHeader title="历史任务" description="查看这个商品生成草稿的历史记录。" />
+            <SectionHeader title="历史任务" description="查看这个商品自动上架的历史记录。" />
             {product.listingJobs.length === 0 ? (
               <EmptyState title="暂无任务记录" />
             ) : (

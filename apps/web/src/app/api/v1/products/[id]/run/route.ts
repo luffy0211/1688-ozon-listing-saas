@@ -21,6 +21,7 @@ export async function POST(
 
   const body = await req.json().catch(() => null);
   const storeId: string | undefined = body?.storeId;
+  const autoPublish = body?.autoPublish === true;
 
   const store = storeId
     ? await prisma.store.findFirst({ where: { tenantId, id: storeId } })
@@ -51,7 +52,7 @@ export async function POST(
 
     await tx.sourceProduct.update({
       where: { id: product.id },
-      data: { status: "draft_generating" },
+      data: { status: autoPublish ? "publishing" : "draft_generating" },
     });
 
     return created;
@@ -59,7 +60,7 @@ export async function POST(
 
   await getListingQueue().add(
     "process-listing",
-    { jobId: job.id },
+    { jobId: job.id, autoPublish },
     { jobId: job.id },
   );
 

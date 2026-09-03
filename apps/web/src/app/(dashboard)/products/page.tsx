@@ -54,7 +54,7 @@ export default async function ProductsPage() {
     <div className="space-y-6">
       <PageHeader
         title="商品池"
-        description="管理已经选入池的商品，批量生成 Ozon 草稿，并处理待发布和失败任务。"
+        description="管理已经选入池的商品，批量转换并提交到 Ozon。"
       >
         <Link className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700" href="/shops">
           <Plus className="h-4 w-4" aria-hidden="true" />
@@ -64,7 +64,7 @@ export default async function ProductsPage() {
 
       <div className="grid gap-4 md:grid-cols-3">
         <MetricCard title="全部商品" value={total} description="当前商品池总数" />
-        <MetricCard title="待发布草稿" value={pendingDrafts} description="已生成，等待确认上架" tone="green" />
+        <MetricCard title="待提交记录" value={pendingDrafts} description="后台提交中或历史停留记录" tone="green" />
         <MetricCard title="失败任务" value={failedJobs} description="需要查看任务记录" tone={failedJobs > 0 ? "red" : "gray"} />
       </div>
 
