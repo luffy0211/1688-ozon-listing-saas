@@ -511,6 +511,10 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
       where: { id: jobId },
       data: { status: "FAILED", error: message, finishedAt: new Date() },
     });
+    await prisma.sourceProduct.update({
+      where: { id: job.productId },
+      data: { status: "failed" },
+    });
     throw error;
   }
 }

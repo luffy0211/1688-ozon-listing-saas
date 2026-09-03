@@ -5,6 +5,15 @@ import { ok, fail, unauthorized, forbidden, notFound } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 import { getListingQueue } from "@/lib/queue";
 
+class ProductRunBlocked extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -30,39 +39,80 @@ export async function POST(
     return fail("missing_store", "请先配置 Ozon 店铺");
   }
 
-  const job = await prisma.$transaction(async (tx) => {
-    const created = await tx.listingJob.create({
-      data: {
-        tenantId,
-        productId: product.id,
-        storeId: store.id,
-        status: "PENDING",
-      },
-    });
+  let jobId: string;
+  try {
+    const job = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.sourceProduct.updateMany({
+        where: {
+          tenantId,
+          id: product.id,
+          status: { notIn: ["draft_generating", "publishing"] },
+        },
+        data: { status: autoPublish ? "publishing" : "draft_generating" },
+      });
+      if (claimed.count === 0) {
+        throw new ProductRunBlocked("listing_job_active", "该商品已有上架任务正在处理");
+      }
 
-    await tx.jobStep.createMany({
-      data: PIPELINE_STEPS.map((name, i) => ({
-        tenantId,
-        jobId: created.id,
-        stepName: name,
-        stepIndex: i,
-        status: "PENDING",
-      })),
-    });
+      const activeJob = await tx.listingJob.findFirst({
+        where: {
+          tenantId,
+          productId: product.id,
+          status: { in: ["PENDING", "RUNNING"] },
+        },
+        select: { id: true },
+      });
+      if (activeJob) {
+        throw new ProductRunBlocked("listing_job_active", "该商品已有上架任务正在处理");
+      }
 
-    await tx.sourceProduct.update({
-      where: { id: product.id },
-      data: { status: autoPublish ? "publishing" : "draft_generating" },
-    });
+      const submittedDraft = await tx.ozonDraft.findFirst({
+        where: {
+          tenantId,
+          productId: product.id,
+          storeId: store.id,
+          status: "SUBMITTED",
+        },
+        select: { id: true },
+      });
+      if (submittedDraft) {
+        throw new ProductRunBlocked("already_submitted", "该商品已提交到 Ozon，禁止重复上架");
+      }
 
-    return created;
-  });
+      const created = await tx.listingJob.create({
+        data: {
+          tenantId,
+          productId: product.id,
+          storeId: store.id,
+          status: "PENDING",
+        },
+      });
+
+      await tx.jobStep.createMany({
+        data: PIPELINE_STEPS.map((name, i) => ({
+          tenantId,
+          jobId: created.id,
+          stepName: name,
+          stepIndex: i,
+          status: "PENDING",
+        })),
+      });
+
+      return created;
+    });
+    jobId = job.id;
+  } catch (error) {
+    if (error instanceof ProductRunBlocked) {
+      return fail(error.code, error.message, [], 409);
+    }
+    throw error;
+  }
 
   await getListingQueue().add(
     "process-listing",
-    { jobId: job.id, autoPublish },
-    { jobId: job.id },
+    { jobId, autoPublish },
+    { jobId },
   );
 
-  return ok({ jobId: job.id });
+  return ok({ jobId });
 }

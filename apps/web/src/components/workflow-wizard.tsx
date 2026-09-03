@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "./status";
 import { Badge, Button, Card, EmptyState, Input, Select, Table, cn } from "./ui";
+import { getWorkflowSelectedProducts, isWorkflowProductSelectable } from "./workflow-selection";
 
 type Snapshot = {
   id: string;
@@ -209,51 +210,12 @@ function CollectPanel({
   );
 }
 
-function InlinePublishButton({
-  productId,
-  onDone,
-}: {
-  productId: string;
-  onDone: () => void;
-}) {
-  const [loading, setLoading] = useState(false);
-  const [jobId, setJobId] = useState("");
-  const [error, setError] = useState("");
-
-  async function run() {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await postJson(`/api/v1/products/${productId}/run`, { autoPublish: true });
-      setJobId(data?.jobId ?? "");
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="space-y-2">
-      <Button onClick={run} disabled={loading}>
-        <PackageCheck className="h-4 w-4" />
-        {loading ? "上架中..." : "立即上架"}
-      </Button>
-      {jobId ? <div className="text-xs text-emerald-700">已开始上架：{jobId}</div> : null}
-      {error ? <div className="text-xs text-red-600">{error}</div> : null}
-    </div>
-  );
-}
-
 function ProductDetailModal({
   item,
   onClose,
-  onRunDone,
 }: {
   item: DetailItem | null;
   onClose: () => void;
-  onRunDone: () => void;
 }) {
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const images = item?.imageUrls.length ? item.imageUrls : item?.imageUrl ? [item.imageUrl] : [];
@@ -397,7 +359,7 @@ function ProductDetailModal({
               {item.draftStatus === "SUBMITTED" ? (
                 <span className="inline-flex h-9 items-center rounded-md bg-emerald-50 px-3 text-sm font-medium text-emerald-700">已提交</span>
               ) : (
-                <InlinePublishButton productId={item.productId} onDone={onRunDone} />
+                <span className="inline-flex h-9 items-center rounded-md bg-gray-100 px-3 text-sm font-medium text-gray-600">回到列表勾选上架</span>
               )}
             </div>
           </aside>
@@ -424,6 +386,10 @@ export function WorkflowWizard({
   const [currentStep, setCurrentStep] = useState(1);
   const [monitorTab, setMonitorTab] = useState<"listed" | "pending" | "failed">("listed");
   const [detailItem, setDetailItem] = useState<DetailItem | null>(null);
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState("");
+  const [bulkErrors, setBulkErrors] = useState<Array<{ id: string; title: string; message: string }>>([]);
 
   function refreshOnStep(step: number) {
     setCurrentStep(step);
@@ -433,11 +399,20 @@ export function WorkflowWizard({
   useEffect(() => {
     const saved = Number(window.sessionStorage.getItem("ozon_workflow_step"));
     if (saved >= 1 && saved <= 4) setCurrentStep(saved);
+    try {
+      setSelectedProductIds(new Set(JSON.parse(window.sessionStorage.getItem("ozon_workflow_selected_products") || "[]")));
+    } catch {
+      setSelectedProductIds(new Set());
+    }
   }, []);
 
   useEffect(() => {
     window.sessionStorage.setItem("ozon_workflow_step", String(currentStep));
   }, [currentStep]);
+
+  useEffect(() => {
+    window.sessionStorage.setItem("ozon_workflow_selected_products", JSON.stringify([...selectedProductIds]));
+  }, [selectedProductIds]);
 
   const completed = useMemo(
     () => new Set([
@@ -450,6 +425,9 @@ export function WorkflowWizard({
   const submittedDrafts = drafts.filter((draft) => draft.status === "SUBMITTED");
   const compiledDrafts = drafts.filter((draft) => draft.status === "COMPILED");
   const failedJobs = jobs.filter((job) => job.status === "FAILED");
+  const selectableProducts = products.filter(isWorkflowProductSelectable);
+  const selectedProducts = getWorkflowSelectedProducts(products, selectedProductIds);
+  const allSelected = selectableProducts.length > 0 && selectableProducts.every((product) => selectedProductIds.has(product.id));
   const productDetails = useMemo(
     () =>
       new Map(
@@ -476,6 +454,46 @@ export function WorkflowWizard({
       ),
     [products],
   );
+
+  function toggleProduct(product: Product) {
+    if (!isWorkflowProductSelectable(product)) return;
+    setSelectedProductIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(product.id)) next.delete(product.id);
+      else next.add(product.id);
+      return next;
+    });
+  }
+
+  function toggleAllProducts() {
+    setSelectedProductIds(allSelected ? new Set() : new Set(selectableProducts.map((product) => product.id)));
+  }
+
+  async function publishSelected() {
+    if (selectedProducts.length === 0) return;
+    setBulkLoading(true);
+    setBulkErrors([]);
+    setBulkProgress("");
+    const errors: Array<{ id: string; title: string; message: string }> = [];
+    for (const [index, product] of selectedProducts.entries()) {
+      setBulkProgress(`正在提交 ${index + 1} / ${selectedProducts.length}`);
+      try {
+        await postJson(`/api/v1/products/${product.id}/run`, { autoPublish: true });
+      } catch (error) {
+        errors.push({
+          id: product.id,
+          title: product.title,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    setBulkErrors(errors);
+    setBulkLoading(false);
+    setBulkProgress(errors.length ? `已提交 ${selectedProducts.length - errors.length} / ${selectedProducts.length}` : `已提交 ${selectedProducts.length} / ${selectedProducts.length}`);
+    setSelectedProductIds(new Set(errors.map((error) => error.id)));
+    if (errors.length) router.refresh();
+    else refreshOnStep(4);
+  }
 
   return (
     <div className="space-y-5">
@@ -543,35 +561,88 @@ export function WorkflowWizard({
 
       {currentStep === 2 ? (
         <Card>
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h2 className="text-base font-semibold text-gray-950">审核商品并立即上架</h2>
-              <p className="mt-1 text-sm text-gray-500">选择商品后，系统自动翻译、定价、生成 Ozon 数据并提交。</p>
+              <p className="mt-1 text-sm text-gray-500">勾选要上架的商品，系统自动翻译、定价、生成 Ozon 数据并提交。</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-gray-500">已选 {selectedProducts.length} / {selectableProducts.length}</span>
+              <Button variant="outline" onClick={toggleAllProducts} disabled={bulkLoading || selectableProducts.length === 0}>
+                {allSelected ? "取消全选" : "全选"}
+              </Button>
+              <Button onClick={publishSelected} disabled={bulkLoading || selectedProducts.length === 0}>
+                <PackageCheck className="h-4 w-4" />
+                {bulkLoading ? "上架中..." : `上架选中${selectedProducts.length ? ` (${selectedProducts.length})` : ""}`}
+              </Button>
             </div>
           </div>
+          {bulkProgress ? <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">{bulkProgress}</div> : null}
+          {bulkErrors.length ? (
+            <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <div className="font-medium">有 {bulkErrors.length} 个商品提交失败</div>
+              <div className="mt-1 space-y-1">
+                {bulkErrors.map((error) => (
+                  <div key={`${error.title}-${error.message}`} className="line-clamp-1">{error.title}: {error.message}</div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {products.length ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {products.map((product) => (
-                <div key={product.id} className="rounded-md border border-gray-200 p-3">
-                  <ProductImage src={product.imageUrl} />
-                  <div className="mt-3 line-clamp-2 text-sm font-medium text-gray-950">{product.title}</div>
-                  <div className="mt-1 text-xs text-gray-500">{product.offerId}</div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <Badge tone="gray">{product.assetCount} 张图</Badge>
-                    <StatusBadge status={product.latestDraftStatus ?? product.latestJobStatus ?? "PENDING"} />
+              {products.map((product) => {
+                const selected = selectedProductIds.has(product.id);
+                const disabled = !isWorkflowProductSelectable(product);
+                return (
+                  <div
+                    key={product.id}
+                    role="button"
+                    tabIndex={disabled ? -1 : 0}
+                    onClick={() => toggleProduct(product)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        toggleProduct(product);
+                      }
+                    }}
+                    className={cn(
+                      "relative rounded-md border p-3 transition-all",
+                      disabled ? "border-gray-200 bg-gray-50 opacity-70" : "cursor-pointer hover:shadow-md",
+                      selected ? "border-blue-500 bg-blue-50 ring-2 ring-blue-100" : "border-gray-200 bg-white",
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute right-3 top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2",
+                      selected ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white/90 text-transparent",
+                    )}>
+                      <CheckCircle2 className="h-4 w-4" />
+                    </div>
+                    <ProductImage src={product.imageUrl} />
+                    <div className="mt-3 line-clamp-2 text-sm font-medium text-gray-950">{product.title}</div>
+                    <div className="mt-1 text-xs text-gray-500">{product.offerId}</div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Badge tone="gray">{product.assetCount} 张图</Badge>
+                      <StatusBadge status={product.latestDraftStatus ?? product.latestJobStatus ?? "PENDING"} />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span
+                        onClick={(event) => {
+                          event.stopPropagation();
+                        }}
+                      >
+                        <Button
+                          variant="outline"
+                          onClick={() => setDetailItem(productDetails.get(product.id) ?? null)}
+                        >
+                          <Eye className="h-4 w-4" aria-hidden="true" />
+                          详情
+                        </Button>
+                      </span>
+                      {disabled ? <span className="text-sm text-gray-500">{product.latestDraftStatus === "SUBMITTED" ? "已提交" : "处理中"}</span> : null}
+                    </div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => setDetailItem(productDetails.get(product.id) ?? null)}
-                    >
-                      <Eye className="h-4 w-4" aria-hidden="true" />
-                      详情
-                    </Button>
-                    <InlinePublishButton productId={product.id} onDone={() => refreshOnStep(4)} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <EmptyState title="商品池为空" description="先从 1688 采集页导入商品。" />
@@ -702,7 +773,7 @@ export function WorkflowWizard({
           )}
         </Card>
       ) : null}
-      <ProductDetailModal item={detailItem} onClose={() => setDetailItem(null)} onRunDone={() => refreshOnStep(4)} />
+      <ProductDetailModal item={detailItem} onClose={() => setDetailItem(null)} />
     </div>
   );
 }
