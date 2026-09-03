@@ -1,5 +1,6 @@
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { preferredProductImageUrl } from "@/lib/product-image";
 import { WorkflowWizard } from "@/components/workflow-wizard";
 import { PageHeader } from "@/components/ui";
 
@@ -29,7 +30,7 @@ export default async function WorkflowPage() {
       take: 9,
       include: {
         shop: true,
-        productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 },
+        productAssets: { orderBy: [{ sortOrder: "asc" }] },
         listingJobs: { orderBy: { createdAt: "desc" }, take: 1 },
         ozonDrafts: { orderBy: { createdAt: "desc" }, take: 1 },
         _count: { select: { productAssets: true } },
@@ -42,7 +43,7 @@ export default async function WorkflowPage() {
       include: {
         product: {
           include: {
-            productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 },
+            productAssets: { orderBy: [{ sortOrder: "asc" }] },
           },
         },
         store: true,
@@ -82,14 +83,13 @@ export default async function WorkflowPage() {
           lastSeenAt: item.lastSeenAt.toISOString(),
         }))}
         products={products.map((product) => {
-          const image = product.productAssets[0];
           const latestJob = product.listingJobs[0];
           const latestDraft = product.ozonDrafts[0];
           return {
             id: product.id,
             title: product.title ?? product.offerId,
             offerId: product.offerId,
-            imageUrl: image?.publicUrl ?? image?.sourceUrl ?? null,
+            imageUrl: preferredProductImageUrl(product.productAssets),
             shopName: product.shop?.shopName ?? "-",
             assetCount: product._count.productAssets,
             latestJobId: latestJob?.id ?? null,
@@ -98,13 +98,12 @@ export default async function WorkflowPage() {
           };
         })}
         drafts={drafts.map((draft) => {
-          const image = draft.product.productAssets[0];
           return {
             id: draft.id,
             productId: draft.productId,
             title: draft.titleRu ?? draft.product.title ?? draft.product.offerId,
             offerId: draft.product.offerId,
-            imageUrl: image?.publicUrl ?? image?.sourceUrl ?? null,
+            imageUrl: preferredProductImageUrl(draft.product.productAssets),
             storeName: draft.store.name,
             priceRub: draft.priceRub?.toString() ?? null,
             status: draft.status,

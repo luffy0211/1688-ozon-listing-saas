@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { preferredProductImageUrl } from "@/lib/product-image";
 import { EmptyState, MetricCard, PageHeader } from "@/components/ui";
 import { ProductDataTable, type ProductTableRow } from "@/components/product-data-table";
 
@@ -17,7 +18,7 @@ export default async function ProductsPage() {
       orderBy: { updatedAt: "desc" },
       include: {
         shop: true,
-        productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 },
+        productAssets: { orderBy: [{ sortOrder: "asc" }] },
         listingJobs: { orderBy: { createdAt: "desc" }, take: 1 },
         ozonDrafts: { orderBy: { createdAt: "desc" }, take: 1 },
         _count: { select: { productAssets: true, ozonDrafts: true } },
@@ -31,14 +32,13 @@ export default async function ProductsPage() {
   const rows: ProductTableRow[] = products.map((product) => {
     const latestJob = product.listingJobs[0];
     const latestDraft = product.ozonDrafts[0];
-    const image = product.productAssets[0];
     return {
       id: product.id,
       title: product.title ?? product.offerId,
       offerId: product.offerId,
       sourceUrl: product.sourceUrl,
       shopName: product.shop?.shopName ?? "-",
-      imageUrl: image?.publicUrl ?? image?.sourceUrl ?? null,
+      imageUrl: preferredProductImageUrl(product.productAssets),
       assetCount: product._count.productAssets,
       draftCount: product._count.ozonDrafts,
       latestJobId: latestJob?.id ?? null,

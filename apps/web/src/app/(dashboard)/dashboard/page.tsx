@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { preferredProductImageUrl } from "@/lib/product-image";
 import { Badge, Card, EmptyState, MetricCard, PageHeader, SectionHeader, Table } from "@/components/ui";
 import { PublishDraftButton } from "@/components/api-actions";
 import { RunButton } from "@/components/run-button";
@@ -46,7 +47,7 @@ export default async function DashboardPage() {
       take: 5,
       include: {
         shop: true,
-        productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 },
+        productAssets: { orderBy: [{ sortOrder: "asc" }] },
       },
     }),
     prisma.ozonDraft.findMany({
@@ -54,7 +55,7 @@ export default async function DashboardPage() {
       orderBy: { updatedAt: "desc" },
       take: 5,
       include: {
-        product: { include: { productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 } } },
+        product: { include: { productAssets: { orderBy: [{ sortOrder: "asc" }] } } },
         store: true,
       },
     }),
@@ -119,7 +120,7 @@ export default async function DashboardPage() {
           ) : (
             <Table head={["商品", "店铺", "操作"]}>
               {productsWithoutDraft.map((product) => {
-                const imageUrl = product.productAssets[0]?.publicUrl ?? product.productAssets[0]?.sourceUrl ?? null;
+                const imageUrl = preferredProductImageUrl(product.productAssets);
                 return (
                   <tr key={product.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
@@ -153,7 +154,7 @@ export default async function DashboardPage() {
           ) : (
             <Table head={["草稿商品", "店铺", "价格", "操作"]}>
               {draftsToPublish.map((draft) => {
-                const imageUrl = draft.product.productAssets[0]?.publicUrl ?? draft.product.productAssets[0]?.sourceUrl ?? null;
+                const imageUrl = preferredProductImageUrl(draft.product.productAssets);
                 return (
                   <tr key={draft.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">

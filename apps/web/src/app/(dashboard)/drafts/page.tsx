@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PackageCheck } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { preferredProductImageUrl } from "@/lib/product-image";
 import { EmptyState, MetricCard, PageHeader, Table } from "@/components/ui";
 import { PublishDraftButton } from "@/components/api-actions";
 import { StatusBadge } from "@/components/status";
@@ -24,7 +25,7 @@ export default async function DraftsPage() {
         product: {
           include: {
             shop: true,
-            productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 },
+            productAssets: { orderBy: [{ sortOrder: "asc" }] },
           },
         },
         store: true,
@@ -63,7 +64,7 @@ export default async function DraftsPage() {
       ) : (
         <Table head={["商品", "来源店铺", "Ozon 店铺", "状态", "价格", "最后发布", "操作"]}>
           {sortedDrafts.map((draft) => {
-            const imageUrl = draft.product.productAssets[0]?.publicUrl ?? draft.product.productAssets[0]?.sourceUrl ?? null;
+            const imageUrl = preferredProductImageUrl(draft.product.productAssets);
             const latestRun = draft.publishRuns[0];
             return (
               <tr key={draft.id} className="hover:bg-gray-50">
