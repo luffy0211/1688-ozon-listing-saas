@@ -175,7 +175,7 @@ export default async function AnalyticsPage({
                 <td className="px-4 py-3">
                   <div className="flex min-w-[280px] items-center gap-3">
                     {product.imageUrl ? (
-                      <img src={product.imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" />
+                      <img src={product.imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" />
                     ) : (
                       <div className="h-12 w-12 rounded-md bg-gray-100" />
                     )}

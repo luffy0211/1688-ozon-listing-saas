@@ -70,7 +70,7 @@ export default async function DraftsPage() {
               <tr key={draft.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
                   <div className="flex min-w-[320px] items-center gap-3">
-                    {imageUrl ? <img src={imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-gray-100" />}
+                    {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
                     <div className="min-w-0">
                       <Link href={`/products/${draft.productId}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
                         {draft.titleRu ?? draft.product.title ?? draft.product.offerId}

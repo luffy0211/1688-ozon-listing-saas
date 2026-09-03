@@ -1,11 +1,5 @@
 import Link from "next/link";
-import {
-  AlertTriangle,
-  Boxes,
-  GitBranch,
-  PackageCheck,
-  Store,
-} from "lucide-react";
+import { AlertTriangle, Boxes, Eye, GitBranch, PackageCheck, Store } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
 import { preferredProductImageUrl } from "@/lib/product-image";
@@ -125,7 +119,7 @@ export default async function DashboardPage() {
                   <tr key={product.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex min-w-[260px] items-center gap-3">
-                        {imageUrl ? <img src={imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-gray-100" />}
+                        {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
                         <div className="min-w-0">
                           <Link href={`/products/${product.id}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
                             {product.title ?? product.offerId}
@@ -135,7 +129,15 @@ export default async function DashboardPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">{product.shop?.shopName ?? "-"}</td>
-                    <td className="px-4 py-3"><RunButton productId={product.id} /></td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Link className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href={`/products/${product.id}`}>
+                          <Eye className="h-4 w-4" aria-hidden="true" />
+                          详情
+                        </Link>
+                        <RunButton productId={product.id} />
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -159,7 +161,7 @@ export default async function DashboardPage() {
                   <tr key={draft.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex min-w-[260px] items-center gap-3">
-                        {imageUrl ? <img src={imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-gray-100" />}
+                        {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
                         <div className="min-w-0">
                           <Link href={`/products/${draft.productId}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
                             {draft.titleRu ?? draft.product.title ?? draft.product.offerId}

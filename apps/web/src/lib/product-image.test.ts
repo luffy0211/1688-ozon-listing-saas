@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { preferredProductImageUrl } from "./product-image";
+import { displayProductImageUrl, preferredProductImageUrl } from "./product-image";
 
 describe("preferredProductImageUrl", () => {
   it("prefers main images over sku and detail images", () => {
@@ -31,5 +31,9 @@ describe("preferredProductImageUrl", () => {
         { kind: "main_image", sourceUrl: "https://cbu01.alicdn.com/img/ibank/main.jpg" },
       ]),
     ).toBe("/api/v1/image-proxy?url=https%3A%2F%2Fcbu01.alicdn.com%2Fimg%2Fibank%2Fmain.jpg");
+  });
+
+  it("keeps non-alicdn image urls unchanged", () => {
+    expect(displayProductImageUrl("https://img.test/main.jpg")).toBe("https://img.test/main.jpg");
   });
 });

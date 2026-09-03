@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink, Images, PackageCheck } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { displayProductImageUrl } from "@/lib/product-image";
 import { Badge, Card, EmptyState, MetricCard, PageHeader, ProgressBar, SectionHeader, Table } from "@/components/ui";
 import { PublishDraftButton } from "@/components/api-actions";
 import { RunButton } from "@/components/run-button";
@@ -73,7 +74,7 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
                   const src = asset.publicUrl ?? asset.sourceUrl;
                   return src ? (
                     <a key={asset.id} href={src} target="_blank" className="group">
-                      <img src={src} alt="" className="aspect-square w-full rounded-md border object-cover transition-opacity group-hover:opacity-80" />
+                      <img src={displayProductImageUrl(src)} alt="" className="aspect-square w-full rounded-md border bg-white object-contain transition-opacity group-hover:opacity-80" />
                       <div className="mt-1 truncate text-xs text-gray-500">{asset.kind}</div>
                     </a>
                   ) : null;

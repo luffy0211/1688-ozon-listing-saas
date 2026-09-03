@@ -306,7 +306,7 @@ export function ShopSnapshotActions({
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     {item.imageUrl ? (
-                      <img src={item.imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" />
+                      <img src={item.imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" />
                     ) : (
                       <div className="h-12 w-12 rounded-md bg-gray-100" />
                     )}

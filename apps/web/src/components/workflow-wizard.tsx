@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -8,6 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
+  Eye,
   PackageCheck,
   PackageSearch,
   RefreshCw,
@@ -76,7 +78,7 @@ const steps = [
 
 function ProductImage({ src }: { src: string | null }) {
   return src ? (
-    <img src={src} alt="" className="h-28 w-full rounded-md object-cover" />
+    <img src={src} alt="" className="h-36 w-full rounded-md border bg-white object-contain" />
   ) : (
     <div className="flex h-28 w-full items-center justify-center rounded-md bg-gray-100 text-xs text-gray-400">
       无图片
@@ -342,7 +344,14 @@ export function WorkflowWizard({
                     <Badge tone="gray">{product.assetCount} 张图</Badge>
                     <StatusBadge status={product.latestDraftStatus ?? product.latestJobStatus ?? "PENDING"} />
                   </div>
-                  <div className="mt-3">
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link
+                      href={`/products/${product.id}`}
+                      className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                      详情
+                    </Link>
                     <InlineRunButton productId={product.id} onDone={() => refreshOnStep(4)} />
                   </div>
                 </div>
@@ -368,7 +377,7 @@ export function WorkflowWizard({
                 <tr key={draft.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <div className="flex min-w-[280px] items-center gap-3">
-                      {draft.imageUrl ? <img src={draft.imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-gray-100" />}
+                      {draft.imageUrl ? <img src={draft.imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
                       <div className="min-w-0">
                         <div className="line-clamp-2 font-medium text-gray-950">{draft.title}</div>
                         <div className="text-xs text-gray-500">{draft.offerId}</div>
@@ -379,7 +388,16 @@ export function WorkflowWizard({
                   <td className="px-4 py-3"><StatusBadge status={draft.status} /></td>
                   <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub} RUB` : "-"}</td>
                   <td className="px-4 py-3">
-                    {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : <span className="text-sm text-gray-500">已处理</span>}
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        href={`/products/${draft.productId}`}
+                        className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      >
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                        详情
+                      </Link>
+                      {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : <span className="text-sm text-gray-500">已处理</span>}
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -11,7 +11,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, Play, Search } from "lucide-react";
+import { ArrowUpDown, Eye, Play, Search } from "lucide-react";
 import { PublishDraftButton } from "./api-actions";
 import { RunButton } from "./run-button";
 import { StatusBadge } from "./status";
@@ -95,9 +95,9 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           return (
             <div className="flex min-w-[320px] items-center gap-3">
               {item.imageUrl ? (
-                <img src={item.imageUrl} alt="" className="h-14 w-14 rounded-md border object-cover" />
+                <img src={item.imageUrl} alt="" className="h-16 w-16 rounded-md border bg-white object-contain" />
               ) : (
-                <div className="h-14 w-14 rounded-md border bg-gray-100" />
+                <div className="h-16 w-16 rounded-md border bg-gray-100" />
               )}
               <div className="min-w-0">
                 <Link href={`/products/${item.id}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
@@ -171,6 +171,13 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           const item = row.original;
           return (
             <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/products/${item.id}`}
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                详情
+              </Link>
               <RunButton productId={item.id} />
               {item.latestDraftId && item.latestDraftStatus === "COMPILED" ? (
                 <PublishDraftButton draftId={item.latestDraftId} />

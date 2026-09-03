@@ -6,7 +6,7 @@ type ProductImageAsset = {
 
 const IMAGE_KIND_PRIORITY = ["main_image", "sku_image", "detail_image"];
 
-function displayImageUrl(url: string): string {
+export function displayProductImageUrl(url: string): string {
   try {
     const parsed = new URL(url);
     if (parsed.hostname === "alicdn.com" || parsed.hostname.endsWith(".alicdn.com")) {
@@ -22,9 +22,9 @@ export function preferredProductImageUrl(assets: ProductImageAsset[]): string | 
   for (const kind of IMAGE_KIND_PRIORITY) {
     const asset = assets.find((item) => item.kind === kind && (item.publicUrl || item.sourceUrl));
     const url = asset?.publicUrl ?? asset?.sourceUrl;
-    if (url) return displayImageUrl(url);
+    if (url) return displayProductImageUrl(url);
   }
   const asset = assets.find((item) => item.publicUrl || item.sourceUrl);
   const url = asset?.publicUrl ?? asset?.sourceUrl;
-  return url ? displayImageUrl(url) : null;
+  return url ? displayProductImageUrl(url) : null;
 }
