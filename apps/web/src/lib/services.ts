@@ -12,20 +12,39 @@ function parseDate(value?: string): Date {
   return Number.isNaN(d.getTime()) ? new Date() : d;
 }
 
+function isUsableProductImageUrl(url: string | null | undefined): url is string {
+  if (!url) return false;
+  const lower = url.split("?")[0]!.toLowerCase();
+  if (/\.(gif|mp4|webm|mov|m4v|avi)$/.test(lower)) return false;
+  return !/\/video\//i.test(url);
+}
+
+function cleanProductMedia(input: SourceProductImport): SourceProductImport {
+  return {
+    ...input,
+    mainImages: input.mainImages.filter(isUsableProductImageUrl),
+    detailImages: input.detailImages.filter(isUsableProductImageUrl),
+    skus: input.skus.map((sku) => ({
+      ...sku,
+      imageUrl: isUsableProductImageUrl(sku.imageUrl) ? sku.imageUrl : undefined,
+    })),
+  };
+}
+
 function sourceProductAssets(
   tenantId: string,
   productId: string,
   input: SourceProductImport,
 ) {
   return [
-    ...input.mainImages.map((url, i) => ({
+    ...input.mainImages.filter(isUsableProductImageUrl).map((url, i) => ({
       tenantId,
       productId,
       kind: "main_image",
       sourceUrl: url,
       sortOrder: i,
     })),
-    ...input.detailImages.map((url, i) => ({
+    ...input.detailImages.filter(isUsableProductImageUrl).map((url, i) => ({
       tenantId,
       productId,
       kind: "detail_image",
@@ -33,7 +52,7 @@ function sourceProductAssets(
       sortOrder: i,
     })),
     ...input.skus
-      .filter((s) => s.imageUrl)
+      .filter((s) => isUsableProductImageUrl(s.imageUrl))
       .map((s, i) => ({
         tenantId,
         productId,
@@ -130,6 +149,7 @@ export async function importProduct(
   tenantId: string,
   input: SourceProductImport,
 ) {
+  const cleanInput = cleanProductMedia(input);
   const shop = await upsertSourceShop(
     tenantId,
     {
@@ -177,7 +197,7 @@ export async function importProduct(
     });
   }
 
-  const fact = normalizeProduct(input);
+  const fact = normalizeProduct(cleanInput);
   const existingFact = await prisma.productFact.findFirst({
     where: { tenantId, productId: product.id },
   });
@@ -196,7 +216,7 @@ export async function importProduct(
     });
   }
 
-  const items = sourceProductAssets(tenantId, product.id, input);
+  const items = sourceProductAssets(tenantId, product.id, cleanInput);
   await prisma.productAsset.deleteMany({
     where: {
       tenantId,
