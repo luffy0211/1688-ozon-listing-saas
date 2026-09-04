@@ -1,6 +1,7 @@
 import type { CookieRecord, ShopProductItem } from "./types";
 import { asRecord, mtopPost } from "./mtop";
 import { cookieHeader } from "./cookie";
+import { clean1688Title } from "./product";
 
 const PC_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -140,7 +141,7 @@ function parseOfferLinks(html: string): ShopProductItem[] {
       "";
     byOfferId.set(offerId, {
       offerId,
-      title: decodeHtmlEntity(title),
+      title: clean1688Title(decodeHtmlEntity(title), `1688 商品 ${offerId}`),
       priceText: "",
       moq: "1",
       sales: "0",
