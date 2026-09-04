@@ -4,6 +4,7 @@ import type { NormalizedProductFact } from "@saas/core";
 import {
   buildRequiredOzonAttributes,
   matchOzonCategory,
+  ozonDraftFacts,
   packageDefaults,
 } from "./ozon-draft-facts";
 
@@ -29,6 +30,24 @@ describe("ozon draft facts", () => {
         description_category_id: 10,
         category_name: "Одежда",
         children: [
+          { type_id: 20, type_name: "Женские платья", children: [] },
+        ],
+      },
+    ];
+
+    expect(matchOzonCategory(tree, dressFact)).toMatchObject({
+      descriptionCategoryId: 10,
+      typeId: 20,
+    });
+  });
+
+  it("does not match normal clothing to erotic fashion categories", () => {
+    const tree: CategoryNode[] = [
+      {
+        description_category_id: 10,
+        category_name: "Одежда",
+        children: [
+          { type_id: 99, type_name: "Платье гоу-гоу", children: [] },
           { type_id: 20, type_name: "Женские платья", children: [] },
         ],
       },
@@ -131,6 +150,43 @@ describe("ozon draft facts", () => {
       { id: 9024, values: [{ value: "1" }] },
       { id: 9533, values: [{ value: "L" }] },
     ]);
+  });
+
+  it("strips Chinese weight hints from manufacturer size", async () => {
+    const result = await buildRequiredOzonAttributes(
+      {
+        ...dressFact,
+        skus: [{ ...dressFact.skus[0]!, attributes: { 颜色: "粉色", 尺码: "L（110-120斤）" } }],
+      },
+      "Женское летнее платье без рукавов",
+      [{ id: 9533, name: "Размер производителя", description: "", type: "String", is_collection: false, is_required: false }],
+      [],
+      async () => [],
+    );
+
+    expect(result).toEqual([{ id: 9533, values: [{ value: "L" }] }]);
+  });
+
+  it("rebuilds existing Ozon attributes that contain Chinese", async () => {
+    const facts = {
+      ...dressFact,
+      skus: [{ ...dressFact.skus[0]!, attributes: { 颜色: "粉色", 尺码: "L（110-120斤）" } }],
+    };
+    const raw = {
+      ozon: {
+        attributes: [{ id: 9533, values: [{ value: "L（110-120斤）" }] }],
+      },
+    };
+
+    const result = await buildRequiredOzonAttributes(
+      facts,
+      "Женское летнее платье без рукавов",
+      [{ id: 9533, name: "Размер производителя", description: "", type: "String", is_collection: false, is_required: false }],
+      ozonDraftFacts(raw).attributes,
+      async () => [],
+    );
+
+    expect(result).toEqual([{ id: 9533, values: [{ value: "L" }] }]);
   });
 
   it("does not use arbitrary dictionary fallback values", async () => {

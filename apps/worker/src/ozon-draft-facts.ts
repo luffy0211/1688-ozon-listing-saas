@@ -45,6 +45,10 @@ export function firstNumber(...values: unknown[]): number | undefined {
   return undefined;
 }
 
+function hasCjk(value: string): boolean {
+  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(value);
+}
+
 function parseOzonAttributes(value: unknown): OzonAttribute[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((rawAttribute) => {
@@ -55,7 +59,7 @@ function parseOzonAttributes(value: unknown): OzonAttribute[] {
     const parsedValues = values.flatMap((rawValue) => {
       const item = asRecord(rawValue);
       const text = firstString(item.value);
-      if (!text) return [];
+      if (!text || hasCjk(text)) return [];
       return [
         {
           value: text,
@@ -142,6 +146,10 @@ function searchTerms(fact: NormalizedProductFact): string[] {
   return [];
 }
 
+function isUnsafeFashionCategory(path: string): boolean {
+  return /эротичес|сексуальн|гоу-гоу|go-go|adult/i.test(path);
+}
+
 export function matchOzonCategory(
   tree: CategoryNode[],
   fact: NormalizedProductFact,
@@ -158,7 +166,7 @@ export function matchOzonCategory(
     const typeId = nodeTypeId(node);
     const combined = nextPath.join(" ").toLowerCase();
 
-    if (descriptionCategoryId && typeId) {
+    if (descriptionCategoryId && typeId && !isUnsafeFashionCategory(combined)) {
       const termScore = terms.reduce(
         (score, term) => score + (combined.includes(term) ? 10 : 0),
         0,
@@ -221,7 +229,11 @@ function ruMaterial(value: string): string {
 
 function manufacturerSize(fact: NormalizedProductFact): string {
   const size = fact.skus[0]?.attributes["尺码"] ?? propertyValue(fact, /尺码|尺寸|size/i);
-  return size || "L";
+  const normalized = size.toUpperCase();
+  const latinSize = normalized.match(/\b(XXXL|XXL|XL|L|M|S|XS)\b/)?.[1];
+  if (latinSize) return latinSize;
+  if (/均码|one\s*size/i.test(size)) return "One Size";
+  return "L";
 }
 
 function russianSize(size: string): string {
