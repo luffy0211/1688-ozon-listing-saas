@@ -89,6 +89,16 @@ beforeEach(() => {
 });
 
 describe("importProduct", () => {
+  it("skips existing products when requested", async () => {
+    const result = await importProduct("tenant-1", input, { skipExisting: true });
+
+    expect(result).toEqual({ productId: "product-1", isNew: false, skipped: true });
+    expect(prisma.sourceShop.update).not.toHaveBeenCalled();
+    expect(prisma.sourceProduct.update).not.toHaveBeenCalled();
+    expect(prisma.productFact.update).not.toHaveBeenCalled();
+    expect(prisma.productAsset.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("refreshes existing product data and replaces only 1688 source assets", async () => {
     const result = await importProduct("tenant-1", input);
 

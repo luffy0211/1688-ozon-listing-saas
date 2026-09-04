@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const input = detailToSourceProductImport(detail);
-  const result = await importProduct(tenantId, input);
+  const result = await importProduct(tenantId, input, { skipExisting: true });
 
   return ok(result);
 }

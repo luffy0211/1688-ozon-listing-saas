@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
         moq: detail.moq || product.moq,
         sales: detail.sales || product.sales,
       });
-      const poolResult = await importProduct(tenantId, productInput);
+      const poolResult = await importProduct(tenantId, productInput, { skipExisting: true });
       pooledOfferIds.push(product.offerId);
       if (poolResult.isNew) productPoolCreated++;
       detailCollected++;

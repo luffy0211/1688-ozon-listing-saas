@@ -148,7 +148,15 @@ export async function upsertSourceShop(
 export async function importProduct(
   tenantId: string,
   input: SourceProductImport,
+  options: { skipExisting?: boolean } = {},
 ) {
+  const existing = await prisma.sourceProduct.findFirst({
+    where: { tenantId, offerId: input.offerId },
+  });
+  if (existing && options.skipExisting) {
+    return { productId: existing.id, isNew: false, skipped: true };
+  }
+
   const cleanInput = cleanProductMedia(input);
   const shop = await upsertSourceShop(
     tenantId,
@@ -163,10 +171,6 @@ export async function importProduct(
     },
     { shop: input.shop },
   );
-
-  const existing = await prisma.sourceProduct.findFirst({
-    where: { tenantId, offerId: input.offerId },
-  });
 
   let product;
   if (existing) {

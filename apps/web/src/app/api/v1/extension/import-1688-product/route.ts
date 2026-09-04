@@ -18,6 +18,6 @@ export async function POST(req: NextRequest) {
     return fail("validation_error", "采集数据校验失败", issues);
   }
 
-  const result = await importProduct(tenantId, input);
+  const result = await importProduct(tenantId, input, { skipExisting: true });
   return ok(result);
 }

@@ -53,6 +53,7 @@ export async function POST(
       const result = await importProduct(
         tenantId,
         detailToSourceProductImport(detail),
+        { skipExisting: true },
       );
       await prisma.shopProductSnapshot.update({
         where: { id: snapshot.id },

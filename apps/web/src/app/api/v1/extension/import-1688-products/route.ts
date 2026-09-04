@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   let created = 0;
-  let updated = 0;
+  let skipped = 0;
   const failures: ImportFailure[] = [];
 
   for (const product of products.slice(0, 200)) {
@@ -40,9 +40,9 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const result = await importProduct(tenantId, product);
+      const result = await importProduct(tenantId, product, { skipExisting: true });
       if (result.isNew) created++;
-      else updated++;
+      else skipped++;
     } catch (error) {
       failures.push({
         offerId: product?.offerId,
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
     received: products.length,
     processed: Math.min(products.length, 200),
     created,
-    updated,
+    skipped,
     failed: failures.length,
     failures,
   });
