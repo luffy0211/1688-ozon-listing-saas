@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { StatusBadge } from "./status";
 import { Badge, Button, Card, EmptyState, Input, Select, Table, cn } from "./ui";
+import { WorkflowPublishProgress, type WorkflowPublishProduct } from "./workflow-publish-progress";
 import { getWorkflowSelectedProducts, isWorkflowProductSelectable } from "./workflow-selection";
 
 type Snapshot = {
@@ -387,9 +388,8 @@ export function WorkflowWizard({
   const [monitorTab, setMonitorTab] = useState<"listed" | "pending" | "failed">("listed");
   const [detailItem, setDetailItem] = useState<DetailItem | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set());
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState("");
-  const [bulkErrors, setBulkErrors] = useState<Array<{ id: string; title: string; message: string }>>([]);
+  const [publishingProducts, setPublishingProducts] = useState<WorkflowPublishProduct[]>([]);
+  const [storageReady, setStorageReady] = useState(false);
 
   function refreshOnStep(step: number) {
     setCurrentStep(step);
@@ -404,15 +404,18 @@ export function WorkflowWizard({
     } catch {
       setSelectedProductIds(new Set());
     }
+    setStorageReady(true);
   }, []);
 
   useEffect(() => {
+    if (!storageReady) return;
     window.sessionStorage.setItem("ozon_workflow_step", String(currentStep));
-  }, [currentStep]);
+  }, [currentStep, storageReady]);
 
   useEffect(() => {
+    if (!storageReady) return;
     window.sessionStorage.setItem("ozon_workflow_selected_products", JSON.stringify([...selectedProductIds]));
-  }, [selectedProductIds]);
+  }, [selectedProductIds, storageReady]);
 
   const completed = useMemo(
     () => new Set([
@@ -469,30 +472,11 @@ export function WorkflowWizard({
     setSelectedProductIds(allSelected ? new Set() : new Set(selectableProducts.map((product) => product.id)));
   }
 
-  async function publishSelected() {
+  function publishSelected() {
     if (selectedProducts.length === 0) return;
-    setBulkLoading(true);
-    setBulkErrors([]);
-    setBulkProgress("");
-    const errors: Array<{ id: string; title: string; message: string }> = [];
-    for (const [index, product] of selectedProducts.entries()) {
-      setBulkProgress(`正在提交 ${index + 1} / ${selectedProducts.length}`);
-      try {
-        await postJson(`/api/v1/products/${product.id}/run`, { autoPublish: true });
-      } catch (error) {
-        errors.push({
-          id: product.id,
-          title: product.title,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-    setBulkErrors(errors);
-    setBulkLoading(false);
-    setBulkProgress(errors.length ? `已提交 ${selectedProducts.length - errors.length} / ${selectedProducts.length}` : `已提交 ${selectedProducts.length} / ${selectedProducts.length}`);
-    setSelectedProductIds(new Set(errors.map((error) => error.id)));
-    if (errors.length) router.refresh();
-    else refreshOnStep(4);
+    setPublishingProducts(selectedProducts.map(({ id, title, offerId }) => ({ id, title, offerId })));
+    setSelectedProductIds(new Set());
+    setCurrentStep(3);
   }
 
   return (
@@ -568,26 +552,15 @@ export function WorkflowWizard({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm text-gray-500">已选 {selectedProducts.length} / {selectableProducts.length}</span>
-              <Button variant="outline" onClick={toggleAllProducts} disabled={bulkLoading || selectableProducts.length === 0}>
+              <Button variant="outline" onClick={toggleAllProducts} disabled={selectableProducts.length === 0}>
                 {allSelected ? "取消全选" : "全选"}
               </Button>
-              <Button onClick={publishSelected} disabled={bulkLoading || selectedProducts.length === 0}>
+              <Button onClick={publishSelected} disabled={selectedProducts.length === 0}>
                 <PackageCheck className="h-4 w-4" />
-                {bulkLoading ? "上架中..." : `上架选中${selectedProducts.length ? ` (${selectedProducts.length})` : ""}`}
+                {`上架选中${selectedProducts.length ? ` (${selectedProducts.length})` : ""}`}
               </Button>
             </div>
           </div>
-          {bulkProgress ? <div className="mb-3 rounded-md border border-blue-100 bg-blue-50 p-3 text-sm text-blue-700">{bulkProgress}</div> : null}
-          {bulkErrors.length ? (
-            <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              <div className="font-medium">有 {bulkErrors.length} 个商品提交失败</div>
-              <div className="mt-1 space-y-1">
-                {bulkErrors.map((error) => (
-                  <div key={`${error.title}-${error.message}`} className="line-clamp-1">{error.title}: {error.message}</div>
-                ))}
-              </div>
-            </div>
-          ) : null}
           {products.length ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {products.map((product) => {
@@ -651,66 +624,13 @@ export function WorkflowWizard({
       ) : null}
 
       {currentStep === 3 ? (
-        <Card>
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-gray-950">发布结果</h2>
-              <p className="mt-1 text-sm text-gray-500">查看系统自动提交后的 Ozon 状态。</p>
-            </div>
-          </div>
-          {drafts.length ? (
-            <Table head={["商品", "店铺", "状态", "价格", "操作"]}>
-              {drafts.map((draft) => (
-                <tr key={draft.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div className="flex min-w-[280px] items-center gap-3">
-                      {draft.imageUrl ? <img src={draft.imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
-                      <div className="min-w-0">
-                        <div className="line-clamp-2 font-medium text-gray-950">{draft.title}</div>
-                        <div className="text-xs text-gray-500">{draft.offerId}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">{draft.storeName}</td>
-                  <td className="px-4 py-3"><StatusBadge status={draft.status} /></td>
-                  <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub} RUB` : "-"}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          setDetailItem({
-                            id: draft.id,
-                            productId: draft.productId,
-                            title: draft.title,
-                            offerId: draft.offerId,
-                            sourceUrl: draft.sourceUrl,
-                            imageUrl: draft.imageUrl,
-                            imageUrls: draft.imageUrls,
-                            shopName: draft.storeName,
-                            assetCount: draft.imageUrls.length,
-                            jobStatus: null,
-                            draftId: draft.id,
-                            draftStatus: draft.status,
-                            priceRub: draft.priceRub,
-                            attributes: draft.attributes,
-                            skus: draft.skus,
-                          })
-                        }
-                      >
-                        <Eye className="h-4 w-4" aria-hidden="true" />
-                        详情
-                      </Button>
-                      <span className="text-sm text-gray-500">{draft.status === "COMPILED" ? "待后台提交" : "已处理"}</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </Table>
-          ) : (
-            <EmptyState title="暂无发布结果" description="先在审核步骤选择商品立即上架。" />
-          )}
-        </Card>
+        <WorkflowPublishProgress
+          products={publishingProducts}
+          onBack={() => setCurrentStep(2)}
+          onMonitor={() => setCurrentStep(4)}
+          onStarted={() => setPublishingProducts([])}
+          onComplete={() => router.refresh()}
+        />
       ) : null}
 
       {currentStep === 4 ? (

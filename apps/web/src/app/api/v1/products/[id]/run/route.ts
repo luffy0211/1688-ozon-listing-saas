@@ -14,6 +14,47 @@ class ProductRunBlocked extends Error {
   }
 }
 
+async function findActiveJob(tenantId: string, productId: string, storeId: string) {
+  return prisma.listingJob.findFirst({
+    where: { tenantId, productId, storeId, status: { in: ["PENDING", "RUNNING"] } },
+    select: { id: true, status: true },
+  });
+}
+
+async function ensureJobQueued(jobId: string, autoPublish: boolean) {
+  await getListingQueue().add("process-listing", { jobId, autoPublish }, { jobId });
+}
+
+async function ensurePendingJobQueued(params: {
+  job: { id: string; status: string };
+  tenantId: string;
+  productId: string;
+  autoPublish: boolean;
+}) {
+  if (params.job.status === "RUNNING") return;
+  try {
+    await ensureJobQueued(params.job.id, params.autoPublish);
+  } catch {
+    await prisma.$transaction(async (tx) => {
+      const failed = await tx.listingJob.updateMany({
+        where: { id: params.job.id, tenantId: params.tenantId, status: "PENDING" },
+        data: { status: "FAILED", error: "任务进入处理队列失败，请重试", finishedAt: new Date() },
+      });
+      if (failed.count) {
+        await tx.sourceProduct.updateMany({
+          where: { id: params.productId, tenantId: params.tenantId },
+          data: { status: "failed" },
+        });
+      }
+    });
+    throw new Error("任务进入处理队列失败，请重试");
+  }
+}
+
+function isSameRunMode(productStatus: string, autoPublish: boolean) {
+  return productStatus === (autoPublish ? "publishing" : "draft_generating");
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -37,6 +78,12 @@ export async function POST(
     : await prisma.store.findFirst({ where: { tenantId, isDefault: true } });
   if (!store) {
     return fail("missing_store", "请先配置 Ozon 店铺");
+  }
+
+  const existingJob = await findActiveJob(tenantId, product.id, store.id);
+  if (existingJob && isSameRunMode(product.status, autoPublish)) {
+    await ensurePendingJobQueued({ job: existingJob, tenantId, productId: product.id, autoPublish });
+    return ok({ jobId: existingJob.id, reused: true });
   }
 
   let jobId: string;
@@ -103,16 +150,25 @@ export async function POST(
     jobId = job.id;
   } catch (error) {
     if (error instanceof ProductRunBlocked) {
+      const [activeJob, currentProduct] = await Promise.all([
+        findActiveJob(tenantId, product.id, store.id),
+        prisma.sourceProduct.findFirst({ where: { tenantId, id: product.id }, select: { status: true } }),
+      ]);
+      if (activeJob && currentProduct && isSameRunMode(currentProduct.status, autoPublish)) {
+        await ensurePendingJobQueued({ job: activeJob, tenantId, productId: product.id, autoPublish });
+        return ok({ jobId: activeJob.id, reused: true });
+      }
       return fail(error.code, error.message, [], 409);
     }
     throw error;
   }
 
-  await getListingQueue().add(
-    "process-listing",
-    { jobId, autoPublish },
-    { jobId },
-  );
+  await ensurePendingJobQueued({
+    job: { id: jobId, status: "PENDING" },
+    tenantId,
+    productId: product.id,
+    autoPublish,
+  });
 
   return ok({ jobId });
 }
