@@ -28,6 +28,7 @@ import {
 import { generateRussianListingContent } from "./listing-content";
 import type { RussianClothingAttributes } from "./listing-content";
 import { translateWithOpenAiCompatible } from "./translate-text";
+import { matchOzonCategoryWithModel } from "./ozon-category-match";
 
 type JsonRecord = Record<string, unknown>;
 type ProductAssetLike = {
@@ -133,9 +134,23 @@ async function completeOzonFacts(params: {
   };
 
   if (!facts.descriptionCategoryId || !facts.typeId) {
-    const matched = matchOzonCategory(await getClient().getCategoryTree(), params.fact);
+    const tree = await getClient().getCategoryTree();
+    let matched = null;
+    try {
+      matched = await matchOzonCategoryWithModel(tree, {
+        titleZh: params.fact.title,
+        titleRu: params.titleRu,
+        categoryPath: params.fact.categoryPath,
+        properties: params.fact.properties.map(({ name, value }) => ({ name, value })),
+      });
+    } catch (error) {
+      console.warn(
+        `DeepSeek Ozon 类目匹配失败，使用本地规则兜底: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    matched ??= matchOzonCategory(tree, params.fact);
     if (!matched) {
-      throw new Error("无法从 1688 商品信息自动匹配 Ozon 类目，请在 rawJson.ozon 中补 description_category_id 和 type_id");
+      throw new Error("无法从 1688 商品信息自动匹配 Ozon 类目，请检查 DeepSeek 配置或商品信息");
     }
     facts = {
       ...facts,
@@ -429,7 +444,7 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
       return {
         descriptionCategoryId: ozonFacts.descriptionCategoryId,
         typeId: ozonFacts.typeId,
-        strategy: "source_json_or_manual",
+        strategy: "source_json_or_deepseek",
       };
     });
 
