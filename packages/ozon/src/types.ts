@@ -174,6 +174,20 @@ export type OzonProductInfoItem = {
   currency_code?: string;
   primary_image?: string;
   images?: string[];
+  description_category_id?: number;
+  type_id?: number;
+  sources?: Array<{
+    sku?: number;
+    source?: string;
+  }>;
+  description?: string;
+  attributes?: OzonAttribute[];
+  weight?: number;
+  width?: number;
+  height?: number;
+  depth?: number;
+  dimension_unit?: string;
+  weight_unit?: string;
 };
 
 export type OzonProductStockItem = {
@@ -212,6 +226,28 @@ export type OzonPostingItem = {
       total_discount_value?: string;
     }>;
   };
+};
+
+export type OzonProductRating = {
+  sku: number;
+  rating: number;
+  groups: Array<{
+    key: string;
+    name: string;
+    rating: number;
+    weight: number;
+    improve_at_least: number;
+    conditions: Array<{
+      key: string;
+      description: string;
+      fulfilled: boolean;
+      cost: number;
+    }>;
+    improve_attributes: Array<{
+      id: number;
+      name: string;
+    }>;
+  }>;
 };
 
 export type OzonFinanceTransactionType =
@@ -348,6 +384,9 @@ export type OzonAnalyticsProduct = {
   reservedStock: number;
   priceRub: number | null;
   imageUrl: string | null;
+  publicSku: string | null;
+  descriptionCategoryId: number | null;
+  typeId: number | null;
 };
 
 export type OzonOrderSummary = {

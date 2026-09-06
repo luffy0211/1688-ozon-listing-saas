@@ -17,7 +17,6 @@ export const env = {
   agentCompetitorCacheHours: Number(
     process.env.AGENT_COMPETITOR_CACHE_HOURS ?? "24",
   ),
-  tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
   xiangjiApiBase: process.env.XIANGJI_API_BASE ?? "https://api.tosoiot.com",
   xiangjiMock: process.env.XIANGJI_MOCK === "true",
 };

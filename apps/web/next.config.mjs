@@ -8,7 +8,7 @@ const nextConfig = {
     "@saas/storage",
   ],
   experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "bullmq", "ioredis"],
+    serverComponentsExternalPackages: ["@prisma/client", "bullmq", "ioredis", "playwright"],
   },
   reactStrictMode: true,
 };

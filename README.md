@@ -102,10 +102,9 @@ OPENAI_AGENT_TRACE_SENSITIVE_DATA=false
 AGENT_MIN_MARGIN_RATE=0.25
 AGENT_MIN_PROFIT_RUB=100
 AGENT_COMPETITOR_CACHE_HOURS=24
-TAVILY_API_KEY=              # 竞品搜索，仅服务端使用
 ```
 
-后台入口：`/agent`。统一 Agent 支持店铺诊断、竞品分析和 Ozon 活动查询。竞品分析默认读取最近 30 天销量前 5 个商品，并通过 Tavily 查找 Ozon 公开商品页。
+后台入口：`/agent`。统一 Agent 支持店铺诊断、竞品分析和 Ozon 活动查询。竞品分析默认读取最近 30 天销量前 5 个商品，通过 Playwright 从自家公开商品页定位二级类目，并且只分析同二级类目的公开商品。部署环境需执行 `pnpm exec playwright install chromium`。
 
 活动报名先在对话中提交自然语言 SOP，Agent 会生成受限规则等待确认；规则生效后才能生成报名动作。报名动作执行前会重新读取活动、候选商品、价格和库存，且单次最多 20 个商品。
 

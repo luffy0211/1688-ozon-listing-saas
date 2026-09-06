@@ -4,9 +4,13 @@ import {
   OzonClient,
   type OzonAnalyticsSummary,
   type OzonFinanceTransaction,
+  type OzonProductRating,
 } from "@saas/ozon";
 import { env } from "@/lib/env";
-import { createTavilyCompetitorSearchClient } from "./competitor-search";
+import {
+  crawlOzonCategoryCompetitors,
+  type OzonCategoryCompetitorResult,
+} from "./ozon-public-crawler";
 import { getProfitGuardrails } from "./policy";
 
 type FinanceLike = Pick<
@@ -130,16 +134,54 @@ export function buildStoreDiagnosis(params: {
   };
 }
 
+export function lowContentRatingProducts(
+  products: OzonAnalyticsSummary["products"],
+  ratings: OzonProductRating[],
+  threshold = 90,
+) {
+  const bySku = new Map(ratings.map((rating) => [String(rating.sku), rating]));
+  return products
+    .flatMap((product) => {
+      const rating = product.publicSku ? bySku.get(product.publicSku) : null;
+      if (!rating || rating.rating >= threshold) return [];
+      const recommendations = new Set<string>();
+      rating.groups.forEach((group) => {
+        group.conditions
+          .filter((condition) => !condition.fulfilled && condition.description)
+          .forEach((condition) => recommendations.add(condition.description));
+        group.improve_attributes.forEach((attribute) => {
+          if (attribute.name) recommendations.add(`补充属性：${attribute.name}`);
+        });
+      });
+      return [{
+        productId: product.productId,
+        offerId: product.offerId,
+        publicSku: product.publicSku,
+        title: product.name,
+        imageUrl: product.imageUrl,
+        contentRating: rating.rating,
+        recommendations: [...recommendations],
+        groups: rating.groups,
+      }];
+    })
+    .sort((a, b) => a.contentRating - b.contentRating)
+    .slice(0, 20);
+}
+
 export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
   const top = summary.topProducts
     .filter((item) => item.offerId && item.name)
     .slice(0, 5)
-    .map((item) => ({
-      offerId: item.offerId,
-      title: item.name!,
-      quantity: item.quantity,
-      revenueRub: item.revenueRub,
-    }));
+    .map((item) => {
+      const product = summary.products.find((entry) => entry.offerId === item.offerId);
+      return {
+        offerId: item.offerId,
+        title: item.name!,
+        publicSku: product?.publicSku ?? null,
+        quantity: item.quantity,
+        revenueRub: item.revenueRub,
+      };
+    });
   if (top.length) return top;
 
   return summary.products
@@ -149,6 +191,7 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
     .map((item) => ({
       offerId: item.offerId,
       title: item.name!,
+      publicSku: item.publicSku,
       quantity: 0,
       revenueRub: 0,
     }));
@@ -221,11 +264,31 @@ export async function diagnoseOzonStore(params: {
     previous,
     finance: summarizeFinanceTransactions(transactions),
   });
+  let ratingWarning: string | null = null;
+  const skus = current.products
+    .map((product) => product.publicSku)
+    .filter((sku): sku is string => Boolean(sku));
+  const ratings = (
+    await Promise.all(
+      Array.from({ length: Math.ceil(skus.length / 100) }, (_, index) =>
+        client.getProductRatings(skus.slice(index * 100, index * 100 + 100)),
+      ),
+    ).catch((error) => {
+      ratingWarning = `Ozon 商品内容评分读取失败：${error instanceof Error ? error.message : String(error)}`;
+      return [];
+    })
+  ).flat();
   return {
     store: { id: store.id, name: store.name },
     ...diagnosis,
-    warnings: [...diagnosis.warnings, ...(financeWarning ? [financeWarning] : [])],
+    lowContentRatingProducts: lowContentRatingProducts(current.products, ratings),
+    warnings: [
+      ...diagnosis.warnings,
+      ...(financeWarning ? [financeWarning] : []),
+      ...(ratingWarning ? [ratingWarning] : []),
+    ],
     financeDataAvailable: transactions.length > 0,
+    contentRatingDataAvailable: ratings.length > 0,
   };
 }
 
@@ -235,10 +298,13 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function cachedCompetitors(value: unknown) {
+export function cachedCompetitorReport(value: unknown) {
   const payload = record(value);
-  return payload.source === "tavily_ozon" && Array.isArray(payload.competitors)
-    ? payload.competitors
+  return payload.source === "ozon_public_category" &&
+    Array.isArray(payload.competitors) &&
+    payload.competitors.length > 0 &&
+    Boolean(record(payload.category).url)
+    ? payload
     : null;
 }
 
@@ -255,14 +321,13 @@ export async function analyzeOzonCompetitors(params: {
     since: addDays(now, -29),
     to: now,
   });
-  if (!env.tavilyApiKey.trim()) throw new Error("TAVILY_API_KEY 未配置");
   const targets = selectCompetitorTargets(summary);
-  const search = createTavilyCompetitorSearchClient({ apiKey: env.tavilyApiKey });
   const cacheAfter = new Date(
     now.getTime() - getProfitGuardrails().competitorCacheHours * 60 * 60 * 1000,
   );
-  const reports = [];
+  const reports: unknown[] = [];
   const warnings = [...(summary.warnings ?? [])];
+  const pending = [];
 
   for (const target of targets) {
     const cached = await prisma.competitorContentReport.findMany({
@@ -275,26 +340,34 @@ export async function analyzeOzonCompetitors(params: {
       take: 10,
     });
     const cachedReport = cached.find(
-      (item) => record(item.reportJson).storeId === store.id && cachedCompetitors(item.reportJson),
+      (item) => record(item.reportJson).storeId === store.id && cachedCompetitorReport(item.reportJson),
     );
-    const reused = cachedReport ? cachedCompetitors(cachedReport.reportJson) : null;
+    const reused = cachedReport ? cachedCompetitorReport(cachedReport.reportJson) : null;
     if (reused) {
-      reports.push({ ownProduct: target, competitors: reused, cached: true });
+      reports.push({ ...reused, cached: true });
       continue;
     }
+    pending.push(target);
+  }
 
-    const ownProduct = summary.products.find((item) => item.offerId === target.offerId);
-    let competitors;
+  let crawled: OzonCategoryCompetitorResult[] = [];
+  if (pending.length) {
     try {
-      competitors = await search.search({
-        title: target.title,
-        offerId: target.offerId,
-        sku: ownProduct?.productId,
+      crawled = await crawlOzonCategoryCompetitors({
+        targets: pending,
+        ownSkus: new Set(summary.products.map((item) => item.publicSku).filter((sku): sku is string => Boolean(sku))),
+        limitPerProduct: 5,
       });
     } catch (error) {
-      warnings.push(
-        `${target.offerId} 竞品搜索失败：${error instanceof Error ? error.message : String(error)}`,
-      );
+      warnings.push(`Ozon 公开页面采集失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  for (const result of crawled) {
+    warnings.push(...result.warnings.map((warning) => `${result.target.offerId}：${warning}`));
+    const competitors = result.competitors;
+    if (!result.category || !competitors.length) {
+      reports.push({ ...result, cached: false });
       continue;
     }
     const competitorIds = [];
@@ -303,16 +376,30 @@ export async function analyzeOzonCompetitors(params: {
         where: { tenantId_url: { tenantId: params.tenantId, url: competitor.url } },
         update: {
           title: competitor.title,
-          description: competitor.content,
-          rawJson: { source: "tavily", score: competitor.score } as never,
+          sku: competitor.sku,
+          sellerName: competitor.sellerName,
+          priceText: competitor.priceRub === null ? null : String(competitor.priceRub),
+          rating: competitor.rating,
+          reviewCount: competitor.reviewCount,
+          imageUrlsJson: competitor.imageUrls as never,
+          attributesJson: competitor.attributes as never,
+          description: competitor.description,
+          rawJson: { source: "ozon_public_category", category: result.category } as never,
           lastCapturedAt: now,
         },
         create: {
           tenantId: params.tenantId,
           url: competitor.url,
+          sku: competitor.sku,
           title: competitor.title,
-          description: competitor.content,
-          rawJson: { source: "tavily", score: competitor.score } as never,
+          sellerName: competitor.sellerName,
+          priceText: competitor.priceRub === null ? null : String(competitor.priceRub),
+          rating: competitor.rating,
+          reviewCount: competitor.reviewCount,
+          imageUrlsJson: competitor.imageUrls as never,
+          attributesJson: competitor.attributes as never,
+          description: competitor.description,
+          rawJson: { source: "ozon_public_category", category: result.category } as never,
           lastCapturedAt: now,
         },
       });
@@ -322,7 +409,12 @@ export async function analyzeOzonCompetitors(params: {
           tenantId: params.tenantId,
           productId: saved.id,
           title: competitor.title,
-          description: competitor.content,
+          priceText: competitor.priceRub === null ? null : String(competitor.priceRub),
+          rating: competitor.rating,
+          reviewCount: competitor.reviewCount,
+          imageUrlsJson: competitor.imageUrls as never,
+          attributesJson: competitor.attributes as never,
+          description: competitor.description,
           rawJson: competitor as never,
           capturedAt: now,
         },
@@ -332,26 +424,37 @@ export async function analyzeOzonCompetitors(params: {
       data: {
         tenantId: params.tenantId,
         competitorProductId: competitorIds[0],
-        ozonOfferId: target.offerId,
-        title: `竞品分析：${target.title}`,
+        ozonOfferId: result.target.offerId,
+        title: `竞品分析：${result.target.title}`,
         createdBy: params.userId,
         reportJson: {
-          source: "tavily_ozon",
+          source: "ozon_public_category",
           storeId: store.id,
-          ownProduct: target,
+          target: result.target,
+          category: result.category,
+          ownProduct: result.ownProduct,
           competitorProductIds: competitorIds,
           competitors,
+          benchmarks: result.benchmarks,
           capturedAt: now.toISOString(),
         } as never,
       },
     });
-    reports.push({ ownProduct: target, competitors, cached: false });
+    reports.push({
+      source: "ozon_public_category",
+      target: result.target,
+      category: result.category,
+      ownProduct: result.ownProduct,
+      competitors,
+      benchmarks: result.benchmarks,
+      cached: false,
+    });
   }
 
   return {
     store: { id: store.id, name: store.name },
     periodDays: 30,
-    source: "Tavily / Ozon 公开页面",
+    source: "Playwright / Ozon 同二级类目公开页面",
     capturedAt: now.toISOString(),
     reports,
     warnings,

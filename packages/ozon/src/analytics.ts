@@ -177,6 +177,11 @@ function normalizeProducts(
         reservedStock,
         priceRub: detail?.price ? toMoney(detail.price) : null,
         imageUrl: firstImage(detail?.primary_image) ?? firstImage(detail?.images) ?? null,
+        publicSku: detail?.sources?.find((source) => source.sku)?.sku
+          ? String(detail.sources.find((source) => source.sku)!.sku)
+          : null,
+        descriptionCategoryId: detail?.description_category_id ?? null,
+        typeId: detail?.type_id ?? null,
       };
     })
     .sort((a, b) => a.stock - b.stock);

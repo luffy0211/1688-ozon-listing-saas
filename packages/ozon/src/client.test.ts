@@ -399,6 +399,77 @@ describe("OzonClient", () => {
     );
   });
 
+  it("reads Ozon content ratings and improvement conditions by public SKU", async () => {
+    const products = [
+      {
+        sku: 99887766,
+        rating: 42,
+        groups: [
+          {
+            key: "media",
+            name: "Media",
+            rating: 10,
+            weight: 30,
+            improve_at_least: 1,
+            conditions: [{ key: "images", description: "Add images", fulfilled: false, cost: 10 }],
+            improve_attributes: [],
+          },
+        ],
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ products }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await expect(client.getProductRatings(["99887766"])).resolves.toEqual(products);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/v1/product/rating-by-sku",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ skus: ["99887766"] }) }),
+    );
+  });
+
+  it("reads complete product attributes needed for safe content updates", async () => {
+    const items = [{
+      id: 99,
+      offer_id: "offer-1",
+      description_category_id: 10,
+      type_id: 20,
+      attributes: [{ id: 85, values: [{ value: "Brand" }] }],
+      weight: 100,
+      width: 200,
+      height: 300,
+      depth: 20,
+    }];
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: items }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await expect(client.getProductInfoAttributes({ offerIds: ["offer-1"] })).resolves.toEqual(items);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/v4/product/info/attributes",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ filter: { offer_id: ["offer-1"], product_id: [] }, limit: 100 }),
+      }),
+    );
+  });
+
   it("never requests action activation when real submit is disabled", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

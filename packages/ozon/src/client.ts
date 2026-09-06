@@ -17,6 +17,7 @@ import type {
   OzonListProductsResult,
   OzonPostingItem,
   OzonProductInfoItem,
+  OzonProductRating,
   OzonProductStockItem,
   ProductArchiveRequest,
   ProductMutationResult,
@@ -290,6 +291,33 @@ export class OzonClient {
       },
     );
     return res.items ?? res.result?.items ?? [];
+  }
+
+  async getProductInfoAttributes(params: {
+    productIds?: string[];
+    offerIds?: string[];
+  }): Promise<OzonProductInfoItem[]> {
+    const response = await this.request<{
+      result?: OzonProductInfoItem[];
+      items?: OzonProductInfoItem[];
+    }>("/v4/product/info/attributes", {
+      filter: {
+        offer_id: params.offerIds ?? [],
+        product_id: params.productIds ?? [],
+      },
+      limit: 100,
+    });
+    return response.result ?? response.items ?? [];
+  }
+
+  async getProductRatings(skus: string[]): Promise<OzonProductRating[]> {
+    if (!skus.length) return [];
+    const response = await this.request<
+      { products?: OzonProductRating[] } | { result: { products?: OzonProductRating[] } }
+    >("/v1/product/rating-by-sku", { skus });
+    return "result" in response
+      ? response.result.products ?? []
+      : response.products ?? [];
   }
 
   async listFbsPostings(params: {

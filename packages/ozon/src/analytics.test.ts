@@ -16,6 +16,9 @@ describe("getOzonAnalyticsSummary", () => {
           name: "Dress",
           visible: true,
           price: "1000",
+          description_category_id: 17027904,
+          type_id: 97311,
+          sources: [{ sku: 99887766, source: "sds" }],
         },
       ],
       getProductStocks: async () => [
@@ -53,5 +56,10 @@ describe("getOzonAnalyticsSummary", () => {
     expect(summary.topProducts).toEqual([
       { offerId: "offer-1", name: "Dress", quantity: 3, revenueRub: 2700 },
     ]);
+    expect(summary.products[0]).toMatchObject({
+      publicSku: "99887766",
+      descriptionCategoryId: 17027904,
+      typeId: 97311,
+    });
   });
 });

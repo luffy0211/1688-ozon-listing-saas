@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   Bot,
   Check,
-  Database,
   Loader2,
   Plus,
   Send,
@@ -13,6 +12,11 @@ import {
   X,
 } from "lucide-react";
 import { Badge, Button, Select, cn } from "./ui";
+import {
+  AgentCommandDeck,
+  AgentInsightPanel,
+  type AgentInsightSource,
+} from "./agent-insight-panel";
 
 type StoreOption = {
   id: string;
@@ -50,33 +54,12 @@ export type ContentAgentActionView = {
   updatedAt: string;
 };
 
-type ContentAgentDataSourceView = {
-  toolName: string;
-  label: string;
-  status: "ok" | "error";
-  at: string;
-  syncedAt?: string | null;
-  storeName?: string | null;
-  productCount?: number | null;
-  visibleProductCount?: number | null;
-  totalStock?: number | null;
-  offerId?: string | null;
-  productId?: string | null;
-  found?: boolean | null;
-  stock?: number | null;
-  actionCount?: number | null;
-  candidateCount?: number | null;
-  competitorReportCount?: number | null;
-  financeDataAvailable?: boolean | null;
-  error?: string | null;
-};
-
 type ChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
   actions?: ContentAgentActionView[];
-  dataSources?: ContentAgentDataSourceView[];
+  dataSources?: AgentInsightSource[];
 };
 
 type PersistedChatMessage = ChatMessage & {
@@ -192,47 +175,6 @@ function formatTime(value?: string | null) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
-function sourceSummary(source: ContentAgentDataSourceView) {
-  const parts = [source.label];
-  if (source.storeName) parts.push(source.storeName);
-  if (typeof source.productCount === "number") parts.push(`商品 ${source.productCount}`);
-  if (typeof source.visibleProductCount === "number") parts.push(`可见 ${source.visibleProductCount}`);
-  if (typeof source.totalStock === "number") parts.push(`库存 ${source.totalStock}`);
-  if (source.offerId) parts.push(`offerId ${source.offerId}`);
-  if (source.productId) parts.push(`productId ${source.productId}`);
-  if (typeof source.stock === "number") parts.push(`库存 ${source.stock}`);
-  if (typeof source.actionCount === "number") parts.push(`活动 ${source.actionCount}`);
-  if (typeof source.candidateCount === "number") parts.push(`候选 ${source.candidateCount}`);
-  if (typeof source.competitorReportCount === "number") parts.push(`分析商品 ${source.competitorReportCount}`);
-  if (typeof source.financeDataAvailable === "boolean") {
-    parts.push(source.financeDataAvailable ? "含财务流水" : "财务流水暂不可用");
-  }
-  const syncedAt = formatTime(source.syncedAt ?? source.at);
-  if (syncedAt) parts.push(`同步 ${syncedAt}`);
-  if (source.error) parts.push(`错误 ${source.error}`);
-  return parts.join(" · ");
-}
-
-function DataSources({ sources }: { sources?: ContentAgentDataSourceView[] }) {
-  if (!sources?.length) return null;
-  return (
-    <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
-      {sources.map((source, index) => (
-        <div
-          key={`${source.toolName}-${source.at}-${index}`}
-          className={cn(
-            "flex items-start gap-2 text-xs leading-5",
-            source.status === "error" ? "text-red-600" : "text-gray-500",
-          )}
-        >
-          <Database className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="break-words">{sourceSummary(source)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function introMessageFor(agentConfig: AgentConfig): ChatMessage {
   return {
     id: "intro",
@@ -300,11 +242,11 @@ function ActionBubble({
     : [];
 
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+    <section className="mt-3 border-t-2 border-gray-950 bg-[#fffdf5] pt-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={toneForStatus(action.status)}>{action.status}</Badge>
         <Badge tone={toneForRisk(action.riskLevel)}>{action.riskLevel}</Badge>
-        <span className="text-xs font-medium text-gray-500">{actionTypeLabel(action.type)}</span>
+        <span className="rounded-md bg-gray-950 px-2 py-1 text-xs font-bold text-white">{actionTypeLabel(action.type)}</span>
       </div>
       <div className="mt-2 text-sm font-semibold text-gray-950">{action.title}</div>
       <div className="mt-1 text-sm leading-6 text-gray-600">{action.rationale}</div>
@@ -350,7 +292,7 @@ function ActionBubble({
           {suggestions.map((suggestion, index) => {
             const item = asRecord(suggestion);
             return (
-              <div key={index} className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm">
+              <div key={index} className="border-l-4 border-[#18a7a0] bg-[#effcf9] p-3 text-sm">
                 <div className="mb-1 flex flex-wrap gap-2">
                   <Badge tone="blue">{fieldLabel(item.field)}</Badge>
                   <Badge tone="gray">{String(item.sourceTag ?? "建议")}</Badge>
@@ -402,7 +344,7 @@ function ActionBubble({
           执行
         </Button>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -420,7 +362,7 @@ function SessionSidebar({
   onNewChat: () => void;
 }) {
   return (
-    <aside className="hidden h-full w-72 shrink-0 flex-col border-l border-gray-200 pl-4 lg:flex">
+    <aside className="hidden h-full w-72 shrink-0 flex-col border-l-2 border-gray-950 bg-[#fffdf5] p-3 lg:flex">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-950">历史对话</div>
         <Button
@@ -444,8 +386,8 @@ function SessionSidebar({
           className={cn(
             "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
             selectedSessionId === "new"
-              ? "border-blue-300 bg-blue-50 text-blue-950"
-              : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+              ? "border-gray-950 bg-[#f5c842] text-gray-950 shadow-[3px_3px_0_#101828]"
+              : "border-gray-300 bg-white text-gray-700 hover:border-[#18a7a0] hover:bg-[#effcf9]",
           )}
         >
           <div className="truncate font-medium">新对话</div>
@@ -461,8 +403,8 @@ function SessionSidebar({
             className={cn(
               "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
               selectedSessionId === session.id
-                ? "border-blue-300 bg-blue-50 text-blue-950"
-                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+                ? "border-gray-950 bg-[#dce8ff] text-[#1745a5] shadow-[3px_3px_0_#2457d6]"
+                : "border-gray-300 bg-white text-gray-700 hover:border-[#d858a8] hover:bg-[#fff0f9]",
             )}
           >
             <div className="truncate font-medium">{session.title ?? session.id}</div>
@@ -577,9 +519,8 @@ export function ContentAgentChat({
     setMessages([introMessage]);
   }
 
-  async function submitPrompt(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = prompt.trim();
+  async function sendPrompt(value: string) {
+    const content = value.trim();
     if (!content || running || loadingHistory) return;
     const requestSessionId = selectedSessionId;
 
@@ -637,6 +578,11 @@ export function ContentAgentChat({
     }
   }
 
+  function submitPrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void sendPrompt(prompt);
+  }
+
   async function updateAction(actionId: string, command: "confirm-execute" | "reject" | "execute") {
     try {
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`);
@@ -654,19 +600,19 @@ export function ContentAgentChat({
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-140px)] max-w-6xl gap-4">
+    <div className="mx-auto flex h-[calc(100vh-132px)] max-w-[1500px] gap-4">
       <main className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-3 flex items-center justify-between gap-3 border-b border-gray-200 pb-3">
+        <div className="mb-3 flex items-center justify-between gap-3 border-b-2 border-gray-950 pb-3">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-900 text-white">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 border-gray-950 bg-[#f5c842] text-gray-950 shadow-[3px_3px_0_#101828]">
               <Bot className="h-5 w-5" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-950">
+              <div className="truncate text-base font-black text-gray-950">
                 Ozon 运营 Agent
               </div>
-              <div className="truncate text-xs text-gray-500">
-                店铺诊断 + 竞品分析 + 活动报名
+              <div className="truncate text-xs font-medium text-gray-500">
+                诊断 · 竞品 · 优化 · 审批执行
               </div>
             </div>
           </div>
@@ -695,13 +641,18 @@ export function ContentAgentChat({
                 </Select>
               </div>
             ) : null}
-            <Badge tone="green">
+            <span className="hidden rounded-md bg-[#1fbd83] px-2 py-1 text-xs font-bold text-gray-950 sm:inline-flex">
               <ShieldCheck className="mr-1 h-3 w-3" aria-hidden="true" />
               改动需确认
-            </Badge>
-            <Badge tone="blue">读取直接执行</Badge>
+            </span>
+            <span className="hidden rounded-md bg-[#dce8ff] px-2 py-1 text-xs font-bold text-[#1745a5] sm:inline-flex">读取直接执行</span>
           </div>
         </div>
+
+        <AgentCommandDeck
+          disabled={!canSubmit || running}
+          onRun={(value) => void sendPrompt(value)}
+        />
 
         {!agentConfig.configured ? (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
@@ -718,7 +669,7 @@ export function ContentAgentChat({
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-y-auto pr-1">
+        <div className="flex-1 overflow-y-auto border-y border-gray-200 bg-[#f7f8fb] px-3 pr-2">
           <div className="space-y-4 pb-4">
             {messages.map((message) => (
               <div
@@ -730,15 +681,15 @@ export function ContentAgentChat({
               >
                 <div
                   className={cn(
-                    "max-w-[88%] rounded-lg px-4 py-3 text-sm leading-6 shadow-sm",
+                    "max-w-[94%] rounded-lg px-4 py-3 text-sm leading-6",
                     message.role === "user"
-                      ? "bg-blue-600 text-white"
-                      : "border border-gray-200 bg-white text-gray-800",
+                      ? "border-2 border-gray-950 bg-[#2457d6] text-white shadow-[4px_4px_0_#101828]"
+                      : "border-2 border-gray-950 bg-white text-gray-800 shadow-[4px_4px_0_#8ddbd3]",
                   )}
                 >
                   <div className="whitespace-pre-wrap break-words">{message.content}</div>
                   {message.role === "assistant" ? (
-                    <DataSources sources={message.dataSources} />
+                    <AgentInsightPanel sources={message.dataSources} />
                   ) : null}
                   {message.actions?.map((action) => (
                     <ActionBubble
@@ -752,7 +703,7 @@ export function ContentAgentChat({
             ))}
             {loadingHistory ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm">
+                <div className="inline-flex items-center gap-2 rounded-lg border-2 border-gray-950 bg-[#fff2e8] px-4 py-3 text-sm font-semibold text-[#7a2d00] shadow-[3px_3px_0_#ff8a3d]">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   正在加载历史
                 </div>
@@ -760,7 +711,7 @@ export function ContentAgentChat({
             ) : null}
             {running ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm">
+                <div className="inline-flex items-center gap-2 rounded-lg border-2 border-gray-950 bg-[#fff0f9] px-4 py-3 text-sm font-semibold text-[#81235d] shadow-[3px_3px_0_#d858a8]">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   正在处理
                 </div>
@@ -770,8 +721,8 @@ export function ContentAgentChat({
           </div>
         </div>
 
-        <form onSubmit={submitPrompt} className="border-t border-gray-200 pt-3">
-          <div className="flex items-end gap-2 rounded-lg border border-gray-300 bg-white p-2 shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+        <form onSubmit={submitPrompt} className="pt-3">
+          <div className="flex items-end gap-2 rounded-lg border-2 border-gray-950 bg-white p-2 shadow-[4px_4px_0_#f5c842] focus-within:ring-2 focus-within:ring-[#18a7a0]">
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -781,7 +732,7 @@ export function ContentAgentChat({
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder="例如：自己店铺现在有多少商品？"
+              placeholder="输入运营任务，例如：诊断低分商品并生成优化方案"
               disabled={!canSubmit}
               className="min-h-11 max-h-40 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400"
               rows={1}
