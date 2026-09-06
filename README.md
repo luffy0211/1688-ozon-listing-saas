@@ -102,13 +102,17 @@ OPENAI_AGENT_TRACE_SENSITIVE_DATA=false
 AGENT_MIN_MARGIN_RATE=0.25
 AGENT_MIN_PROFIT_RUB=100
 AGENT_COMPETITOR_CACHE_HOURS=24
+TAVILY_API_KEY=              # 竞品搜索，仅服务端使用
 ```
 
-后台入口：`/agent`。第一版 Agent 会读取脱敏后的 Ozon 运营快照，生成动作草案和审批项；改价动作必须通过利润 guardrail，补货和广告促销只生成推荐。
+后台入口：`/agent`。统一 Agent 支持店铺诊断、竞品分析和 Ozon 活动查询。竞品分析默认读取最近 30 天销量前 5 个商品，并通过 Tavily 查找 Ozon 公开商品页。
+
+活动报名先在对话中提交自然语言 SOP，Agent 会生成受限规则等待确认；规则生效后才能生成报名动作。报名动作执行前会重新读取活动、候选商品、价格和库存，且单次最多 20 个商品。
 
 ## 关键安全开关
 
 - `ENABLE_REAL_OZON_SUBMIT=false`（默认）：只打 mock Ozon，绝不调用真实 Ozon 创建/更新接口。真实提交必须显式设为 `true`。
+- 活动报名和商品修改共用上述开关，并且必须经过 Agent 动作确认；模型不能直接调用写接口。
 - Ozon API Key、象寄 X-API-Key 均 AES-256-GCM 加密存储，API 只返回脱敏值。
 - Ozon payload 永远不包含库存字段；已有 `ozon_task_id` 时禁止重复提交。
 

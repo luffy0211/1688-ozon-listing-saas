@@ -4,11 +4,14 @@ const prisma = vi.hoisted(() => ({
   agentAction: {
     findFirst: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   auditLog: {
     create: vi.fn(),
   },
 }));
+
+const activatePromotionEnrollment = vi.hoisted(() => vi.fn());
 
 vi.mock("@saas/db", () => ({
   prisma,
@@ -25,10 +28,13 @@ vi.mock("@saas/db", () => ({
   },
 }));
 
+vi.mock("./promotions", () => ({ activatePromotionEnrollment }));
+
 import { executeApprovedAgentAction } from "./actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  prisma.agentAction.updateMany.mockResolvedValue({ count: 1 });
   process.env.ENABLE_REAL_OZON_SUBMIT = "false";
 });
 
@@ -62,7 +68,11 @@ describe("executeApprovedAgentAction", () => {
         error: "missing_store_id",
       },
     });
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: "agent.action.failed" }),
+      }),
+    );
   });
 
   it("does not execute unapproved actions", async () => {
@@ -111,6 +121,160 @@ describe("executeApprovedAgentAction", () => {
         error: "missing_store_id",
       },
     });
-    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ action: "agent.action.failed" }),
+      }),
+    );
+  });
+
+  it("activates a confirmed promotion policy locally", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "policy-1",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      type: "PROMOTION_POLICY",
+      status: "APPROVED",
+      payloadJson: {
+        sop: "库存至少 5 件",
+        rule: { all: [{ field: "stock", operator: "gte", value: 5 }] },
+      },
+      guardrailJson: {},
+    });
+    prisma.agentAction.update.mockResolvedValue({
+      id: "policy-1",
+      type: "PROMOTION_POLICY",
+      status: "EXECUTED",
+    });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "policy-1",
+    });
+
+    expect(activatePromotionEnrollment).not.toHaveBeenCalled();
+    expect(prisma.agentAction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "policy-1" },
+        data: expect.objectContaining({ status: "EXECUTED" }),
+      }),
+    );
+  });
+
+  it("records partial Ozon promotion activation results", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "enroll-1",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      type: "PROMOTION_ENROLLMENT",
+      status: "APPROVED",
+      payloadJson: {
+        actionId: 7,
+        policyActionId: "policy-1",
+        productIds: [10, 11],
+      },
+      guardrailJson: {},
+    });
+    activatePromotionEnrollment.mockResolvedValue({
+      product_ids: [10],
+      rejected: [{ product_id: 11, reason: "price_changed" }],
+    });
+    prisma.agentAction.update.mockResolvedValue({
+      id: "enroll-1",
+      type: "PROMOTION_ENROLLMENT",
+      status: "EXECUTED",
+    });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "enroll-1",
+    });
+
+    expect(activatePromotionEnrollment).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      actionId: 7,
+      policyActionId: "policy-1",
+      productIds: [10, 11],
+    });
+    expect(prisma.agentAction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          guardrailJson: expect.objectContaining({
+            execution: expect.objectContaining({
+              result: "partial",
+              activatedProductIds: [10],
+              rejected: [{ product_id: 11, reason: "price_changed" }],
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not submit a promotion twice when another request claimed it", async () => {
+    const action = {
+      id: "enroll-2",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      type: "PROMOTION_ENROLLMENT",
+      status: "APPROVED",
+      payloadJson: {
+        actionId: 7,
+        policyActionId: "policy-1",
+        productIds: [10],
+      },
+      guardrailJson: {},
+    };
+    prisma.agentAction.findFirst.mockResolvedValue(action);
+    prisma.agentAction.updateMany.mockResolvedValue({ count: 0 });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "enroll-2",
+    });
+
+    expect(activatePromotionEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("marks an enrollment failed when Ozon rejects every product", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "enroll-3",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      type: "PROMOTION_ENROLLMENT",
+      status: "APPROVED",
+      payloadJson: {
+        actionId: 7,
+        policyActionId: "policy-1",
+        productIds: [10],
+      },
+      guardrailJson: {},
+    });
+    activatePromotionEnrollment.mockResolvedValue({
+      product_ids: [],
+      rejected: [{ product_id: 10, reason: "not_eligible" }],
+    });
+    prisma.agentAction.update.mockResolvedValue({
+      id: "enroll-3",
+      status: "FAILED",
+    });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "enroll-3",
+    });
+
+    expect(prisma.agentAction.update).toHaveBeenCalledWith({
+      where: { id: "enroll-3" },
+      data: {
+        status: "FAILED",
+        error: expect.stringContaining("promotion_all_products_rejected"),
+      },
+    });
   });
 });

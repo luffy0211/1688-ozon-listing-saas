@@ -214,6 +214,129 @@ export type OzonPostingItem = {
   };
 };
 
+export type OzonFinanceTransactionType =
+  | "all"
+  | "orders"
+  | "returns"
+  | "services"
+  | "compensation"
+  | "transferDelivery"
+  | "other";
+
+export type OzonFinanceTransactionFilter = {
+  operation_type?: string[];
+  transaction_type?: OzonFinanceTransactionType;
+} & (
+  | { date: { from: string; to: string }; posting_number?: string }
+  | { date?: never; posting_number: string }
+);
+
+export type OzonFinanceTransactionListRequest = {
+  filter: OzonFinanceTransactionFilter;
+  page: number;
+  page_size: number;
+};
+
+export type OzonFinanceTransaction = {
+  operation_id: number;
+  operation_type: string;
+  operation_date: string;
+  operation_type_name: string;
+  delivery_charge: number;
+  return_delivery_charge: number;
+  accruals_for_sale: number;
+  sale_commission: number;
+  amount: number;
+  type: OzonFinanceTransactionType;
+  posting: {
+    delivery_schema: string;
+    order_date: string;
+    posting_number: string;
+    warehouse_id: number;
+  };
+  items: Array<{
+    name?: string;
+    sku?: number;
+    offer_id?: string;
+  }>;
+  services: Array<{
+    name?: string;
+    price?: number;
+  }>;
+};
+
+export type OzonFinanceTransactionListResult = {
+  operations: OzonFinanceTransaction[];
+  page_count: number;
+  row_count: number;
+};
+
+export type OzonAction = {
+  id: number;
+  title: string;
+  action_type: string;
+  description: string;
+  date_start: string;
+  date_end: string;
+  auto_add_dates: string[];
+  freeze_date: string;
+  potential_products_count: number;
+  participating_products_count: number;
+  is_participating: boolean;
+  is_voucher_action: boolean;
+  banned_products_count: number;
+  with_targeting: boolean;
+  order_amount: number;
+  discount_type: string;
+  discount_value: number;
+};
+
+export type OzonActionProductsRequest = {
+  action_id: number;
+  limit?: number;
+  offset?: number;
+  last_id?: string | number;
+};
+
+export type OzonActionProduct = {
+  id: number;
+  price: number;
+  action_price: number;
+  alert_max_action_price_failed: boolean;
+  alert_max_action_price: number;
+  max_action_price: number;
+  add_mode: string;
+  stock: number;
+  min_stock: number;
+  current_boost?: number;
+  price_min_elastic?: number;
+  price_max_elastic?: number;
+  min_boost?: number;
+  max_boost?: number;
+};
+
+export type OzonActionProductsResult = {
+  products: OzonActionProduct[];
+  total: number;
+  last_id?: string | number;
+};
+
+export type OzonActivateActionProductsRequest = {
+  action_id: number;
+  products: Array<{
+    product_id: number;
+    action_price: number;
+  }>;
+};
+
+export type OzonActivateActionProductsResult = {
+  product_ids: number[];
+  rejected: Array<{
+    product_id: number;
+    reason: string;
+  }>;
+};
+
 export type OzonAnalyticsProduct = {
   productId: string;
   offerId: string;

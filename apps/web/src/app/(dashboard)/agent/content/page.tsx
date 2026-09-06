@@ -18,7 +18,7 @@ function contentAgentConfig() {
     missing,
     message:
       missing.length === 0
-        ? "模型已配置，可以运行内容 Agent。"
+        ? "模型已配置，可以运行 Ozon 运营 Agent。"
         : "要运行真正的 Agent，需要设置 OPENAI_API_KEY、OPENAI_AGENT_MODEL，并把 OPENAI_AGENT_MOCK 设为 false。使用 DeepSeek 时设置 OPENAI_BASE_URL=https://api.deepseek.com。当前不会使用 mock 回答。",
   };
 }
@@ -65,7 +65,10 @@ export default async function ContentAgentPage() {
       select: { id: true, title: true, status: true, updatedAt: true },
     }),
     prisma.agentAction.findMany({
-      where: { tenantId: user.tenantId, type: "CONTENT_DRAFT" },
+      where: {
+        tenantId: user.tenantId,
+        status: { in: ["PENDING_APPROVAL", "APPROVED"] },
+      },
       orderBy: { createdAt: "desc" },
       take: 30,
     }),
@@ -85,7 +88,7 @@ export default async function ContentAgentPage() {
     <div className="mx-auto flex h-[calc(100vh-140px)] max-w-3xl items-center">
       <EmptyState
         title="还没有 Ozon 店铺"
-        description="先在店铺设置里连接 Ozon，再运行内容 Agent。"
+        description="先在店铺设置里连接 Ozon，再运行运营 Agent。"
       >
         <div className="inline-flex h-9 items-center gap-2 rounded-md bg-gray-900 px-3 text-sm font-medium text-white">
           <Bot className="h-4 w-4" aria-hidden="true" />

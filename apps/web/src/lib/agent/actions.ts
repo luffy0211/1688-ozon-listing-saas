@@ -19,7 +19,10 @@ import {
   actionApprovalPolicy,
   evaluateProfitGuardrail,
   isRecommendationOnly,
+  type ProfitGuardrailResult,
 } from "./policy";
+import { promotionPolicySchema } from "./promotion-policy";
+import { activatePromotionEnrollment } from "./promotions";
 
 export type ProposedAgentAction = {
   type: AgentActionType;
@@ -111,6 +114,47 @@ function importPayloadFrom(value: unknown): ImportProductsRequest | null {
   return Array.isArray(payload.items) && payload.items.length > 0
     ? (payload as unknown as ImportProductsRequest)
     : null;
+}
+
+function purchaseCostCnyFromFact(value: unknown) {
+  const fact = asRecord(value);
+  const purchase = asRecord(fact.purchaseCny);
+  return numberField(purchase.value) ?? numberField(fact.purchaseCny);
+}
+
+async function evaluateTrustedPriceChange(params: {
+  tenantId: string;
+  storeId: string;
+  offerId: string;
+  proposedPriceRub: number;
+}) {
+  const [sourceProduct, pricingRule] = await Promise.all([
+    prisma.sourceProduct.findFirst({
+      where: { tenantId: params.tenantId, offerId: params.offerId },
+      include: {
+        productFacts: { orderBy: { updatedAt: "desc" }, take: 1 },
+      },
+    }),
+    prisma.pricingRule.findFirst({
+      where: {
+        tenantId: params.tenantId,
+        OR: [
+          { storeId: params.storeId },
+          { storeId: null, isDefault: true },
+        ],
+      },
+      orderBy: [{ storeId: "desc" }, { isDefault: "desc" }, { updatedAt: "desc" }],
+    }),
+  ]);
+  return evaluateProfitGuardrail({
+    actionType: "UPDATE_PRICE",
+    proposedPriceRub: params.proposedPriceRub,
+    purchaseCostCny: purchaseCostCnyFromFact(
+      sourceProduct?.productFacts[0]?.normalizedJson,
+    ),
+    cnyToRub: pricingRule ? Number(pricingRule.cnyToRub) : null,
+    commissionRate: pricingRule ? Number(pricingRule.commissionRate) : null,
+  });
 }
 
 function contentSuggestionValue(payload: Record<string, unknown>, field: string) {
@@ -223,16 +267,7 @@ function contentDraftImportPayload(action: {
   };
 }
 
-function actionStatus(action: ProposedAgentAction): AgentActionStatus {
-  const guardrail = evaluateProfitGuardrail({
-    actionType: action.type,
-    proposedPriceRub: action.payload?.proposedPriceRub,
-    costRub: action.payload?.costRub,
-    purchaseCostCny: action.payload?.purchaseCostCny,
-    cnyToRub: action.payload?.cnyToRub,
-    commissionRate: action.payload?.commissionRate,
-  });
-
+function actionStatus(action: ProposedAgentAction, guardrail: ProfitGuardrailResult): AgentActionStatus {
   if (!guardrail.allowed) return AgentActionStatus.BLOCKED;
   if (isRecommendationOnly(action.type)) return AgentActionStatus.RECOMMENDED;
   if (actionNeedsApproval(action.type)) return AgentActionStatus.PENDING_APPROVAL;
@@ -248,16 +283,22 @@ export async function createAgentActions(params: {
 }) {
   const created = [];
   for (const action of params.actions.slice(0, 20)) {
-    const guardrail = evaluateProfitGuardrail({
-      actionType: action.type,
-      proposedPriceRub: action.payload?.proposedPriceRub,
-      costRub: action.payload?.costRub,
-      purchaseCostCny: action.payload?.purchaseCostCny,
-      cnyToRub: action.payload?.cnyToRub,
-      commissionRate: action.payload?.commissionRate,
-    });
+    const offerId = action.offerId ?? stringField(action.payload?.offerId);
+    const proposedPriceRub = action.payload?.proposedPriceRub ?? null;
+    const guardrail =
+      action.type === "UPDATE_PRICE" && action.storeId && offerId && proposedPriceRub
+        ? await evaluateTrustedPriceChange({
+            tenantId: params.tenantId,
+            storeId: action.storeId,
+            offerId,
+            proposedPriceRub,
+          })
+        : evaluateProfitGuardrail({
+            actionType: action.type,
+            proposedPriceRub,
+          });
     const approvalPolicy = actionApprovalPolicy(action.type);
-    const status = actionStatus(action);
+    const status = actionStatus(action, guardrail);
     const record = await prisma.agentAction.create({
       data: {
         tenantId: params.tenantId,
@@ -435,16 +476,29 @@ async function markActionExecuted(params: {
 }
 
 async function markActionFailed(params: {
-  actionId: string;
+  tenantId: string;
+  userId: string;
+  action: { id: string; type: AgentActionType };
   error: string;
 }) {
-  return prisma.agentAction.update({
-    where: { id: params.actionId },
+  const updated = await prisma.agentAction.update({
+    where: { id: params.action.id },
     data: {
       status: AgentActionStatus.FAILED,
       error: params.error,
     },
   });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action: "agent.action.failed",
+      entityType: "agent_action",
+      entityId: params.action.id,
+      metaJson: { type: params.action.type, error: params.error.slice(0, 1500) } as never,
+    },
+  });
+  return updated;
 }
 
 async function executePublishDraftAction(params: {
@@ -568,6 +622,15 @@ async function executePriceAction(params: {
   if (!proposedPriceRub || proposedPriceRub <= 0) throw new Error("missing_or_invalid_price");
   const client = ozonClientForStore(store);
   await verifyCurrentProduct({ client, offerId });
+  const trustedGuardrail = await evaluateTrustedPriceChange({
+    tenantId: params.tenantId,
+    storeId: store.id,
+    offerId,
+    proposedPriceRub,
+  });
+  if (!trustedGuardrail.allowed) {
+    throw new Error(`trusted_price_guardrail_failed:${trustedGuardrail.reason}`);
+  }
 
   const response = await client.importPrices({
     prices: [
@@ -832,6 +895,15 @@ async function executeBulkProductUpdateAction(params: {
         const price = numberField(item.proposedPriceRub ?? item.price);
         if (!offerId) throw new Error("missing_offer_id");
         if (!price || price <= 0) throw new Error("missing_or_invalid_price");
+        const trustedGuardrail = await evaluateTrustedPriceChange({
+          tenantId: params.tenantId,
+          storeId: store.id,
+          offerId,
+          proposedPriceRub: price,
+        });
+        if (!trustedGuardrail.allowed) {
+          throw new Error(`trusted_price_guardrail_failed:${trustedGuardrail.reason}`);
+        }
         await client.importPrices({
           prices: [{ offer_id: offerId, price: String(price), old_price: stringField(item.oldPriceRub) ?? "0", currency_code: "RUB" }],
         });
@@ -896,6 +968,71 @@ async function executeArchiveAction(params: {
   });
 }
 
+async function executePromotionPolicyAction(params: {
+  tenantId: string;
+  userId: string;
+  action: Awaited<ReturnType<typeof prisma.agentAction.findFirst>>;
+}) {
+  const action = params.action!;
+  const payload = asRecord(action.payloadJson);
+  if (!action.storeId) throw new Error("missing_store_id");
+  if (!stringField(payload.sop)) throw new Error("missing_promotion_sop");
+  if (!promotionPolicySchema.safeParse(payload.rule).success) {
+    throw new Error("invalid_promotion_policy");
+  }
+  return markActionExecuted({
+    tenantId: params.tenantId,
+    userId: params.userId,
+    action,
+    execution: { kind: "PROMOTION_POLICY", storeId: action.storeId },
+  });
+}
+
+async function executePromotionEnrollmentAction(params: {
+  tenantId: string;
+  userId: string;
+  action: Awaited<ReturnType<typeof prisma.agentAction.findFirst>>;
+}) {
+  const action = params.action!;
+  const payload = asRecord(action.payloadJson);
+  const actionId = numberField(payload.actionId);
+  const policyActionId = stringField(payload.policyActionId);
+  const productIds = Array.isArray(payload.productIds)
+    ? [...new Set(payload.productIds.map(numberField).filter((id): id is number => Boolean(id)))]
+    : [];
+  if (!action.storeId) throw new Error("missing_store_id");
+  if (!actionId) throw new Error("missing_promotion_action_id");
+  if (!policyActionId) throw new Error("missing_promotion_policy_action_id");
+  if (!productIds.length || productIds.length > 20) {
+    throw new Error("invalid_promotion_product_ids");
+  }
+  const result = await activatePromotionEnrollment({
+    tenantId: params.tenantId,
+    storeId: action.storeId,
+    actionId,
+    policyActionId,
+    productIds,
+  });
+  if (!result.product_ids.length) {
+    throw new Error(
+      `promotion_all_products_rejected:${JSON.stringify(result.rejected).slice(0, 1500)}`,
+    );
+  }
+  return markActionExecuted({
+    tenantId: params.tenantId,
+    userId: params.userId,
+    action,
+    execution: {
+      kind: "PROMOTION_ENROLLMENT",
+      result: result.rejected.length ? "partial" : "complete",
+      actionId,
+      requestedProductCount: productIds.length,
+      activatedProductIds: result.product_ids,
+      rejected: result.rejected,
+    },
+  });
+}
+
 export async function executeApprovedAgentAction(params: {
   tenantId: string;
   userId: string;
@@ -907,7 +1044,39 @@ export async function executeApprovedAgentAction(params: {
   if (!action) return null;
   if (action.status !== "APPROVED") return action;
 
+  const claim = await prisma.agentAction.updateMany({
+    where: {
+      id: action.id,
+      tenantId: params.tenantId,
+      status: AgentActionStatus.APPROVED,
+    },
+    data: {
+      status: AgentActionStatus.BLOCKED,
+      error: "execution_in_progress",
+    },
+  });
+  if (claim.count !== 1) {
+    return prisma.agentAction.findFirst({
+      where: { id: action.id, tenantId: params.tenantId },
+    });
+  }
   try {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: params.tenantId,
+        userId: params.userId,
+        action: "agent.action.execution_started",
+        entityType: "agent_action",
+        entityId: action.id,
+        metaJson: { type: action.type } as never,
+      },
+    });
+    if (action.type === "PROMOTION_POLICY") {
+      return await executePromotionPolicyAction({ ...params, action });
+    }
+    if (action.type === "PROMOTION_ENROLLMENT") {
+      return await executePromotionEnrollmentAction({ ...params, action });
+    }
     if (action.type === "PUBLISH_DRAFT") {
       return await executePublishDraftAction({ ...params, action });
     }
@@ -939,12 +1108,16 @@ export async function executeApprovedAgentAction(params: {
       return await executeArchiveAction({ ...params, action });
     }
     return await markActionFailed({
-      actionId: action.id,
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action,
       error: "unsupported_action_execution",
     });
   } catch (error) {
     return markActionFailed({
-      actionId: action.id,
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action,
       error: error instanceof Error ? error.message : String(error),
     });
   }

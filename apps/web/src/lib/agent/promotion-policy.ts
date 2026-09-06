@@ -26,7 +26,7 @@ const conditionSchema = z.discriminatedUnion("operator", [
 ]);
 
 export const promotionPolicySchema = z.strictObject({
-  all: z.array(conditionSchema).min(1),
+  all: z.array(conditionSchema).min(1).max(12),
 });
 
 const promotionMetricsSchema = z.strictObject({

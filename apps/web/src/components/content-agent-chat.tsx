@@ -64,6 +64,10 @@ type ContentAgentDataSourceView = {
   productId?: string | null;
   found?: boolean | null;
   stock?: number | null;
+  actionCount?: number | null;
+  candidateCount?: number | null;
+  competitorReportCount?: number | null;
+  financeDataAvailable?: boolean | null;
   error?: string | null;
 };
 
@@ -114,6 +118,27 @@ function fieldLabel(field: unknown) {
   return labels[key] ?? key;
 }
 
+function promotionFieldLabel(field: unknown) {
+  const labels: Record<string, string> = {
+    stock: "库存",
+    currentPrice: "当前价",
+    actionPrice: "活动价",
+    maxActionPrice: "最高活动价",
+    discountRate: "折扣率",
+    orders30d: "30天订单",
+    revenue30d: "30天销售额",
+    ozonNetPayout: "Ozon净回款",
+    contentRating: "内容评分",
+  };
+  return labels[String(field ?? "")] ?? String(field ?? "");
+}
+
+function promotionOperatorLabel(operator: unknown) {
+  return ({ gte: "≥", lte: "≤", eq: "=", in: "属于", not_in: "不属于" } as Record<string, string>)[
+    String(operator ?? "")
+  ] ?? String(operator ?? "");
+}
+
 function actionTypeLabel(type: string) {
   const labels: Record<string, string> = {
     CONTENT_DRAFT: "内容草稿",
@@ -127,6 +152,8 @@ function actionTypeLabel(type: string) {
     UNARCHIVE_PRODUCT: "恢复商品",
     DELETE_PRODUCT: "删除商品",
     BULK_PRODUCT_UPDATE: "批量修改商品",
+    PROMOTION_POLICY: "活动报名规则",
+    PROMOTION_ENROLLMENT: "活动报名",
   };
   return labels[type] ?? type;
 }
@@ -149,6 +176,12 @@ function actionPayloadSummary(action: ContentAgentActionView) {
   if (attributes) parts.push(`属性: ${attributes} 个`);
   const items = Array.isArray(payload.items) ? payload.items.length : null;
   if (items) parts.push(`批量: ${items} 个商品`);
+  const products = Array.isArray(payload.products) ? payload.products.length : null;
+  if (products) parts.push(`报名商品: ${products} 个`);
+  const rule = asRecord(payload.rule);
+  const conditions = Array.isArray(rule.all) ? rule.all.length : null;
+  if (conditions) parts.push(`规则条件: ${conditions} 条`);
+  push("活动ID", payload.actionId);
   return parts.slice(0, 6).join(" · ");
 }
 
@@ -168,6 +201,12 @@ function sourceSummary(source: ContentAgentDataSourceView) {
   if (source.offerId) parts.push(`offerId ${source.offerId}`);
   if (source.productId) parts.push(`productId ${source.productId}`);
   if (typeof source.stock === "number") parts.push(`库存 ${source.stock}`);
+  if (typeof source.actionCount === "number") parts.push(`活动 ${source.actionCount}`);
+  if (typeof source.candidateCount === "number") parts.push(`候选 ${source.candidateCount}`);
+  if (typeof source.competitorReportCount === "number") parts.push(`分析商品 ${source.competitorReportCount}`);
+  if (typeof source.financeDataAvailable === "boolean") {
+    parts.push(source.financeDataAvailable ? "含财务流水" : "财务流水暂不可用");
+  }
   const syncedAt = formatTime(source.syncedAt ?? source.at);
   if (syncedAt) parts.push(`同步 ${syncedAt}`);
   if (source.error) parts.push(`错误 ${source.error}`);
@@ -199,7 +238,7 @@ function introMessageFor(agentConfig: AgentConfig): ChatMessage {
     id: "intro",
     role: "assistant",
     content: agentConfig.configured
-      ? "你可以正常对话。读取店铺、商品、库存、订单等信息时会直接调用真实工具；涉及新增、删除、修改、发布、归档、价格或内容变更时，只会先生成等待人工确认的草稿或动作。"
+      ? "你可以直接询问店铺诊断、竞品分析和 Ozon 活动。读取数据会调用真实工具；任何商品改动或活动报名都必须先生成等待人工确认的动作。"
       : agentConfig.message,
   };
 }
@@ -252,6 +291,13 @@ function ActionBubble({
   onCommand: (actionId: string, command: "confirm-execute" | "reject" | "execute") => void;
 }) {
   const suggestions = suggestionsFromPayload(action.payload);
+  const payload = asRecord(action.payload);
+  const ruleConditions = Array.isArray(asRecord(payload.rule).all)
+    ? (asRecord(payload.rule).all as unknown[])
+    : [];
+  const promotionProducts = Array.isArray(payload.products)
+    ? payload.products.slice(0, 20)
+    : [];
 
   return (
     <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
@@ -266,6 +312,38 @@ function ActionBubble({
         <div className="mt-2 text-xs text-gray-500">{actionPayloadSummary(action)}</div>
       ) : null}
       {action.error ? <div className="mt-2 text-xs text-red-600">{action.error}</div> : null}
+
+      {ruleConditions.length ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">确认后生效的规则</div>
+          {ruleConditions.map((condition, index) => {
+            const item = asRecord(condition);
+            const value = Array.isArray(item.value) ? item.value.join("、") : String(item.value ?? "");
+            return (
+              <div key={index} className="py-0.5">
+                {promotionFieldLabel(item.field)} {promotionOperatorLabel(item.operator)} {value}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {promotionProducts.length ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">待报名商品与实时条件快照</div>
+          {promotionProducts.map((product, index) => {
+            const item = asRecord(product);
+            return (
+              <div key={`${String(item.productId)}-${index}`} className="grid grid-cols-4 gap-2 py-1">
+                <span>商品 {String(item.productId ?? "-")}</span>
+                <span>当前价 {String(item.currentPrice ?? "-")}</span>
+                <span>活动价 {String(item.actionPrice ?? "-")}</span>
+                <span>库存 {String(item.stock ?? "-")}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {suggestions.length ? (
         <div className="mt-3 space-y-2">
@@ -291,7 +369,15 @@ function ActionBubble({
         <Button
           variant="success"
           disabled={action.status !== "PENDING_APPROVAL"}
-          onClick={() => onCommand(action.id, "confirm-execute")}
+          onClick={() => {
+            if (
+              action.type === "PROMOTION_ENROLLMENT" &&
+              !window.confirm("活动报名会真实修改 Ozon 活动商品。确认继续执行？")
+            ) {
+              return;
+            }
+            onCommand(action.id, "confirm-execute");
+          }}
           title="确认并执行"
         >
           <Check className="h-4 w-4" aria-hidden="true" />
@@ -428,7 +514,7 @@ export function ContentAgentChat({
           {
             id: "initial-actions",
             role: "assistant" as const,
-            content: "这里有最近还没处理完的内容草稿。",
+            content: "这里有最近还没处理完的 Agent 动作。",
             actions: pendingInitialActions,
           },
         ]
@@ -577,10 +663,10 @@ export function ContentAgentChat({
             </div>
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-gray-950">
-                Ozon 内容 Agent
+                Ozon 运营 Agent
               </div>
               <div className="truncate text-xs text-gray-500">
-                普通对话 + 真实店铺工具 + 人工确认
+                店铺诊断 + 竞品分析 + 活动报名
               </div>
             </div>
           </div>
@@ -622,7 +708,7 @@ export function ContentAgentChat({
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <div>
-                <div className="font-semibold">模型未配置，内容 Agent 暂时不能运行</div>
+                <div className="font-semibold">模型未配置，运营 Agent 暂时不能运行</div>
                 <div>{agentConfig.message}</div>
                 <div className="mt-1 text-xs">
                   缺少：{agentConfig.missing.join(", ")}

@@ -7,6 +7,13 @@ import type {
   ImportPricesResult,
   ImportProductsRequest,
   ImportProductsResult,
+  OzonAction,
+  OzonActionProductsRequest,
+  OzonActionProductsResult,
+  OzonActivateActionProductsRequest,
+  OzonActivateActionProductsResult,
+  OzonFinanceTransactionListRequest,
+  OzonFinanceTransactionListResult,
   OzonListProductsResult,
   OzonPostingItem,
   OzonProductInfoItem,
@@ -59,6 +66,13 @@ function parseOzonError(text: string): {
   }
 }
 
+function unwrapOzonResult<T>(response: T | { result: T }): T {
+  if (typeof response === "object" && response !== null && "result" in response) {
+    return response.result;
+  }
+  return response;
+}
+
 export class OzonApiError extends Error {
   readonly path: string;
   readonly status: number;
@@ -94,15 +108,19 @@ export class OzonClient {
     this.enableRealSubmit = resolveEnableRealSubmit(options.enableRealSubmit);
   }
 
-  private async request<T>(path: string, body: unknown): Promise<T> {
+  private async request<T>(
+    path: string,
+    body?: unknown,
+    method: "GET" | "POST" = "POST",
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
-      method: "POST",
+      method,
       headers: {
         "Client-Id": this.clientId,
         "Api-Key": this.apiKey,
-        "Content-Type": "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       },
-      body: JSON.stringify(body),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!res.ok) {
       const text = await res.text();
@@ -280,24 +298,31 @@ export class OzonClient {
     limit?: number;
   }): Promise<OzonPostingItem[]> {
     const limit = Math.min(Math.max(params.limit ?? 100, 1), 100);
-    const res = await this.request<{ postings?: OzonPostingItem[]; result?: { postings?: OzonPostingItem[] } }>(
-      "/v4/posting/fbs/list",
-      {
+    const postings: OzonPostingItem[] = [];
+    for (let offset = 0; offset < 10_000; offset += limit) {
+      const res = await this.request<{
+        postings?: OzonPostingItem[];
+        has_next?: boolean;
+        result?: { postings?: OzonPostingItem[]; has_next?: boolean };
+      }>("/v4/posting/fbs/list", {
         dir: "ASC",
         filter: {
           since: params.since.toISOString(),
           to: params.to.toISOString(),
         },
         limit,
-        offset: 0,
+        offset,
         with: {
           analytics_data: false,
           barcodes: false,
           financial_data: true,
         },
-      },
-    );
-    return res.postings ?? res.result?.postings ?? [];
+      });
+      const page = res.postings ?? res.result?.postings ?? [];
+      postings.push(...page);
+      if (!(res.has_next ?? res.result?.has_next ?? page.length === limit)) break;
+    }
+    return postings;
   }
 
   async listFboPostings(params: {
@@ -305,23 +330,74 @@ export class OzonClient {
     to: Date;
     limit?: number;
   }): Promise<OzonPostingItem[]> {
-    const res = await this.request<{ result?: OzonPostingItem[] | { postings?: OzonPostingItem[] } }>(
-      "/v2/posting/fbo/list",
-      {
+    const limit = Math.min(Math.max(params.limit ?? 1000, 1), 1000);
+    const postings: OzonPostingItem[] = [];
+    for (let offset = 0; offset < 100_000; offset += limit) {
+      const res = await this.request<{ result?: OzonPostingItem[] | { postings?: OzonPostingItem[] } }>(
+        "/v2/posting/fbo/list",
+        {
         dir: "ASC",
         filter: {
           since: params.since.toISOString(),
           to: params.to.toISOString(),
         },
-        limit: params.limit ?? 1000,
-        offset: 0,
+        limit,
+        offset,
         with: {
           analytics_data: false,
           financial_data: true,
         },
-      },
+        },
+      );
+      const page = Array.isArray(res.result) ? res.result : res.result?.postings ?? [];
+      postings.push(...page);
+      if (page.length < limit) break;
+    }
+    return postings;
+  }
+
+  async listFinanceTransactions(
+    payload: OzonFinanceTransactionListRequest,
+  ): Promise<OzonFinanceTransactionListResult> {
+    const res = await this.request<
+      OzonFinanceTransactionListResult | { result: OzonFinanceTransactionListResult }
+    >("/v3/finance/transaction/list", payload);
+    return unwrapOzonResult(res);
+  }
+
+  async listActions(): Promise<OzonAction[]> {
+    const res = await this.request<OzonAction[] | { result: OzonAction[] }>(
+      "/v1/actions",
+      undefined,
+      "GET",
     );
-    if (Array.isArray(res.result)) return res.result;
-    return res.result?.postings ?? [];
+    return unwrapOzonResult(res);
+  }
+
+  async listActionCandidates(
+    payload: OzonActionProductsRequest,
+  ): Promise<OzonActionProductsResult> {
+    const res = await this.request<
+      OzonActionProductsResult | { result: OzonActionProductsResult }
+    >("/v1/actions/candidates", payload);
+    return unwrapOzonResult(res);
+  }
+
+  async listActionProducts(
+    payload: OzonActionProductsRequest,
+  ): Promise<OzonActionProductsResult> {
+    const res = await this.request<
+      OzonActionProductsResult | { result: OzonActionProductsResult }
+    >("/v1/actions/products", payload);
+    return unwrapOzonResult(res);
+  }
+
+  async activateActionProducts(
+    payload: OzonActivateActionProductsRequest,
+  ): Promise<OzonActivateActionProductsResult> {
+    const res = await this.mutationRequest<
+      OzonActivateActionProductsResult | { result: OzonActivateActionProductsResult }
+    >("/v1/actions/products/activate", payload);
+    return unwrapOzonResult(res);
   }
 }

@@ -67,6 +67,8 @@ describe("agent policy", () => {
       "UNARCHIVE_PRODUCT",
       "DELETE_PRODUCT",
       "BULK_PRODUCT_UPDATE",
+      "PROMOTION_POLICY",
+      "PROMOTION_ENROLLMENT",
     ] as const) {
       expect(actionNeedsApproval(actionType)).toBe(true);
       expect(actionApprovalPolicy(actionType)).toMatchObject({

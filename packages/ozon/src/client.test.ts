@@ -81,6 +81,37 @@ describe("OzonClient", () => {
     expect(body.limit).toBe(100);
   });
 
+  it("paginates FBS postings until Ozon has no next page", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ postings: [{ posting_number: "fbs-1" }], has_next: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ postings: [{ posting_number: "fbs-2" }], has_next: false }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+    });
+
+    await expect(
+      client.listFbsPostings({
+        since: new Date("2026-09-01T00:00:00Z"),
+        to: new Date("2026-09-02T00:00:00Z"),
+        limit: 1,
+      }),
+    ).resolves.toEqual([
+      { posting_number: "fbs-1" },
+      { posting_number: "fbs-2" },
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1].body)).offset).toBe(1);
+  });
+
   it("rejects submit requests when real submit is disabled", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -311,5 +342,108 @@ describe("OzonClient", () => {
     const secondBody = JSON.parse(String(fetchMock.mock.calls[1]![1].body));
     expect(firstBody).toMatchObject({ type_id: 93337, limit: 5000, last_value_id: 0 });
     expect(secondBody).toMatchObject({ type_id: 93337, limit: 5000, last_value_id: 10 });
+  });
+
+  it("reads finance transactions and action data from top-level and result responses", async () => {
+    const finance = { operations: [], page_count: 0, row_count: 0 };
+    const actions = [{ id: 7, title: "Sale" }];
+    const candidates = { products: [{ id: 10 }], total: 1, last_id: "next" };
+    const products = { products: [{ id: 11 }], total: 1 };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: finance }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => actions })
+      .mockResolvedValueOnce({ ok: true, json: async () => candidates })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: products }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+    const financeRequest = {
+      filter: {
+        date: { from: "2026-09-01T00:00:00Z", to: "2026-09-02T00:00:00Z" },
+        transaction_type: "all" as const,
+      },
+      page: 1,
+      page_size: 100,
+    };
+
+    await expect(client.listFinanceTransactions(financeRequest)).resolves.toEqual(finance);
+    await expect(client.listActions()).resolves.toEqual(actions);
+    await expect(client.listActionCandidates({ action_id: 7 })).resolves.toEqual(candidates);
+    await expect(client.listActionProducts({ action_id: 7 })).resolves.toEqual(products);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://example.test/v3/finance/transaction/list",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(financeRequest) }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://example.test/v1/actions",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock.mock.calls[1]![1]).not.toHaveProperty("body");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://example.test/v1/actions/candidates",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "https://example.test/v1/actions/products",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("never requests action activation when real submit is disabled", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await expect(client.activateActionProducts({
+      action_id: 7,
+      products: [{ product_id: 10, action_price: 90 }],
+    })).rejects.toThrow("ENABLE_REAL_OZON_SUBMIT=false");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns partial action activation rejections unchanged", async () => {
+    const result = {
+      product_ids: [10],
+      rejected: [{ product_id: 11, reason: "Price is too high" }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: true,
+    });
+    const request = {
+      action_id: 7,
+      products: [
+        { product_id: 10, action_price: 90 },
+        { product_id: 11, action_price: 90 },
+      ],
+    };
+
+    await expect(client.activateActionProducts(request)).resolves.toEqual(result);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/v1/actions/products/activate",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(request) }),
+    );
   });
 });

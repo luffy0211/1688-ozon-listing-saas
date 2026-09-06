@@ -105,7 +105,6 @@ export async function GET(
             tenantId: requestSession.tenantId,
             sessionId: params.id,
             runId: { in: runIds },
-            type: "CONTENT_DRAFT",
           },
           orderBy: { createdAt: "asc" },
         })

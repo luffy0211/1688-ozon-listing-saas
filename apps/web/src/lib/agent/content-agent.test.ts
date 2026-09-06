@@ -89,6 +89,24 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("你好", null)).toBeNull();
   });
 
+  it("requires the diagnosis tool for store diagnosis requests", () => {
+    expect(requiredOzonToolForPrompt("给我的店铺做一次完整诊断", null)).toBe(
+      "diagnose_ozon_store",
+    );
+  });
+
+  it("requires competitor evidence for competitor analysis", () => {
+    expect(requiredOzonToolForPrompt("分析最近销量最高商品的竞品", null)).toBe(
+      "analyze_ozon_competitors",
+    );
+  });
+
+  it("requires promotion data for campaign requests", () => {
+    expect(requiredOzonToolForPrompt("看看有什么活动可以报名", null)).toBe(
+      "list_ozon_promotions",
+    );
+  });
+
   it("serializes successful store tool calls as visible data sources", () => {
     const sources = contentAgentDataSourcesFromToolCalls([
       {
