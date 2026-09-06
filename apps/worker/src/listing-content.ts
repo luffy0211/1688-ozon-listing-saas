@@ -12,6 +12,8 @@ export type RussianClothingAttributes = {
   material?: string;
   style?: string;
   season?: string;
+  careInstructions?: string;
+  dressLength?: string;
   country?: string;
   packageType?: string;
   warranty?: string;
@@ -61,6 +63,8 @@ function clothingAttributesField(data: Record<string, unknown>): RussianClothing
     material: stringField(source, "material"),
     style: stringField(source, "style"),
     season: stringField(source, "season"),
+    careInstructions: stringField(source, "careInstructions"),
+    dressLength: stringField(source, "dressLength"),
     country: stringField(source, "country"),
     packageType: stringField(source, "packageType"),
     warranty: stringField(source, "warranty"),
@@ -123,8 +127,8 @@ export async function generateRussianListingContent(
           content: [
             "You write Russian Ozon fashion listings from Chinese 1688 product facts.",
             "Return only JSON with keys: titleRu, descriptionRu, bulletPointsRu, hashtagsRu, attributesRu.",
-            "attributesRu keys: material, style, season, country, packageType, warranty, pattern, neckline, sleeveType, purpose, colorName, packageQuantity, factoryPackageQuantity, markingRequired, unitQuantity, type.",
-            "Prefer Ozon-like values: country Китай, packageType Пакет, warranty Без гарантии, packageQuantity 1, markingRequired false, style Деловой/Повседневный/Романтический, season with source year when present.",
+            "attributesRu keys: material, style, season, careInstructions, dressLength, country, packageType, warranty, pattern, neckline, sleeveType, purpose, colorName, packageQuantity, factoryPackageQuantity, markingRequired, unitQuantity, type.",
+            "Prefer Ozon-like values: country Китай, packageType Пакет, warranty Без гарантии, packageQuantity 1, markingRequired false, style Деловой/Повседневный/Романтический, season with source year when present, careInstructions from source facts or Следовать рекомендациям на ярлыке изделия, dressLength as Мини/Миди/Макси when supported by the source facts.",
             "No Chinese buyer-facing text. Do not invent brand, certification, or material not present in facts.",
             "Use Russian Ozon dictionary-like values where possible, concise title, 4-6 selling bullets, and hashtag string.",
           ].join(" "),

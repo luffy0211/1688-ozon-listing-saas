@@ -10,7 +10,7 @@ describe("parseRussianListingContent", () => {
       '  "descriptionRu": "Легкое платье для летнего образа.",',
       '  "bulletPointsRu": ["Легкая ткань", "Свободный крой"],',
       '  "hashtagsRu": "#платье #летнееплатье",',
-      '  "attributesRu": { "material": "полиэстер", "style": "Повседневный", "country": "Китай" }',
+      '  "attributesRu": { "material": "полиэстер", "style": "Повседневный", "country": "Китай", "careInstructions": "Деликатная стирка при 30°C", "dressLength": "Миди" }',
       "}",
       "```",
     ].join("\n");
@@ -25,6 +25,8 @@ describe("parseRussianListingContent", () => {
         style: "Повседневный",
         country: "Китай",
         season: "",
+        careInstructions: "Деликатная стирка при 30°C",
+        dressLength: "Миди",
         packageType: "",
         warranty: "",
         pattern: "",

@@ -293,7 +293,7 @@ function primaryAttrName(attribute: CategoryAttribute): string {
 function isSafeOptionalListingAttribute(attribute: CategoryAttribute): boolean {
   const name = primaryAttrName(attribute);
   return (
-    /хештег|аннотац|rich|код продавца|размер производител|тип упаковки одежды|страна-изготовитель|вес с упаковкой|стиль|коллекция|назначение|количество в упаковке|название цвета|гарантия|количество заводских упаковок|нужен код маркировки|тип рукава|рисунок|вырез горловины|количество товара в уеи/i.test(name) ||
+    /хештег|аннотац|rich|код продавца|размер производител|тип упаковки одежды|страна-изготовитель|вес с упаковкой|стиль|коллекция|сезон|уход за вещами|длина юбки|длина платья|назначение|количество в упаковке|название цвета|гарантия|количество заводских упаковок|нужен код маркировки|тип рукава|рисунок|вырез горловины|количество товара в уеи/i.test(name) ||
     ["название", "материал", "состав материала"].includes(name)
   );
 }
@@ -307,11 +307,11 @@ function templateValue(
 }
 
 function seasonValue(fact: NormalizedProductFact): string {
-  const season = propertyValue(fact, /上市年份\/季节|季节|season/i);
+  const season = `${propertyValue(fact, /上市年份\/季节|季节|season/i)} ${fact.title}`;
   const year = season.match(/20\d{2}/)?.[0];
   if (/春|夏/.test(season)) return year ? `Весна-лето ${year}` : "Весна-лето";
   if (/秋|冬/.test(season)) return year ? `Осень-зима ${year}` : "Осень-зима";
-  return "Всесезон";
+  return "";
 }
 
 function seasonTemplateValue(content: OzonAttributeContent, fact: NormalizedProductFact): string {
@@ -320,6 +320,37 @@ function seasonTemplateValue(content: OzonAttributeContent, fact: NormalizedProd
   if (/\d/.test(value)) return value;
   if (/\d/.test(fallback)) return fallback;
   return value || fallback;
+}
+
+function dressLengthValue(fact: NormalizedProductFact, titleRu: string): string {
+  const text = `${textOfFact(fact)} ${titleRu}`;
+  if (/макси|拖地|及踝/i.test(text)) return "Макси";
+  if (/миди|中长|过膝/i.test(text)) return "Миди";
+  if (/мини|超短|短裙|短款/i.test(text)) return "Мини";
+  if (/长款|长裙/i.test(text)) return "Макси";
+  return "";
+}
+
+function dressLengthTemplateValue(
+  content: OzonAttributeContent,
+  fact: NormalizedProductFact,
+  titleRu: string,
+): string {
+  const value = content.attributesRu?.dressLength ?? "";
+  if (/макси/i.test(value)) return "Макси";
+  if (/миди/i.test(value)) return "Миди";
+  if (/мини/i.test(value)) return "Мини";
+  return dressLengthValue(fact, titleRu);
+}
+
+function isClothingProduct(fact: NormalizedProductFact, titleRu: string): boolean {
+  return /服装|连衣裙|女裙|裙子|上衣|衬衫|毛衣|大衣|外套|风衣|裤|短袖|长袖|t-?shirt|shirt|blouse|dress|skirt|coat|cardigan|sweater|pants|trousers|одежд|плать|юбк|пальто|рубаш|блуз|свитер|брюк/i.test(
+    `${textOfFact(fact)} ${titleRu}`,
+  );
+}
+
+function isDressProduct(fact: NormalizedProductFact, titleRu: string): boolean {
+  return /连衣裙|女裙|裙子|dress|skirt|плать|юбк/i.test(`${textOfFact(fact)} ${titleRu}`);
 }
 
 function styleValue(fact: NormalizedProductFact): string {
@@ -380,6 +411,8 @@ function desiredValue(
   if (/размер|size/i.test(name)) return manufacturerSize(fact);
   if (/страна/i.test(name)) return templateValue(content, "country", "Китай");
   if (/коллекц|сезон/i.test(name)) return seasonTemplateValue(content, fact);
+  if (/уход за вещами/i.test(name)) return templateValue(content, "careInstructions", "Следовать рекомендациям на ярлыке изделия");
+  if (/длина юбки|длина платья/i.test(name)) return dressLengthTemplateValue(content, fact, titleRu);
   if (/стиль/i.test(name)) return templateValue(content, "style", styleValue(fact));
   if (/назначен/i.test(name)) return templateValue(content, "purpose", "для повседневной носки");
   if (/тип рукава/i.test(name)) return templateValue(content, "sleeveType", sleeveValue(fact));
@@ -424,6 +457,9 @@ export async function buildRequiredOzonAttributes(
     const id = firstNumber(attribute.id, attribute.attribute_id);
     const required = Boolean(attribute.is_required || attribute.required);
     if (!id || byId.has(id) || !(required || isSafeOptionalListingAttribute(attribute))) continue;
+    const name = primaryAttrName(attribute);
+    if (/сезон|уход за вещами/i.test(name) && !isClothingProduct(fact, titleRu)) continue;
+    if (/длина юбки|длина платья/i.test(name) && !isDressProduct(fact, titleRu)) continue;
 
     const desired = desiredValue(attribute, fact, titleRu, content);
     if (!desired) continue;

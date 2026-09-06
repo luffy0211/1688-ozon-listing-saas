@@ -231,6 +231,9 @@ describe("ozon draft facts", () => {
       { id: 4300, name: "Тип упаковки одежды", description: "", type: "Dictionary", is_collection: false, is_required: false },
       { id: 4501, name: "Стиль", description: "", type: "Dictionary", is_collection: false, is_required: false },
       { id: 4503, name: "Коллекция", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 4495, name: "Сезон", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 4655, name: "Уход за вещами", description: "", type: "String", is_collection: false, is_required: false },
+      { id: 23063, name: "Длина юбки/платья", description: "", type: "String", is_collection: false, is_required: false },
       { id: 9168, name: "Назначение", description: "", type: "String", is_collection: false, is_required: false },
       { id: 10097, name: "Название цвета", description: "", type: "String", is_collection: false, is_required: false },
       { id: 10400, name: "Гарантия", description: "", type: "Dictionary", is_collection: false, is_required: false },
@@ -256,6 +259,8 @@ describe("ozon draft facts", () => {
           packageType: "Пакет",
           style: "Повседневный",
           season: "Весна-лето",
+          careInstructions: "Деликатная стирка при 30°C",
+          dressLength: "Миди",
           purpose: "для повседневной носки",
           colorName: "черный",
           warranty: "Без гарантии",
@@ -268,10 +273,49 @@ describe("ozon draft facts", () => {
       { id: 4389, values: [{ value: "Китай", dictionaryValueId: 20 }] },
       { id: 4300, values: [{ value: "Пакет", dictionaryValueId: 30 }] },
       { id: 4501, values: [{ value: "Повседневный", dictionaryValueId: 40 }] },
-      { id: 4503, values: [{ value: "Весна-лето" }] },
+      { id: 4503, values: [{ value: "Весна-лето 2025" }] },
+      { id: 4495, values: [{ value: "Весна-лето 2025" }] },
+      { id: 4655, values: [{ value: "Деликатная стирка при 30°C" }] },
+      { id: 23063, values: [{ value: "Миди" }] },
       { id: 9168, values: [{ value: "для повседневной носки" }] },
       { id: 10097, values: [{ value: "черный" }] },
       { id: 10400, values: [{ value: "Без гарантии", dictionaryValueId: 50 }] },
     ]);
+  });
+
+  it("uses conservative clothing fallbacks when the model omits optional values", async () => {
+    const result = await buildRequiredOzonAttributes(
+      dressFact,
+      "Женское летнее платье макси",
+      [
+        { id: 4495, name: "Сезон", description: "", type: "String", is_collection: false, is_required: false },
+        { id: 4655, name: "Уход за вещами", description: "", type: "String", is_collection: false, is_required: false },
+        { id: 23063, name: "Длина юбки/платья", description: "", type: "String", is_collection: false, is_required: false },
+      ],
+      [],
+      async () => [],
+    );
+
+    expect(result).toEqual([
+      { id: 4495, values: [{ value: "Весна-лето 2025" }] },
+      { id: 4655, values: [{ value: "Следовать рекомендациям на ярлыке изделия" }] },
+      { id: 23063, values: [{ value: "Макси" }] },
+    ]);
+  });
+
+  it("does not add clothing-only optional attributes to unrelated products", async () => {
+    const result = await buildRequiredOzonAttributes(
+      { ...dressFact, title: "现代简约木制餐椅", categoryPath: ["家具"], properties: [], skus: [] },
+      "Современный деревянный стул",
+      [
+        { id: 4495, name: "Сезон", description: "", type: "String", is_collection: false, is_required: false },
+        { id: 4655, name: "Уход за вещами", description: "", type: "String", is_collection: false, is_required: false },
+        { id: 23063, name: "Длина юбки/платья", description: "", type: "String", is_collection: false, is_required: false },
+      ],
+      [],
+      async () => [],
+    );
+
+    expect(result).toEqual([]);
   });
 });
