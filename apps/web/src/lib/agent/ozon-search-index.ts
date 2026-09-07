@@ -105,11 +105,40 @@ export function parseIndexedOzonProduct(result: IndexedResult, position: number)
   };
 }
 
-function searchLabel(title: string) {
-  if (/поло/i.test(title)) return "Мужское поло";
-  if (/рубаш/i.test(title)) return "Мужская рубашка";
-  if (/худи|толстов/i.test(title)) return "Мужское худи";
-  return title.split(",")[0]!.slice(0, 100);
+function normalizedCategoryTerm(value: string) {
+  const term = value.normalize("NFKC").toLocaleLowerCase("ru-RU").replace(/ё/g, "е");
+  if (/^муж/.test(term)) return "__male__";
+  if (/^жен/.test(term)) return "__female__";
+  if (/^(?:дет|мальч|девоч)/.test(term)) return "__child__";
+  const stem = term.replace(/(?:иями|ями|ами|ого|ему|ими|ыми|ая|яя|ое|ее|ый|ий|ой|ые|ие|ых|их|ую|юю|ом|ем|ам|ям|ах|ях|ов|ев|ей|ы|и|а|я|у|ю|е|о)$/u, "");
+  return stem.length >= 4 ? stem : term;
+}
+
+function categoryTerms(value: string) {
+  const ignored = new Set(["товар", "товары", "одежда", "обувь", "аксессуары", "для", "и"]);
+  return [...new Set(
+    (value.match(/[\p{L}\p{N}]+/gu) ?? [])
+      .map(normalizedCategoryTerm)
+      .filter((term) => term.length >= 3 && !ignored.has(term)),
+  )];
+}
+
+function matchesTargetCategory(result: IndexedResult, target: OzonCompetitorTarget) {
+  if (!target.categoryNameRu) return false;
+  const titleTerms = new Set(categoryTerms(result.title ?? ""));
+  const typeAlternatives = target.categoryNameRu
+    .split(/\s+(?:и|или)\s+|[,/]+/iu)
+    .map(categoryTerms)
+    .filter((terms) => terms.length > 0);
+  if (!typeAlternatives.some((terms) => terms.every((term) => titleTerms.has(term)))) return false;
+  const genderTerms = categoryTerms((target.categoryPathRu ?? []).join(" "))
+    .filter((term) => /^__(?:male|female|child)__$/.test(term));
+  return genderTerms.every((term) => titleTerms.has(term));
+}
+
+function categorySearchLabel(target: OzonCompetitorTarget) {
+  return [...new Set([...(target.categoryPathRu ?? []).slice(-2), target.categoryNameRu].filter(Boolean))]
+    .join(" ");
 }
 
 function emptyOwnProduct(target: OzonCompetitorTarget): OzonPublicProduct {
@@ -140,22 +169,39 @@ export async function searchOzonIndexedCompetitors(params: {
   if (!params.apiKey) throw new Error("tavily_api_key_missing");
   const fetchImpl = params.fetchImpl ?? fetch;
   const results: OzonCategoryCompetitorResult[] = [];
+  const grouped = new Map<string, OzonCompetitorTarget[]>();
 
-  for (const target of params.targets) {
-    const label = searchLabel(target.title);
+  params.targets.forEach((target) => {
+    if (!target.descriptionCategoryId || !target.typeId || !target.categoryNameRu) {
+      results.push({
+        target,
+        category: null,
+        ownProduct: emptyOwnProduct(target),
+        competitors: [],
+        benchmarks: null,
+        warnings: ["自家商品缺少 Ozon 官方类目名称，已跳过竞品搜索"],
+      });
+      return;
+    }
+    const key = `${target.descriptionCategoryId}:${target.typeId}`;
+    grouped.set(key, [...(grouped.get(key) ?? []), target]);
+  });
+
+  for (const targets of grouped.values()) {
+    const target = targets[0]!;
+    const label = categorySearchLabel(target);
     const category = {
-      name: label,
+      name: target.categoryNameRu!,
       url: `https://www.ozon.ru/search/?text=${encodeURIComponent(label)}`,
-      path: ["Ozon 搜索索引", label],
+      path: target.categoryPathRu ?? [target.categoryNameRu!],
     };
-    const fallback = emptyOwnProduct(target);
     try {
       const response = await fetchImpl("https://api.tavily.com/search", {
         method: "POST",
         signal: AbortSignal.timeout(30_000),
         headers: { authorization: `Bearer ${params.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
-          query: `site:ozon.ru/product/ ${label} О товаре Материал Состав материала`,
+          query: `site:ozon.ru/product/ ${label} Характеристики Описание`,
           include_domains: ["ozon.ru"],
           include_raw_content: "text",
           search_depth: "advanced",
@@ -173,27 +219,35 @@ export async function searchOzonIndexedCompetitors(params: {
         .flatMap((item, index) => item && typeof item === "object" ? [parseIndexedOzonProduct(item as IndexedResult, index + 1)] : [])
         .filter((item): item is OzonPublicProduct => Boolean(item))
         .filter((item, index, items) => items.findIndex((candidate) => candidate.sku === item.sku) === index);
-      const ownProduct = indexed.find((item) => item.sku === target.publicSku) ?? fallback;
       const competitors = indexed
+        .filter((item) => matchesTargetCategory({ title: item.title }, target))
         .filter((item) => !params.ownSkus.has(item.sku))
         .slice(0, params.limitPerProduct ?? 5);
-      results.push({
-        target,
-        category,
-        ownProduct,
-        competitors,
-        benchmarks: competitors.length ? buildCompetitorBenchmarks(ownProduct, competitors) : null,
-        warnings: competitors.length ? [] : ["搜索索引没有返回有效 Ozon 竞品"],
+      const rejectedCount = indexed.filter((item) => !matchesTargetCategory({ title: item.title }, target)).length;
+      targets.forEach((currentTarget) => {
+        const ownProduct = indexed.find((item) => item.sku === currentTarget.publicSku) ?? emptyOwnProduct(currentTarget);
+        const warnings = [
+          ...(rejectedCount ? [`已过滤 ${rejectedCount} 个无法证明属于 ${target.categoryNameRu} 的搜索结果`] : []),
+          ...(!competitors.length ? ["搜索索引没有返回有效同类目 Ozon 竞品"] : []),
+        ];
+        results.push({
+          target: currentTarget,
+          category,
+          ownProduct,
+          competitors,
+          benchmarks: competitors.length ? buildCompetitorBenchmarks(ownProduct, competitors) : null,
+          warnings,
+        });
       });
     } catch (error) {
-      results.push({
-        target,
+      targets.forEach((currentTarget) => results.push({
+        target: currentTarget,
         category,
-        ownProduct: fallback,
+        ownProduct: emptyOwnProduct(currentTarget),
         competitors: [],
         benchmarks: null,
         warnings: [`搜索失败：${error instanceof Error ? error.message : String(error)}`],
-      });
+      }));
     }
   }
   return results;

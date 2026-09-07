@@ -77,6 +77,31 @@ function suggestionsFromPayload(payload: unknown) {
   return Array.isArray(suggestions) ? suggestions.slice(0, 6) : [];
 }
 
+export function attributeChangesFromPayload(payload: unknown) {
+  const recommendations = asRecord(payload).recommendations;
+  if (!Array.isArray(recommendations)) return [];
+  return recommendations.flatMap((value) => {
+    const item = asRecord(value);
+    const offerId = typeof item.offerId === "string" ? item.offerId.trim() : "";
+    const attributeName = typeof item.ozonNameRu === "string" && item.ozonNameRu.trim()
+      ? item.ozonNameRu.trim()
+      : typeof item.competitorNameRu === "string" ? item.competitorNameRu.trim() : "";
+    const suggestedValue = typeof item.suggestedValue === "string" ? item.suggestedValue.trim() : "";
+    if (!offerId || !attributeName || !suggestedValue) return [];
+    const evidenceUrls = Array.isArray(item.evidenceUrls)
+      ? item.evidenceUrls.filter((url): url is string => typeof url === "string" && /^https:\/\//.test(url))
+      : [];
+    return [{
+      offerId,
+      attributeName,
+      suggestedValue,
+      required: item.required === true,
+      reasonZh: typeof item.reasonZh === "string" ? item.reasonZh : "",
+      evidenceUrl: evidenceUrls[0] ?? null,
+    }];
+  });
+}
+
 function toneForStatus(status: string) {
   if (status === "APPROVED") return "green";
   if (status === "REJECTED" || status === "FAILED" || status === "BLOCKED") return "red";
@@ -234,6 +259,8 @@ function ActionBubble({
 }) {
   const suggestions = suggestionsFromPayload(action.payload);
   const payload = asRecord(action.payload);
+  const attributeChanges = attributeChangesFromPayload(action.payload);
+  const isCompetitorBatch = action.type === "BULK_PRODUCT_UPDATE" && payload.source === "competitor_attribute_playbook";
   const ruleConditions = Array.isArray(asRecord(payload.rule).all)
     ? (asRecord(payload.rule).all as unknown[])
     : [];
@@ -307,11 +334,42 @@ function ActionBubble({
         </div>
       ) : null}
 
+      {isCompetitorBatch ? (
+        <div className="mt-3 border-t border-gray-200 pt-2 text-xs text-gray-700">
+          <div className="mb-2 font-bold text-gray-950">确认后将写入的属性（{attributeChanges.length}项）</div>
+          {attributeChanges.length ? (
+            <div className="max-h-72 divide-y divide-gray-200 overflow-y-auto border border-gray-200 bg-white">
+              {attributeChanges.map((change, index) => (
+                <div key={`${change.offerId}-${change.attributeName}-${index}`} className="grid gap-1 p-2 sm:grid-cols-[140px_1fr_1fr]">
+                  <span className="break-all font-semibold text-gray-950">{change.offerId}</span>
+                  <span>{change.attributeName}{change.required ? "（必填）" : ""}</span>
+                  <span className="font-semibold text-[#075e5a]">写入：{change.suggestedValue}</span>
+                  {change.reasonZh ? <span className="sm:col-span-2 sm:col-start-2">{change.reasonZh}</span> : null}
+                  {change.evidenceUrl ? (
+                    <a className="text-blue-700 underline sm:col-start-3" href={change.evidenceUrl} target="_blank" rel="noreferrer">
+                      查看竞品证据
+                    </a>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="border-l-4 border-red-500 bg-red-50 p-2 text-red-800">修改明细不完整，已禁止执行。</div>
+          )}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           variant="success"
-          disabled={action.status !== "PENDING_APPROVAL"}
+          disabled={action.status !== "PENDING_APPROVAL" || (isCompetitorBatch && !attributeChanges.length)}
           onClick={() => {
+            if (
+              isCompetitorBatch &&
+              !window.confirm(`将真实修改 ${attributeChanges.length} 项 Ozon 商品属性，是否继续？`)
+            ) {
+              return;
+            }
             if (
               action.type === "PROMOTION_ENROLLMENT" &&
               !window.confirm("活动报名会真实修改 Ozon 活动商品。确认继续执行？")

@@ -109,6 +109,59 @@ function attributesFromPayload(value: unknown): OzonAttribute[] | null {
   return attributes.length ? attributes : null;
 }
 
+export function validateCompetitorBatchPayload(value: unknown) {
+  const payload = asRecord(value);
+  if (payload.source !== "competitor_attribute_playbook") return;
+
+  const recommendations = recordArray(payload.recommendations);
+  const items = recordArray(payload.items);
+  if (!recommendations.length || !items.length) {
+    throw new Error("competitor_batch_preview_mismatch");
+  }
+  if (items.some((item) => stringField(item.type ?? item.actionType) !== "UPDATE_ATTRIBUTES")) {
+    throw new Error("competitor_batch_attributes_only");
+  }
+
+  const expected = new Map<string, { value: string; dictionaryValueId: number | null }>();
+  for (const recommendation of recommendations) {
+    const offerId = stringField(recommendation.offerId);
+    const attributeId = numberField(recommendation.ozonAttributeId);
+    const suggestedValue = stringField(recommendation.suggestedValue);
+    const key = offerId && attributeId ? `${offerId}:${attributeId}` : null;
+    if (!key || !suggestedValue || expected.has(key)) {
+      throw new Error("competitor_batch_preview_mismatch");
+    }
+    expected.set(key, {
+      value: suggestedValue,
+      dictionaryValueId: numberField(recommendation.dictionaryValueId),
+    });
+  }
+
+  const matched = new Set<string>();
+  for (const item of items) {
+    const offerId = stringField(item.offerId ?? item.offer_id);
+    const attributes = attributesFromPayload(item.attributes);
+    if (!offerId || !attributes) throw new Error("competitor_batch_preview_mismatch");
+    for (const attribute of attributes) {
+      const key = `${offerId}:${attribute.id}`;
+      const actual = attribute.values[0];
+      const preview = expected.get(key);
+      if (
+        attribute.values.length !== 1 ||
+        !actual ||
+        !preview ||
+        matched.has(key) ||
+        actual.value !== preview.value ||
+        (actual.dictionaryValueId ?? null) !== preview.dictionaryValueId
+      ) {
+        throw new Error("competitor_batch_preview_mismatch");
+      }
+      matched.add(key);
+    }
+  }
+  if (matched.size !== expected.size) throw new Error("competitor_batch_preview_mismatch");
+}
+
 function importPayloadFrom(value: unknown): ImportProductsRequest | null {
   const payload = asRecord(value);
   return Array.isArray(payload.items) && payload.items.length > 0
@@ -852,6 +905,7 @@ async function executeBulkProductUpdateAction(params: {
 }) {
   const action = params.action!;
   const payload = asRecord(action.payloadJson);
+  validateCompetitorBatchPayload(payload);
   const items = recordArray(payload.items);
   if (!items.length) throw new Error("missing_bulk_items");
   if (items.length > 50) throw new Error("bulk_item_limit_exceeded");

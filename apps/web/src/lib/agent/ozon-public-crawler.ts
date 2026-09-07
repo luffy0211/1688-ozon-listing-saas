@@ -32,6 +32,10 @@ export type OzonCompetitorTarget = {
   publicSku: string | null;
   quantity: number;
   revenueRub: number;
+  descriptionCategoryId?: number | null;
+  typeId?: number | null;
+  categoryNameRu?: string | null;
+  categoryPathRu?: string[];
 };
 
 export type OzonCategoryCompetitorResult = {

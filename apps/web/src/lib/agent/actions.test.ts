@@ -30,7 +30,7 @@ vi.mock("@saas/db", () => ({
 
 vi.mock("./promotions", () => ({ activatePromotionEnrollment }));
 
-import { executeApprovedAgentAction } from "./actions";
+import { executeApprovedAgentAction, validateCompetitorBatchPayload } from "./actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -39,6 +39,37 @@ beforeEach(() => {
 });
 
 describe("executeApprovedAgentAction", () => {
+  it("requires the approved competitor preview to match the exact Ozon attributes", () => {
+    const payload = {
+      source: "competitor_attribute_playbook",
+      recommendations: [{
+        offerId: "SKU-1",
+        ozonAttributeId: 10,
+        suggestedValue: "Хлопок",
+        dictionaryValueId: 1001,
+      }],
+      items: [{
+        type: "UPDATE_ATTRIBUTES",
+        offerId: "SKU-1",
+        productId: "44",
+        attributes: [{ id: 10, values: [{ value: "Хлопок", dictionaryValueId: 1001 }] }],
+      }],
+    };
+
+    expect(() => validateCompetitorBatchPayload(payload)).not.toThrow();
+    expect(() => validateCompetitorBatchPayload({
+      ...payload,
+      items: [{
+        ...payload.items[0],
+        attributes: [{ id: 10, values: [{ value: "Полиэстер", dictionaryValueId: 1001 }] }],
+      }],
+    })).toThrow("competitor_batch_preview_mismatch");
+    expect(() => validateCompetitorBatchPayload({
+      ...payload,
+      items: [{ ...payload.items[0], type: "UPDATE_PRICE" }],
+    })).toThrow("competitor_batch_attributes_only");
+  });
+
   it("does not mark approved content drafts as executed without a real Ozon write", async () => {
     prisma.agentAction.findFirst.mockResolvedValue({
       id: "action-1",

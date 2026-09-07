@@ -5,6 +5,7 @@ import {
   getOzonAnalyticsSummary,
   OzonClient,
   parseCategoryAttributePlaybook,
+  type CategoryNode,
   type OzonProductInfoItem,
   type OzonAnalyticsSummary,
   type OzonFinanceTransaction,
@@ -15,6 +16,7 @@ import { env } from "@/lib/env";
 import {
   buildCompetitorBenchmarks,
   type OzonCategoryCompetitorResult,
+  type OzonCompetitorTarget,
   type OzonPublicProduct,
 } from "./ozon-public-crawler";
 import { searchOzonIndexedCompetitors } from "./ozon-search-index";
@@ -186,6 +188,10 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
         publicSku: product?.publicSku ?? null,
         quantity: item.quantity,
         revenueRub: item.revenueRub,
+        descriptionCategoryId: product?.descriptionCategoryId ?? null,
+        typeId: product?.typeId ?? null,
+        categoryNameRu: null,
+        categoryPathRu: [],
       };
     })
     .filter((item) => item.publicSku)
@@ -206,7 +212,55 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
       publicSku: item.publicSku,
       quantity: 0,
       revenueRub: 0,
+      descriptionCategoryId: item.descriptionCategoryId ?? null,
+      typeId: item.typeId ?? null,
+      categoryNameRu: null,
+      categoryPathRu: [],
     }));
+}
+
+function positiveNumber(...values: unknown[]) {
+  for (const value of values) {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function categoryNodeName(node: CategoryNode) {
+  return String(node.type_name ?? node.category_name ?? node.title ?? node.name ?? "").trim();
+}
+
+export function attachCompetitorCategoryLabels(
+  tree: CategoryNode[],
+  targets: OzonCompetitorTarget[],
+) {
+  const labels = new Map<string, { name: string; path: string[] }>();
+  const visit = (node: CategoryNode, path: string[], inheritedCategoryId: number | null) => {
+    const name = categoryNodeName(node);
+    const nextPath = name ? [...path, name] : path;
+    const categoryId = positiveNumber(
+      node.description_category_id,
+      node.category_id,
+      node.id,
+    ) ?? inheritedCategoryId;
+    const typeId = positiveNumber(node.type_id);
+    if (categoryId && typeId && name) {
+      labels.set(`${categoryId}:${typeId}`, { name, path: nextPath });
+    }
+    (node.children ?? []).forEach((child) => visit(child, nextPath, categoryId));
+  };
+  tree.forEach((node) => visit(node, [], null));
+
+  return targets.map((target) => {
+    const key = `${target.descriptionCategoryId ?? 0}:${target.typeId ?? 0}`;
+    const label = labels.get(key);
+    return {
+      ...target,
+      categoryNameRu: label?.name ?? null,
+      categoryPathRu: label?.path ?? [],
+    };
+  });
 }
 
 async function resolveStore(tenantId: string, storeId?: string | null) {
@@ -310,7 +364,7 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-const COMPETITOR_DETAIL_SCOPE = "search_index_attributes_description";
+const COMPETITOR_DETAIL_SCOPE = "category_search_index_attributes_description_v2";
 
 function cachedPublicProduct(value: unknown): OzonPublicProduct | null {
   const product = record(value);
@@ -409,7 +463,7 @@ async function buildCompetitorPlaybooks(params: {
   client: OzonClient;
   tenantId: string;
   userId: string;
-  targets: ReturnType<typeof selectCompetitorTargets>;
+  targets: OzonCompetitorTarget[];
   reports: unknown[];
   cacheAfter: Date;
   capturedAt: Date;
@@ -458,7 +512,7 @@ async function buildCompetitorPlaybooks(params: {
       return;
     }
     const report = reportByOffer.get(target.offerId);
-    const categoryName = String(record(report?.category).name ?? target.title);
+    const categoryName = target.categoryNameRu ?? String(record(report?.category).name ?? target.title);
     const key = `${categoryId}:${typeId}`;
     const group = groups.get(key) ?? {
       categoryName,
@@ -477,7 +531,7 @@ async function buildCompetitorPlaybooks(params: {
   for (const [categoryKey, group] of groups) {
     try {
       const [descriptionCategoryId, typeId] = categoryKey.split(":").map(Number);
-      const title = `类目属性经验：${categoryKey}`;
+      const title = `类目属性经验 v2：${categoryKey}`;
       const cached = await prisma.competitorContentReport.findFirst({
         where: {
           tenantId: params.tenantId,
@@ -563,12 +617,19 @@ export async function analyzeOzonCompetitors(params: {
     since: addDays(now, -29),
     to: now,
   });
-  const targets = selectCompetitorTargets(summary);
+  let targets: OzonCompetitorTarget[] = selectCompetitorTargets(summary);
   const cacheAfter = new Date(
     now.getTime() - getProfitGuardrails().competitorCacheHours * 60 * 60 * 1000,
   );
-  const reports: unknown[] = [];
   const warnings = [...(summary.warnings ?? [])];
+  if (targets.length) {
+    try {
+      targets = attachCompetitorCategoryLabels(await client.getCategoryTree(), targets);
+    } catch (error) {
+      warnings.push(`Ozon 官方类目读取失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const reports: unknown[] = [];
   const pending = [];
 
   for (const target of targets) {

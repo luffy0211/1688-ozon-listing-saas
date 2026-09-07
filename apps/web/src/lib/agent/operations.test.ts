@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attachCompetitorCategoryLabels,
   buildCompetitorBatchProposal,
   buildStoreDiagnosis,
   cachedCompetitorReport,
@@ -7,6 +8,19 @@ import {
   selectCompetitorTargets,
   summarizeFinanceTransactions,
 } from "./operations";
+
+const categoryTree = [
+  {
+    description_category_id: 17027904,
+    category_name: "Одежда",
+    children: [
+      {
+        category_name: "Мужская одежда",
+        children: [{ type_id: 93337, type_name: "Поло" }],
+      },
+    ],
+  },
+];
 
 const summary = (overrides: Record<string, unknown> = {}) => ({
   productCount: 10,
@@ -144,7 +158,7 @@ describe("Ozon operations helpers", () => {
     });
     const report = cachedCompetitorReport({
       source: "ozon_search_index",
-      detailScope: "search_index_attributes_description",
+      detailScope: "category_search_index_attributes_description_v2",
       category: { url: "https://www.ozon.ru/search/?text=polo" },
       ownProduct: product("own", {}),
       competitors: [product("1", { Материал: "Хлопок" }), product("2", { Материал: "Хлопок" })],
@@ -158,6 +172,13 @@ describe("Ozon operations helpers", () => {
         },
       },
     });
+    expect(cachedCompetitorReport({
+      source: "ozon_search_index",
+      detailScope: "search_index_attributes_description",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: product("own", {}),
+      competitors: [product("1", { Материал: "Хлопок" })],
+    })).toBeNull();
   });
 
   it("rejects cached competitor attributes with invalid value types", () => {
@@ -178,7 +199,7 @@ describe("Ozon operations helpers", () => {
 
     expect(cachedCompetitorReport({
       source: "ozon_search_index",
-      detailScope: "search_index_attributes_description",
+      detailScope: "category_search_index_attributes_description_v2",
       category: { url: "https://www.ozon.ru/search/?text=polo" },
       ownProduct: { ...malformed, sku: "own", attributes: {} },
       competitors: [malformed],
@@ -236,12 +257,22 @@ describe("Ozon operations helpers", () => {
         summary({
           topProducts: [{ offerId: "best", name: "Best", quantity: 8, revenueRub: 900 }],
           products: [
-            { offerId: "best", name: "Best", publicSku: "9001", visible: true, archived: false, stock: 2 },
+            { offerId: "best", name: "Best", publicSku: "9001", visible: true, archived: false, stock: 2, descriptionCategoryId: 17027904, typeId: 93337 },
             { offerId: "fallback", name: "Fallback", publicSku: "9002", visible: true, archived: false, stock: 9 },
           ],
         }) as never,
       ),
-    ).toEqual([{ offerId: "best", title: "Best", publicSku: "9001", quantity: 8, revenueRub: 900 }]);
+    ).toEqual([{
+      offerId: "best",
+      title: "Best",
+      publicSku: "9001",
+      quantity: 8,
+      revenueRub: 900,
+      descriptionCategoryId: 17027904,
+      typeId: 93337,
+      categoryNameRu: null,
+      categoryPathRu: [],
+    }]);
 
     expect(
       selectCompetitorTargets(
@@ -252,7 +283,36 @@ describe("Ozon operations helpers", () => {
           ],
         }) as never,
       ),
-    ).toEqual([{ offerId: "stocked", title: "Stocked", publicSku: "9004", quantity: 0, revenueRub: 0 }]);
+    ).toEqual([{
+      offerId: "stocked",
+      title: "Stocked",
+      publicSku: "9004",
+      quantity: 0,
+      revenueRub: 0,
+      descriptionCategoryId: null,
+      typeId: null,
+      categoryNameRu: null,
+      categoryPathRu: [],
+    }]);
+  });
+
+  it("attaches the exact Ozon type and category path to competitor targets", () => {
+    const [target] = attachCompetitorCategoryLabels(categoryTree, [{
+      offerId: "offer-1",
+      title: "Поло мужское",
+      publicSku: "9001",
+      quantity: 0,
+      revenueRub: 0,
+      descriptionCategoryId: 17027904,
+      typeId: 93337,
+      categoryNameRu: null,
+      categoryPathRu: [],
+    }]);
+
+    expect(target).toMatchObject({
+      categoryNameRu: "Поло",
+      categoryPathRu: ["Одежда", "Мужская одежда", "Поло"],
+    });
   });
 
   it("falls back to hidden inventory when a store has no sales or visible products", () => {
@@ -268,8 +328,8 @@ describe("Ozon operations helpers", () => {
         }) as never,
       ),
     ).toEqual([
-      { offerId: "hidden-high", title: "Hidden high", publicSku: "9007", quantity: 0, revenueRub: 0 },
-      { offerId: "hidden-low", title: "Hidden low", publicSku: "9006", quantity: 0, revenueRub: 0 },
+      { offerId: "hidden-high", title: "Hidden high", publicSku: "9007", quantity: 0, revenueRub: 0, descriptionCategoryId: null, typeId: null, categoryNameRu: null, categoryPathRu: [] },
+      { offerId: "hidden-low", title: "Hidden low", publicSku: "9006", quantity: 0, revenueRub: 0, descriptionCategoryId: null, typeId: null, categoryNameRu: null, categoryPathRu: [] },
     ]);
   });
 
@@ -282,7 +342,7 @@ describe("Ozon operations helpers", () => {
           ],
         }) as never,
       ),
-    ).toEqual([{ offerId: "draft", title: "Draft product", publicSku: "9008", quantity: 0, revenueRub: 0 }]);
+    ).toEqual([{ offerId: "draft", title: "Draft product", publicSku: "9008", quantity: 0, revenueRub: 0, descriptionCategoryId: null, typeId: null, categoryNameRu: null, categoryPathRu: [] }]);
   });
 
   it("sorts low content-rating products and keeps Ozon improvement evidence", () => {

@@ -29,6 +29,18 @@ const indexedProduct = {
 `,
 };
 
+const target = (offerId: string, publicSku: string) => ({
+  offerId,
+  title: "任意自家标题",
+  publicSku,
+  quantity: 0,
+  revenueRub: 0,
+  descriptionCategoryId: 17027904,
+  typeId: 93337,
+  categoryNameRu: "Поло",
+  categoryPathRu: ["Одежда", "Мужская одежда", "Поло"],
+});
+
 describe("Ozon search index", () => {
   it("requires a Tavily API key", async () => {
     await expect(searchOzonIndexedCompetitors({
@@ -93,13 +105,14 @@ describe("Ozon search index", () => {
         { ...indexedProduct, url: "https://www.ozon.ru/product/own-100/" },
         indexedProduct,
         { ...indexedProduct, url: "https://ozon.ru/product/polo-mark-formelle-1607177448/" },
-        { ...indexedProduct, url: "https://example.com/product/other-200/" },
+        { ...indexedProduct, title: "Платье женское", url: "https://www.ozon.ru/product/dress-200/" },
+        { ...indexedProduct, url: "https://example.com/product/other-300/" },
       ],
     }), { status: 200 }));
 
     const [result] = await searchOzonIndexedCompetitors({
       apiKey: "test-key",
-      targets: [{ offerId: "own", title: "Мужское поло", publicSku: "100", quantity: 0, revenueRub: 0 }],
+      targets: [target("own", "100")],
       ownSkus: new Set(["100"]),
       limitPerProduct: 5,
       fetchImpl,
@@ -107,12 +120,81 @@ describe("Ozon search index", () => {
 
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({
+      query: expect.stringContaining("Поло"),
       include_domains: ["ozon.ru"],
       include_raw_content: "text",
       max_results: 10,
     });
     expect(result?.competitors.map((item) => item.sku)).toEqual(["1607177448"]);
-    expect(result?.category?.name).toBe("Мужское поло");
+    expect(result?.category?.name).toBe("Поло");
+  });
+
+  it("searches once per official category and rejects products from another type", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      results: [
+        indexedProduct,
+        { ...indexedProduct, title: "Платье женское", url: "https://www.ozon.ru/product/dress-200/" },
+      ],
+    }), { status: 200 }));
+
+    const results = await searchOzonIndexedCompetitors({
+      apiKey: "test-key",
+      targets: [target("one", "100"), target("two", "101")],
+      ownSkus: new Set(["100", "101"]),
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(results).toHaveLength(2);
+    expect(results.every((result) => result.competitors.map((item) => item.sku).join() === "1607177448")).toBe(true);
+    expect(results[0]?.warnings).toContain("已过滤 1 个无法证明属于 Поло 的搜索结果");
+  });
+
+  it("does not confuse different Russian product types with the same prefix", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      results: [
+        { ...indexedProduct, title: "Кроссовки женские", url: "https://www.ozon.ru/product/shoes-300/" },
+        { ...indexedProduct, title: "Сумка кроссбоди женская", url: "https://www.ozon.ru/product/bag-301/" },
+      ],
+    }), { status: 200 }));
+
+    const [result] = await searchOzonIndexedCompetitors({
+      apiKey: "test-key",
+      targets: [{
+        ...target("shoes", "302"),
+        typeId: 44,
+        categoryNameRu: "Кроссовки",
+        categoryPathRu: ["Обувь", "Женская обувь", "Кроссовки"],
+      }],
+      ownSkus: new Set(["302"]),
+      fetchImpl,
+    });
+
+    expect(result?.competitors.map((item) => item.sku)).toEqual(["300"]);
+  });
+
+  it("accepts either product type from a compound official category", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      results: [
+        { ...indexedProduct, title: "Блузка женская", url: "https://www.ozon.ru/product/blouse-400/" },
+        { ...indexedProduct, title: "Рубашка женская", url: "https://www.ozon.ru/product/shirt-401/" },
+        { ...indexedProduct, title: "Брюки женские", url: "https://www.ozon.ru/product/trousers-402/" },
+      ],
+    }), { status: 200 }));
+
+    const [result] = await searchOzonIndexedCompetitors({
+      apiKey: "test-key",
+      targets: [{
+        ...target("tops", "403"),
+        typeId: 45,
+        categoryNameRu: "Блузки и рубашки",
+        categoryPathRu: ["Одежда", "Женская одежда", "Блузки и рубашки"],
+      }],
+      ownSkus: new Set(["403"]),
+      fetchImpl,
+    });
+
+    expect(result?.competitors.map((item) => item.sku)).toEqual(["400", "401"]);
   });
 
   it("keeps other products when one search response is malformed", async () => {
@@ -123,8 +205,8 @@ describe("Ozon search index", () => {
     const results = await searchOzonIndexedCompetitors({
       apiKey: "test-key",
       targets: [
-        { offerId: "bad", title: "Мужское поло", publicSku: "100", quantity: 0, revenueRub: 0 },
-        { offerId: "good", title: "Мужское поло", publicSku: "200", quantity: 0, revenueRub: 0 },
+        { ...target("bad", "100"), typeId: 1 },
+        { ...target("good", "200"), typeId: 2 },
       ],
       ownSkus: new Set(["100", "200"]),
       fetchImpl,
