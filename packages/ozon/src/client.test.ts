@@ -232,7 +232,10 @@ describe("OzonClient", () => {
       images: ["https://example.test/image.jpg"],
     });
     await client.updateAttributes({
-      items: [{ offer_id: "offer-1", attributes: [{ id: 1, values: [{ value: "Red" }] }] }],
+      items: [{
+        offer_id: "offer-1",
+        attributes: [{ id: 1, values: [{ value: "Red", dictionaryValueId: 77 }] }],
+      }],
     });
     await client.deleteProducts({
       products: [{ product_id: 99 }],
@@ -251,7 +254,18 @@ describe("OzonClient", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       "https://example.test/v1/product/attributes/update",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          items: [{
+            offer_id: "offer-1",
+            attributes: [{
+              id: 1,
+              values: [{ value: "Red", dictionary_value_id: 77 }],
+            }],
+          }],
+        }),
+      }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,

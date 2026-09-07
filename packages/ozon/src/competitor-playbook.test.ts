@@ -95,6 +95,10 @@ describe("Ozon competitor attribute playbook", () => {
     ]));
     expect(parseCategoryAttributePlaybook(playbook)).toEqual(playbook);
     expect(parseCategoryAttributePlaybook({ ...playbook, categoryKey: "wrong" })).toBeNull();
+    expect(parseCategoryAttributePlaybook({
+      ...playbook,
+      attributes: [{ ...playbook.attributes[0], commonValues: [{ value: 123 }] }],
+    })).toBeNull();
   });
 
   it("only proposes values supported by the own product content", () => {
@@ -154,8 +158,7 @@ describe("Ozon competitor attribute playbook", () => {
       }),
     ]));
     expect(result.actionableCount).toBe(1);
-    expect(result.mergedAttributes).toEqual([
-      { id: 30, values: [{ value: "Синий" }] },
+    expect(result.actionAttributes).toEqual([
       { id: 10, values: [{ value: "Хлопок", dictionaryValueId: 1001 }] },
     ]);
   });
@@ -186,6 +189,32 @@ describe("Ozon competitor attribute playbook", () => {
       currentValues: ["Лен"],
     });
     expect(result.actionableCount).toBe(0);
-    expect(result.mergedAttributes).toBeNull();
+    expect(result.actionAttributes).toBeNull();
+  });
+
+  it("requires a complete own-content value match instead of a word fragment", () => {
+    const playbook = buildCategoryAttributePlaybook({
+      descriptionCategoryId: 1,
+      typeId: 2,
+      categoryName: "Рубашки",
+      categoryAttributes: [categoryAttributes[1]!],
+      dictionaryValues: new Map([[20, [{ id: 2001, value: "Лето" }]]]),
+      competitors: [
+        { url: "https://www.ozon.ru/product/1/", attributes: { Сезон: "Лето" }, description: null },
+      ],
+    });
+    const result = buildProductAttributeRecommendations({
+      playbook,
+      product: {
+        offer_id: "offer-3",
+        description_category_id: 1,
+        type_id: 2,
+        name: "Рубашка для прогулок летом",
+        attributes: [],
+      },
+    });
+
+    expect(result.actionableCount).toBe(0);
+    expect(result.recommendations[0]).toMatchObject({ status: "NEEDS_CONFIRMATION" });
   });
 });

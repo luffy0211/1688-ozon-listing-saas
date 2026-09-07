@@ -50,7 +50,7 @@ function numberFromText(value: string) {
 }
 
 function extractAttributes(lines: string[]) {
-  return Object.fromEntries(ATTRIBUTE_NAMES.flatMap((name) => {
+  const known = Object.fromEntries(ATTRIBUTE_NAMES.flatMap((name) => {
     const index = lines.findIndex((line) => line === name || line.startsWith(`${name}:`));
     if (index < 0) return [];
     const inline = lines[index]!.slice(name.length + 1).trim();
@@ -58,6 +58,19 @@ function extractAttributes(lines: string[]) {
     const value = inline || (next && !ATTRIBUTE_NAMES.includes(next) && !SECTION_NAMES.has(next) ? next : null);
     return value ? [[name, value]] : [];
   }));
+  const start = lines.findIndex((line) => /^Характеристики(?: товара)?$/i.test(line));
+  if (start < 0) return known;
+  const section = lines.slice(start + 1);
+  const end = section.findIndex((line) => SECTION_NAMES.has(line));
+  const candidates = section.slice(0, end < 0 ? undefined : end);
+  const dynamic: Record<string, string> = {};
+  for (let index = 0; index < candidates.length; index += 2) {
+    const name = candidates[index];
+    const value = candidates[index + 1];
+    if (!name || !value || name.length > 100 || value.length > 500) continue;
+    dynamic[name.replace(/:$/, "").trim()] = value.trim();
+  }
+  return { ...dynamic, ...known };
 }
 
 function extractDescription(lines: string[]) {

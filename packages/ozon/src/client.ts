@@ -24,6 +24,7 @@ import type {
   UpdateAttributesRequest,
   UpdateStocksRequest,
 } from "./types";
+import { wireAttributes } from "./payload";
 
 export type OzonClientOptions = {
   clientId: string;
@@ -183,7 +184,12 @@ export class OzonClient {
   }
 
   async updateAttributes(payload: UpdateAttributesRequest): Promise<ProductMutationResult> {
-    const res = await this.mutationRequest<unknown>("/v1/product/attributes/update", payload);
+    const res = await this.mutationRequest<unknown>("/v1/product/attributes/update", {
+      items: payload.items.map((item) => ({
+        ...item,
+        attributes: wireAttributes(item.attributes),
+      })),
+    });
     return { raw: res };
   }
 

@@ -16,7 +16,7 @@ function positiveInt(value: number, field: string): number {
   return Math.ceil(value);
 }
 
-function wireAttributes(attributes: OzonAttribute[]): OzonProductPayload["attributes"] {
+export function wireAttributes(attributes: OzonAttribute[]): OzonProductPayload["attributes"] {
   return attributes.map((attribute) => ({
     id: attribute.id,
     values: attribute.values.map((value) => ({

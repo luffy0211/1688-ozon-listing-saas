@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildCompetitorBatchProposal,
   buildStoreDiagnosis,
   cachedCompetitorReport,
   lowContentRatingProducts,
@@ -29,6 +30,87 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("Ozon operations helpers", () => {
+  it("builds one approval-gated batch from evidence-backed attribute additions", () => {
+    const proposal = buildCompetitorBatchProposal({
+      storeId: "store-1",
+      reportIds: ["report-1"],
+      productRecommendations: [
+        {
+          offerId: "offer-1",
+          productId: "44",
+          categoryKey: "1:2",
+          categoryMatches: true,
+          recommendations: [
+            {
+              ozonAttributeId: 10,
+              ozonNameRu: "Материал",
+              competitorNameRu: "Материал",
+              required: false,
+              status: "ADD",
+              currentValues: [],
+              suggestedValue: "Хлопок",
+              dictionaryValueId: 1001,
+              evidenceSource: "OWN_CONTENT",
+              competitorCoverageRate: 1,
+              evidenceUrls: ["https://www.ozon.ru/product/1/"],
+              reasonZh: "自家描述包含该值。",
+            },
+          ],
+          actionableCount: 1,
+          actionAttributes: [
+            { id: 10, values: [{ value: "Хлопок", dictionaryValueId: 1001 }] },
+          ],
+        },
+        {
+          offerId: "offer-2",
+          productId: "45",
+          categoryKey: "1:2",
+          categoryMatches: true,
+          recommendations: [],
+          actionableCount: 0,
+          actionAttributes: null,
+        },
+      ],
+    });
+
+    expect(proposal).toMatchObject({
+      type: "BULK_PRODUCT_UPDATE",
+      storeId: "store-1",
+      riskLevel: "MEDIUM",
+      payload: {
+        source: "competitor_attribute_playbook",
+        reportIds: ["report-1"],
+        items: [
+          {
+            type: "UPDATE_ATTRIBUTES",
+            offerId: "offer-1",
+            productId: "44",
+            attributes: [
+              { id: 10, values: [{ value: "Хлопок", dictionaryValueId: 1001 }] },
+            ],
+          },
+        ],
+      },
+    });
+    expect(proposal?.payload.recommendations).toHaveLength(1);
+  });
+
+  it("does not create a batch when every suggestion needs confirmation", () => {
+    expect(buildCompetitorBatchProposal({
+      storeId: "store-1",
+      reportIds: ["report-1"],
+      productRecommendations: [{
+        offerId: "offer-1",
+        productId: "44",
+        categoryKey: "1:2",
+        categoryMatches: true,
+        recommendations: [],
+        actionableCount: 0,
+        actionAttributes: null,
+      }],
+    })).toBeNull();
+  });
+
   it("does not reuse incomplete competitor reports", () => {
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [] })).toBeNull();
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [{}] })).toBeNull();
