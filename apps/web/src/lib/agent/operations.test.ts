@@ -33,13 +33,13 @@ describe("Ozon operations helpers", () => {
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [] })).toBeNull();
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [{}] })).toBeNull();
     expect(cachedCompetitorReport({
-      source: "ozon_public_category",
+      source: "ozon_search_index",
       category: { url: "https://www.ozon.ru/category/example-1/" },
       competitors: [{ sku: "1" }],
     })).toBeNull();
     expect(cachedCompetitorReport({
-      source: "ozon_public_category",
-      detailScope: "attributes_description",
+      source: "ozon_search_index",
+      detailScope: "search_index_attributes_description",
       category: { url: "https://www.ozon.ru/category/example-1/" },
       competitors: [{ sku: "1" }],
     })).toBeTruthy();

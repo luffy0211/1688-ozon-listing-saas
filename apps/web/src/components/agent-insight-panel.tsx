@@ -55,9 +55,9 @@ const commands = [
     iconClassName: "bg-[#ff5b22] text-white",
   },
   {
-    title: "同类目竞品雷达",
-    detail: "二级类目 · 价格评分 · 差距建议",
-    prompt: "分析当前店铺销量靠前商品的同二级类目竞品，并为差距最大的商品生成待确认优化方案。",
+    title: "搜索索引竞品雷达",
+    detail: "搜索索引 · 属性描述 · 差距建议",
+    prompt: "分析当前店铺商品的 Ozon 搜索索引相似竞品，并为差距最大的商品生成待确认优化方案。",
     icon: Binoculars,
     className: "border-[#18a7a0] bg-[#e7fbf8] text-[#075e5a] hover:bg-[#cef6f1]",
     iconClassName: "bg-[#087f78] text-white",
@@ -206,12 +206,12 @@ function CompetitorInsight({ source }: { source: AgentInsightSource }) {
   return (
     <div className="border-l-4 border-[#087f78] bg-[#effcf9] p-3">
       <div className="flex items-center gap-2 font-bold text-[#075e5a]">
-        <ScanSearch className="h-4 w-4" aria-hidden="true" /> 同二级类目竞品雷达
+        <ScanSearch className="h-4 w-4" aria-hidden="true" /> 搜索索引竞品雷达
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
         <Metric label="分析自家商品" value={source.competitorReportCount ?? 0} accent="#087f78" />
         <Metric label="有效竞品样本" value={source.competitorCount ?? 0} accent="#f5c842" />
-        <Metric label="类目覆盖" value={source.categories?.length ?? 0} accent="#d858a8" />
+        <Metric label="搜索词覆盖" value={source.categories?.length ?? 0} accent="#d858a8" />
       </div>
       {source.categories?.length ? (
         <div className="mt-3 flex flex-wrap gap-2">
