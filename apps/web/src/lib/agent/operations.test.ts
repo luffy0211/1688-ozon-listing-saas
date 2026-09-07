@@ -42,7 +42,65 @@ describe("Ozon operations helpers", () => {
       detailScope: "search_index_attributes_description",
       category: { url: "https://www.ozon.ru/category/example-1/" },
       competitors: [{ sku: "1" }],
-    })).toBeTruthy();
+    })).toBeNull();
+  });
+
+  it("rebuilds content benchmarks from cached competitor details", () => {
+    const product = (sku: string, attributes: Record<string, string>) => ({
+      sku,
+      url: `https://www.ozon.ru/product/${sku}/`,
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes,
+      description: "Хлопковое поло для повседневной носки.",
+      reviews: [],
+    });
+    const report = cachedCompetitorReport({
+      source: "ozon_search_index",
+      detailScope: "search_index_attributes_description",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: product("own", {}),
+      competitors: [product("1", { Материал: "Хлопок" }), product("2", { Материал: "Хлопок" })],
+      benchmarks: { sampleSize: 2 },
+    });
+
+    expect(report).toMatchObject({
+      benchmarks: {
+        content: {
+          attributePatterns: [expect.objectContaining({ name: "Материал", coverageRate: 1 })],
+        },
+      },
+    });
+  });
+
+  it("rejects cached competitor attributes with invalid value types", () => {
+    const malformed = {
+      sku: "1",
+      url: "https://www.ozon.ru/product/1/",
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes: { Материал: ["Хлопок"] },
+      description: null,
+      reviews: [],
+    };
+
+    expect(cachedCompetitorReport({
+      source: "ozon_search_index",
+      detailScope: "search_index_attributes_description",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: { ...malformed, sku: "own", attributes: {} },
+      competitors: [malformed],
+    })).toBeNull();
   });
 
   it("summarizes Ozon net payout and platform charges", () => {

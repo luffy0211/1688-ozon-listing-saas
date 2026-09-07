@@ -8,7 +8,9 @@ import {
 } from "@saas/ozon";
 import { env } from "@/lib/env";
 import {
+  buildCompetitorBenchmarks,
   type OzonCategoryCompetitorResult,
+  type OzonPublicProduct,
 } from "./ozon-public-crawler";
 import { searchOzonIndexedCompetitors } from "./ozon-search-index";
 import { getProfitGuardrails } from "./policy";
@@ -305,15 +307,46 @@ function record(value: unknown): Record<string, unknown> {
 
 const COMPETITOR_DETAIL_SCOPE = "search_index_attributes_description";
 
+function cachedPublicProduct(value: unknown): OzonPublicProduct | null {
+  const product = record(value);
+  const attributes = record(product.attributes);
+  const nullableNumber = (item: unknown) => item === null || (typeof item === "number" && Number.isFinite(item));
+  const nullableString = (item: unknown) => item === null || typeof item === "string";
+  return typeof product.sku === "string" &&
+    typeof product.url === "string" &&
+    typeof product.title === "string" &&
+    nullableNumber(product.priceRub) &&
+    nullableNumber(product.oldPriceRub) &&
+    nullableNumber(product.rating) &&
+    nullableNumber(product.reviewCount) &&
+    nullableString(product.sellerName) &&
+    nullableString(product.description) &&
+    Array.isArray(product.imageUrls) && product.imageUrls.every((item) => typeof item === "string") &&
+    product.attributes !== null && typeof product.attributes === "object" && !Array.isArray(product.attributes) &&
+    Object.values(attributes).every((item) => typeof item === "string") &&
+    Array.isArray(product.reviews)
+    ? product as OzonPublicProduct
+    : null;
+}
+
 export function cachedCompetitorReport(value: unknown) {
   const payload = record(value);
-  return payload.source === "ozon_search_index" &&
+  const report = payload.source === "ozon_search_index" &&
     payload.detailScope === COMPETITOR_DETAIL_SCOPE &&
     Array.isArray(payload.competitors) &&
     payload.competitors.length > 0 &&
     Boolean(record(payload.category).url)
     ? payload
     : null;
+  if (!report) return null;
+
+  const ownProduct = cachedPublicProduct(report.ownProduct);
+  const competitors = (report.competitors as unknown[]).map(cachedPublicProduct);
+  if (!ownProduct || competitors.some((product) => !product)) return null;
+  return {
+    ...report,
+    benchmarks: buildCompetitorBenchmarks(ownProduct, competitors as OzonPublicProduct[]),
+  };
 }
 
 export async function analyzeOzonCompetitors(params: {

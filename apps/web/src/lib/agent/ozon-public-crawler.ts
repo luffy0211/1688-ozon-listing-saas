@@ -328,9 +328,16 @@ export function buildCompetitorBenchmarks(own: OzonPublicProduct, competitors: O
   const priceMedian = median(competitors.map((item) => item.priceRub));
   const termCounts = new Map<string, number>();
   const attributeCounts = new Map<string, number>();
+  const attributeValueCounts = new Map<string, Map<string, number>>();
   competitors.forEach((item) => {
     new Set(titleTerms(item.title)).forEach((term) => termCounts.set(term, (termCounts.get(term) ?? 0) + 1));
-    Object.keys(item.attributes).forEach((name) => attributeCounts.set(name, (attributeCounts.get(name) ?? 0) + 1));
+    Object.entries(item.attributes).forEach(([name, value]) => {
+      attributeCounts.set(name, (attributeCounts.get(name) ?? 0) + 1);
+      const values = attributeValueCounts.get(name) ?? new Map<string, number>();
+      new Set(value.split(/[,;|]+/).map((part) => part.trim()).filter(Boolean))
+        .forEach((part) => values.set(part, (values.get(part) ?? 0) + 1));
+      attributeValueCounts.set(name, values);
+    });
   });
   const threshold = Math.max(2, Math.ceil(competitors.length / 2));
   const ownTerms = new Set(titleTerms(own.title));
@@ -359,6 +366,26 @@ export function buildCompetitorBenchmarks(own: OzonPublicProduct, competitors: O
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([name]) => name),
+    content: {
+      attributePatterns: [...attributeCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, coverageCount]) => ({
+          name,
+          coverageCount,
+          coverageRate: coverageCount / competitors.length,
+          commonValues: [...(attributeValueCounts.get(name) ?? [])]
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([value, count]) => ({ value, count })),
+        })),
+      descriptions: {
+        availableCount: competitors.filter((item) => Boolean(item.description)).length,
+        samples: competitors
+          .filter((item): item is OzonPublicProduct & { description: string } => Boolean(item.description))
+          .slice(0, 3)
+          .map((item) => ({ sku: item.sku, title: item.title, text: item.description.slice(0, 500) })),
+      },
+    },
     reviewEvidence: competitors.flatMap((item) => item.reviews).slice(0, 30),
   };
 }

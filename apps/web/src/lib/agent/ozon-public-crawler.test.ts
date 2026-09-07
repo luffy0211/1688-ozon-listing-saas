@@ -118,9 +118,10 @@ describe("Ozon public category crawler", () => {
             images: ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg", "https://cdn.test/c.jpg"],
           },
           "webReviewProductScore-1": { totalScore: "4.8", reviewsCount: "300" },
+          "webDescription-1": { description: "Легкое летнее платье из шифона для прогулок." },
           "webCharacteristics-1": {
             characteristics: [
-              { name: "Материал", values: [{ text: "Шифон" }] },
+              { name: "Материал", values: [{ text: "Шифон" }, { text: "Полиэстер" }] },
               { name: "Сезон", values: [{ text: "Лето" }] },
             ],
           },
@@ -135,6 +136,7 @@ describe("Ozon public category crawler", () => {
             images: ["https://cdn.test/d.jpg", "https://cdn.test/e.jpg"],
           },
           "webReviewProductScore-1": { totalScore: "4.9", reviewsCount: "500" },
+          "webDescription-1": { description: "Вечернее шифоновое платье с легким силуэтом." },
           "webCharacteristics-1": {
             characteristics: [
               { name: "Материал", values: [{ text: "Шифон" }] },
@@ -153,6 +155,55 @@ describe("Ozon public category crawler", () => {
     expect(result.images).toEqual({ ownCount: 1, medianCount: 2.5 });
     expect(result.missingTitleTerms).toContain("летнее");
     expect(result.missingAttributes).toContain("Сезон");
+    expect(result.content.attributePatterns).toEqual(expect.arrayContaining([
+      {
+        name: "Материал",
+        coverageCount: 2,
+        coverageRate: 1,
+        commonValues: [{ value: "Шифон", count: 2 }, { value: "Полиэстер", count: 1 }],
+      },
+      {
+        name: "Сезон",
+        coverageCount: 2,
+        coverageRate: 1,
+        commonValues: [{ value: "Лето", count: 2 }],
+      },
+    ]));
+    expect(result.content.descriptions.availableCount).toBe(2);
+    expect(result.content.descriptions.samples).toEqual([
+      expect.objectContaining({ sku: "200", text: expect.stringContaining("летнее платье") }),
+      expect.objectContaining({ sku: "300", text: expect.stringContaining("шифоновое платье") }),
+    ]);
+  });
+
+  it("keeps content evidence when price and rating are unavailable", () => {
+    const product = (sku: string, attributes: Record<string, string>, description: string | null) => ({
+      sku,
+      url: `https://www.ozon.ru/product/${sku}/`,
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes,
+      description,
+      reviews: [],
+    });
+    const result = buildCompetitorBenchmarks(product("own", {}, null), [
+      product("1", { Материал: "Хлопок" }, "Базовое хлопковое поло для повседневной носки."),
+      product("2", { Материал: "Хлопок" }, "Мужское поло прямого кроя."),
+    ]);
+
+    expect(result.price.medianRub).toBeNull();
+    expect(result.rating).toEqual({ median: null, reviewCountMedian: null });
+    expect(result.content.attributePatterns[0]).toMatchObject({
+      name: "Материал",
+      coverageRate: 1,
+      commonValues: [{ value: "Хлопок", count: 2 }],
+    });
+    expect(result.content.descriptions.availableCount).toBe(2);
   });
 
   it("enriches only attributes and description from product detail", () => {
