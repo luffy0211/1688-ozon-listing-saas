@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
   normalizeOzonProductContent,
   requiredOzonToolForPrompt,
 } from "./content-agent";
+
+describe("contentAgentModelSettings", () => {
+  it("disables DeepSeek thinking for multi-turn tool compatibility", () => {
+    expect(contentAgentModelSettings("https://api.deepseek.com")).toEqual({
+      providerData: { thinking: { type: "disabled" } },
+    });
+    expect(contentAgentModelSettings("https://api.openai.com/v1")).toEqual({});
+  });
+});
 
 describe("normalizeOzonProductContent", () => {
   it("maps Ozon product info and stock into a content snapshot", () => {

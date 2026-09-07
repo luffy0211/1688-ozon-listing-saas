@@ -353,6 +353,16 @@ function createModelProvider() {
   });
 }
 
+export function contentAgentModelSettings(baseUrl: string) {
+  try {
+    return new URL(baseUrl).hostname === "api.deepseek.com"
+      ? { providerData: { thinking: { type: "disabled" } } }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function buildInstructions(offerId: string | null) {
   return [
     "读取类操作可以直接调用真实工具，不需要人工确认。",
@@ -1162,6 +1172,7 @@ export async function runOzonContentAgent(params: {
     const agent = new Agent({
       name: "Ozon Operations Agent",
       model: env.openaiAgentModel,
+      modelSettings: contentAgentModelSettings(env.openaiBaseUrl),
       instructions: buildInstructions(offerId),
       tools: [
         getStoreSnapshotTool,
