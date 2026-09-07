@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Activity,
   BarChart3,
   Binoculars,
   ChevronRight,
@@ -9,7 +8,6 @@ import {
   Gauge,
   Megaphone,
   ScanSearch,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { cn } from "./ui";
@@ -51,24 +49,24 @@ const commands = [
     detail: "经营指标 · 低分商品 · 待确认优化",
     prompt: "请对当前店铺做完整诊断，找出内容评分最低的商品，给出建议，并为最紧急的商品生成待确认优化方案。",
     icon: Gauge,
-    className: "border-[#ff8a3d] bg-[#fff2e8] text-[#7a2d00] hover:bg-[#ffe4d1]",
-    iconClassName: "bg-[#ff5b22] text-white",
+    className: "border-white bg-white/80 text-[#26334d] hover:border-[#cbdcff] hover:bg-white",
+    iconClassName: "bg-[#eaf1ff] text-[#3478f6]",
   },
   {
     title: "搜索索引竞品雷达",
     detail: "搜索索引 · 属性描述 · 差距建议",
     prompt: "分析当前店铺商品的 Ozon 搜索索引相似竞品，并为差距最大的商品生成待确认优化方案。",
     icon: Binoculars,
-    className: "border-[#18a7a0] bg-[#e7fbf8] text-[#075e5a] hover:bg-[#cef6f1]",
-    iconClassName: "bg-[#087f78] text-white",
+    className: "border-white bg-white/80 text-[#26334d] hover:border-[#bde8ee] hover:bg-white",
+    iconClassName: "bg-[#e4f8fb] text-[#0795ad]",
   },
   {
     title: "活动机会中心",
     detail: "实时活动 · 候选商品 · 报名审批",
     prompt: "读取当前 Ozon 活动和候选商品，告诉我最值得关注的活动，不要直接报名。",
     icon: Megaphone,
-    className: "border-[#d858a8] bg-[#fff0f9] text-[#81235d] hover:bg-[#ffe0f3]",
-    iconClassName: "bg-[#bd2f87] text-white",
+    className: "border-white bg-white/80 text-[#26334d] hover:border-[#d9cdf8] hover:bg-white",
+    iconClassName: "bg-[#f0eaff] text-[#7659d6]",
   },
 ];
 
@@ -80,27 +78,16 @@ export function AgentCommandDeck({
   onRun: (prompt: string) => void;
 }) {
   return (
-    <section className="mb-4 overflow-hidden rounded-lg border-2 border-gray-950 bg-[#101828] shadow-[6px_6px_0_#f5c842]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/15 px-4 py-3 text-white">
-        <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#f5c842] text-gray-950">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div>
-            <div className="text-sm font-bold">运营指挥台</div>
-            <div className="text-xs text-gray-300">真实数据进入，修改动作必须确认</div>
-          </div>
+    <section className="border-b border-[#e3ebf5] bg-[linear-gradient(135deg,rgba(229,247,255,0.72),rgba(241,236,255,0.68))] px-4 py-5 md:px-6">
+      <div className="mx-auto max-w-5xl">
+        <div className="flex items-center gap-1.5 text-xs font-bold text-[#3478f6]">
+          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+          AI ECOMMERCE COPILOT
         </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 rounded-md bg-[#1fbd83] px-2 py-1 font-semibold text-gray-950">
-            <Activity className="h-3.5 w-3.5" aria-hidden="true" /> 实时读取
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-1 text-white">
-            <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" /> 人工审批
-          </span>
-        </div>
+        <h1 className="mt-2 text-2xl font-bold text-[#15213b] md:text-3xl">今天想先优化哪一部分？</h1>
+        <p className="mt-1.5 text-sm text-[#708099]">读取真实店铺和竞品数据，执行商品修改前由你确认。</p>
       </div>
-      <div className="grid gap-2 p-3 md:grid-cols-3">
+      <div className="mx-auto mt-4 grid max-w-5xl gap-3 md:grid-cols-3">
         {commands.map((command) => {
           const Icon = command.icon;
           return (
@@ -111,16 +98,16 @@ export function AgentCommandDeck({
               onClick={() => onRun(command.prompt)}
               title={command.title}
               className={cn(
-                "group flex min-h-24 items-center gap-3 rounded-md border-2 p-3 text-left transition-transform hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50",
+                "group flex min-h-24 items-center gap-3 rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(52,80,124,0.07)] transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(52,80,124,0.11)] disabled:cursor-not-allowed disabled:opacity-50",
                 command.className,
               )}
             >
-              <span className={cn("flex h-11 w-11 shrink-0 items-center justify-center rounded-md", command.iconClassName)}>
+              <span className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl", command.iconClassName)}>
                 <Icon className="h-5 w-5" aria-hidden="true" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold">{command.title}</span>
-                <span className="mt-1 block text-xs leading-5 opacity-80">{command.detail}</span>
+                <span className="mt-1 block text-xs leading-5 text-[#8290a8]">{command.detail}</span>
               </span>
               <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
             </button>
@@ -133,7 +120,7 @@ export function AgentCommandDeck({
 
 function Metric({ label, value, accent }: { label: string; value: string | number; accent: string }) {
   return (
-    <div className="border-l-4 bg-white px-3 py-2 shadow-sm" style={{ borderColor: accent }}>
+    <div className="rounded-lg border border-[#e2eaf4] bg-white px-3 py-2" style={{ borderTopColor: accent }}>
       <div className="text-[11px] font-medium text-gray-500">{label}</div>
       <div className="mt-0.5 text-lg font-black text-gray-950">{value}</div>
     </div>
@@ -143,7 +130,7 @@ function Metric({ label, value, accent }: { label: string; value: string | numbe
 function DiagnosisInsight({ source }: { source: AgentInsightSource }) {
   const products = source.lowContentRatingProducts ?? [];
   return (
-    <div className="border-l-4 border-[#ff5b22] bg-[#fff8f2] p-3">
+    <div className="rounded-xl border border-[#f3dfd2] bg-[#fffaf6] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 font-bold text-[#702400]">
           <Gauge className="h-4 w-4" aria-hidden="true" /> 店铺诊断快照
@@ -204,7 +191,7 @@ function DiagnosisInsight({ source }: { source: AgentInsightSource }) {
 
 function CompetitorInsight({ source }: { source: AgentInsightSource }) {
   return (
-    <div className="border-l-4 border-[#087f78] bg-[#effcf9] p-3">
+    <div className="rounded-xl border border-[#ccebe6] bg-[#f3fcfa] p-3">
       <div className="flex items-center gap-2 font-bold text-[#075e5a]">
         <ScanSearch className="h-4 w-4" aria-hidden="true" /> 搜索索引竞品雷达
       </div>
@@ -234,7 +221,7 @@ function DefaultInsight({ source }: { source: AgentInsightSource }) {
     ["候选", source.candidateCount],
   ].filter((entry) => typeof entry[1] === "number") as Array<[string, number]>;
   return (
-    <div className="border-l-4 border-[#5d55c7] bg-[#f6f5ff] p-3">
+    <div className="rounded-xl border border-[#ddd8f3] bg-[#faf9ff] p-3">
       <div className="flex items-center gap-2 font-bold text-[#3d368d]">
         <BarChart3 className="h-4 w-4" aria-hidden="true" /> {source.label}
       </div>

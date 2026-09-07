@@ -6,10 +6,12 @@ import type { ReactNode } from "react";
 import {
   BarChart3,
   Bot,
+  ChevronDown,
   GitBranch,
   LayoutDashboard,
   PackageSearch,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import type { SessionPayload } from "@/lib/auth";
 import { LogoutButton } from "./logout-button";
@@ -33,19 +35,30 @@ export function AppShell({
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-950">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-gray-200 bg-white lg:flex lg:flex-col">
-        <Link href="/dashboard" className="flex h-16 items-center gap-3 border-b border-gray-200 px-5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
-            OZ
+    <div className="min-h-screen bg-[linear-gradient(135deg,#dff7ff_0%,#f6f8ff_48%,#eeeafd_100%)] p-0 text-[#14213d] lg:p-3">
+      <aside className="fixed inset-y-3 left-3 z-30 hidden w-[272px] overflow-hidden rounded-[28px] border border-white/80 bg-white/70 shadow-[0_20px_60px_rgba(48,88,145,0.13)] backdrop-blur-xl lg:flex lg:flex-col">
+        <Link href="/dashboard" className="flex h-20 items-center gap-3 border-b border-[#dce8f5] px-5">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#3478f6] text-white shadow-[0_8px_20px_rgba(52,120,246,0.28)]">
+            <Sparkles className="h-5 w-5" aria-hidden="true" />
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-gray-950">1688 到 Ozon</span>
-            <span className="block text-xs text-gray-500">跨境上架系统</span>
+            <span className="block text-[15px] font-bold text-[#17223d]">Ozon 运营中心</span>
+            <span className="mt-0.5 block text-xs text-[#8290a8]">跨境智能增长工作台</span>
           </span>
         </Link>
 
-        <nav className="flex-1 space-y-1 px-3 py-4">
+        <div className="px-4 pt-4">
+          <Link
+            href="/agent/content"
+            className="flex h-11 items-center justify-center gap-2 rounded-xl bg-[#3478f6] px-4 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(52,120,246,0.24)] transition-colors hover:bg-[#2868df]"
+          >
+            <Bot className="h-4 w-4" aria-hidden="true" />
+            开始 Agent 对话
+          </Link>
+        </div>
+
+        <nav className="flex-1 space-y-1 px-3 py-5">
+          <div className="mb-2 px-3 text-[11px] font-semibold text-[#9aa6ba]">工作空间</div>
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -54,79 +67,97 @@ export function AppShell({
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  "flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors",
-                  active ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-950",
+                  "flex h-11 items-center gap-3 rounded-xl px-3 text-sm font-semibold transition-all",
+                  active
+                    ? "bg-white text-[#2465dd] shadow-[0_7px_22px_rgba(54,88,140,0.10)]"
+                    : "text-[#52627b] hover:bg-white/65 hover:text-[#1d2b49]",
                 )}
               >
-                <Icon className="h-4 w-4" aria-hidden="true" />
+                <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
                 {item.label}
+                {item.href === "/agent/content" ? (
+                  <span className="ml-auto h-2 w-2 rounded-full bg-[#36bd8c]" aria-label="Agent 在线" />
+                ) : null}
               </Link>
             );
           })}
         </nav>
 
-        <div className="border-t border-gray-200 p-4">
-          <div className="min-w-0 rounded-lg bg-gray-50 p-3">
-            <div className="truncate text-sm font-medium text-gray-900">{user.email}</div>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <Badge tone={user.role === "admin" ? "violet" : "gray"}>{user.role}</Badge>
-              <LogoutButton />
+        <div className="mx-3 mb-3 border-t border-[#dce8f5] p-3 pt-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#eaf1ff] text-xs font-bold text-[#2465dd]">
+              {user.email.slice(0, 2).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold text-[#26334d]">{user.email}</div>
+              <Badge tone={user.role === "admin" ? "violet" : "gray"} className="mt-1">
+                {user.role}
+              </Badge>
             </div>
+            <LogoutButton />
           </div>
         </div>
       </aside>
 
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/95 backdrop-blur">
-          <div className="flex h-14 items-center justify-between gap-3 px-4 md:px-6">
-            <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
-              <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600 text-xs font-bold text-white">
-                OZ
-              </span>
-              <span className="text-sm font-semibold">1688 到 Ozon</span>
-            </Link>
-            <div className="hidden items-center gap-2 text-sm text-gray-500 lg:flex">
-              <PackageSearch className="h-4 w-4" />
-              采集、翻译、上架、复盘
-            </div>
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="hidden min-w-0 text-right sm:block">
-                <div className="truncate text-sm font-medium text-gray-700">{user.email}</div>
-                <div className="text-xs text-gray-500">{user.role}</div>
-              </div>
-              <Link
-                href="/settings"
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <Settings className="h-4 w-4" aria-hidden="true" />
-                设置
+      <div className="min-h-[calc(100vh-24px)] lg:pl-[288px]">
+        <div className="min-h-[calc(100vh-24px)] overflow-hidden bg-[#f8fbff]/85 shadow-[0_20px_60px_rgba(48,88,145,0.10)] backdrop-blur-xl lg:rounded-[28px] lg:border lg:border-white/80">
+          <header className="sticky top-0 z-20 border-b border-[#e3ebf5] bg-white/80 backdrop-blur-xl">
+            <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6">
+              <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#3478f6] text-white">
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="text-sm font-bold">Ozon 运营中心</span>
               </Link>
-              <div className="lg:hidden">
-                <LogoutButton />
+              <div className="hidden items-center gap-3 lg:flex">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f1f5fb] text-[#52627b]">
+                  <PackageSearch className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div className="flex h-9 items-center gap-2 rounded-xl bg-white px-3 text-sm font-semibold text-[#26334d] shadow-[0_4px_14px_rgba(55,84,130,0.08)]">
+                  Ozon 店铺工作区
+                  <ChevronDown className="h-3.5 w-3.5 text-[#9aa6ba]" aria-hidden="true" />
+                </div>
+              </div>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="hidden items-center gap-1.5 rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-3 py-1.5 text-xs font-semibold text-[#168864] sm:inline-flex">
+                  <span className="h-2 w-2 rounded-full bg-[#36bd8c]" />
+                  系统在线
+                </span>
+                <Link
+                  href="/settings"
+                  aria-label="设置"
+                  title="设置"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white bg-white text-[#52627b] shadow-[0_4px_14px_rgba(55,84,130,0.08)] transition-colors hover:text-[#2465dd]"
+                >
+                  <Settings className="h-4 w-4" aria-hidden="true" />
+                </Link>
+                <div className="lg:hidden">
+                  <LogoutButton />
+                </div>
               </div>
             </div>
-          </div>
-          <nav className="flex gap-1 overflow-x-auto border-t border-gray-100 px-3 py-2 lg:hidden">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "inline-flex h-9 shrink-0 items-center gap-2 rounded-md px-3 text-sm font-medium",
-                    active ? "bg-blue-50 text-blue-700" : "text-gray-600 hover:bg-gray-100",
-                  )}
-                >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {item.label}
-                </Link>
-              );
-            })}
-          </nav>
-        </header>
-        <main className="mx-auto max-w-7xl px-4 py-5 md:px-6 md:py-7">{children}</main>
+            <nav className="scrollbar-none flex gap-1 overflow-x-auto border-t border-[#edf2f8] px-3 py-2 lg:hidden">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      "inline-flex h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold",
+                      active ? "bg-[#eaf1ff] text-[#2465dd]" : "text-[#67758e] hover:bg-white",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </header>
+          <main className="mx-auto max-w-[1600px] px-4 py-5 md:px-6 md:py-6">{children}</main>
+        </div>
       </div>
     </div>
   );

@@ -269,11 +269,11 @@ function ActionBubble({
     : [];
 
   return (
-    <section className="mt-3 border-t-2 border-gray-950 bg-[#fffdf5] pt-3">
+    <section className="mt-3 rounded-xl border border-[#dfe8f4] bg-[#f8fbff] p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={toneForStatus(action.status)}>{action.status}</Badge>
         <Badge tone={toneForRisk(action.riskLevel)}>{action.riskLevel}</Badge>
-        <span className="rounded-md bg-gray-950 px-2 py-1 text-xs font-bold text-white">{actionTypeLabel(action.type)}</span>
+        <span className="rounded-md bg-[#26334d] px-2 py-1 text-xs font-semibold text-white">{actionTypeLabel(action.type)}</span>
       </div>
       <div className="mt-2 text-sm font-semibold text-gray-950">{action.title}</div>
       <div className="mt-1 text-sm leading-6 text-gray-600">{action.rationale}</div>
@@ -420,7 +420,7 @@ function SessionSidebar({
   onNewChat: () => void;
 }) {
   return (
-    <aside className="hidden h-full w-72 shrink-0 flex-col border-l-2 border-gray-950 bg-[#fffdf5] p-3 lg:flex">
+    <aside className="hidden h-full w-64 shrink-0 flex-col rounded-2xl border border-white bg-white/75 p-3 shadow-[0_14px_40px_rgba(45,78,128,0.10)] backdrop-blur lg:flex">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-950">历史对话</div>
         <Button
@@ -442,10 +442,10 @@ function SessionSidebar({
           onClick={onNewChat}
           disabled={running}
           className={cn(
-            "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
+            "w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
             selectedSessionId === "new"
-              ? "border-gray-950 bg-[#f5c842] text-gray-950 shadow-[3px_3px_0_#101828]"
-              : "border-gray-300 bg-white text-gray-700 hover:border-[#18a7a0] hover:bg-[#effcf9]",
+              ? "border-[#bfd4ff] bg-[#eaf1ff] text-[#245fcf] shadow-[0_6px_16px_rgba(52,120,246,0.10)]"
+              : "border-transparent bg-white/70 text-gray-700 hover:border-[#dce8f5] hover:bg-white",
           )}
         >
           <div className="truncate font-medium">新对话</div>
@@ -459,10 +459,10 @@ function SessionSidebar({
             onClick={() => onSelect(session.id)}
             disabled={running}
             className={cn(
-              "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
+              "w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
               selectedSessionId === session.id
-                ? "border-gray-950 bg-[#dce8ff] text-[#1745a5] shadow-[3px_3px_0_#2457d6]"
-                : "border-gray-300 bg-white text-gray-700 hover:border-[#d858a8] hover:bg-[#fff0f9]",
+                ? "border-[#bfd4ff] bg-[#eaf1ff] text-[#245fcf] shadow-[0_6px_16px_rgba(52,120,246,0.10)]"
+                : "border-transparent bg-white/70 text-gray-700 hover:border-[#dce8f5] hover:bg-white",
             )}
           >
             <div className="truncate font-medium">{session.title ?? session.id}</div>
@@ -658,19 +658,20 @@ export function ContentAgentChat({
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-132px)] max-w-[1500px] gap-4">
-      <main className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-3 flex items-center justify-between gap-3 border-b-2 border-gray-950 pb-3">
+    <div className="mx-auto flex h-[calc(100vh-136px)] max-w-[1500px] gap-4">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white bg-white/45 shadow-[0_14px_40px_rgba(45,78,128,0.08)]">
+        <div className="flex items-center justify-between gap-3 border-b border-[#e3ebf5] bg-white/65 px-4 py-3 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border-2 border-gray-950 bg-[#f5c842] text-gray-950 shadow-[3px_3px_0_#101828]">
-              <Bot className="h-5 w-5" aria-hidden="true" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#3478f6] text-white shadow-[0_8px_20px_rgba(52,120,246,0.22)]">
+              <Bot className="h-[18px] w-[18px]" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <div className="truncate text-base font-black text-gray-950">
+              <div className="truncate text-sm font-bold text-[#17223d]">
                 Ozon 运营 Agent
               </div>
-              <div className="truncate text-xs font-medium text-gray-500">
-                诊断 · 竞品 · 优化 · 审批执行
+              <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-medium text-[#8290a8]">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#36bd8c]" />
+                在线 · 诊断、竞品与审批执行
               </div>
             </div>
           </div>
@@ -699,11 +700,11 @@ export function ContentAgentChat({
                 </Select>
               </div>
             ) : null}
-            <span className="hidden rounded-md bg-[#1fbd83] px-2 py-1 text-xs font-bold text-gray-950 sm:inline-flex">
+            <span className="hidden rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-2.5 py-1 text-xs font-semibold text-[#168864] sm:inline-flex">
               <ShieldCheck className="mr-1 h-3 w-3" aria-hidden="true" />
               改动需确认
             </span>
-            <span className="hidden rounded-md bg-[#dce8ff] px-2 py-1 text-xs font-bold text-[#1745a5] sm:inline-flex">读取直接执行</span>
+            <span className="hidden rounded-full border border-[#dbe6fb] bg-[#f2f6fd] px-2.5 py-1 text-xs font-semibold text-[#52627b] sm:inline-flex">读取直接执行</span>
           </div>
         </div>
 
@@ -713,7 +714,7 @@ export function ContentAgentChat({
         />
 
         {!agentConfig.configured ? (
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+          <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <div>
@@ -727,8 +728,8 @@ export function ContentAgentChat({
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-y-auto border-y border-gray-200 bg-[#f7f8fb] px-3 pr-2">
-          <div className="space-y-4 pb-4">
+        <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(240,247,255,0.75),rgba(248,251,255,0.35))] px-4 py-4 pr-3 md:px-5">
+          <div className="mx-auto max-w-5xl space-y-4 pb-4">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -739,10 +740,10 @@ export function ContentAgentChat({
               >
                 <div
                   className={cn(
-                    "max-w-[94%] rounded-lg px-4 py-3 text-sm leading-6",
+                    "max-w-[94%] rounded-2xl px-4 py-3 text-sm leading-6",
                     message.role === "user"
-                      ? "border-2 border-gray-950 bg-[#2457d6] text-white shadow-[4px_4px_0_#101828]"
-                      : "border-2 border-gray-950 bg-white text-gray-800 shadow-[4px_4px_0_#8ddbd3]",
+                      ? "rounded-br-md bg-[#3478f6] text-white shadow-[0_10px_24px_rgba(52,120,246,0.18)]"
+                      : "rounded-bl-md border border-white bg-white text-[#35415a] shadow-[0_10px_28px_rgba(49,78,122,0.09)]",
                   )}
                 >
                   <div className="whitespace-pre-wrap break-words">{message.content}</div>
@@ -761,7 +762,7 @@ export function ContentAgentChat({
             ))}
             {loadingHistory ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg border-2 border-gray-950 bg-[#fff2e8] px-4 py-3 text-sm font-semibold text-[#7a2d00] shadow-[3px_3px_0_#ff8a3d]">
+                <div className="inline-flex items-center gap-2 rounded-xl border border-[#f4dbc9] bg-[#fff7f1] px-4 py-3 text-sm font-semibold text-[#8d4d25] shadow-sm">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   正在加载历史
                 </div>
@@ -769,7 +770,7 @@ export function ContentAgentChat({
             ) : null}
             {running ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg border-2 border-gray-950 bg-[#fff0f9] px-4 py-3 text-sm font-semibold text-[#81235d] shadow-[3px_3px_0_#d858a8]">
+                <div className="inline-flex items-center gap-2 rounded-xl border border-[#e7dcfa] bg-[#f8f4ff] px-4 py-3 text-sm font-semibold text-[#6c55a6] shadow-sm">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   正在处理
                 </div>
@@ -779,8 +780,8 @@ export function ContentAgentChat({
           </div>
         </div>
 
-        <form onSubmit={submitPrompt} className="pt-3">
-          <div className="flex items-end gap-2 rounded-lg border-2 border-gray-950 bg-white p-2 shadow-[4px_4px_0_#f5c842] focus-within:ring-2 focus-within:ring-[#18a7a0]">
+        <form onSubmit={submitPrompt} className="border-t border-[#e3ebf5] bg-white/75 p-3 md:px-5">
+          <div className="mx-auto flex max-w-5xl items-end gap-2 rounded-2xl border border-[#d8e4f2] bg-white p-2 shadow-[0_10px_30px_rgba(46,80,132,0.10)] focus-within:border-[#9bbcff] focus-within:ring-4 focus-within:ring-[#3478f6]/10">
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -792,13 +793,13 @@ export function ContentAgentChat({
               }}
               placeholder="输入运营任务，例如：诊断低分商品并生成优化方案"
               disabled={!canSubmit}
-              className="min-h-11 max-h-40 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+              className="min-h-11 max-h-40 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-gray-900 outline-none placeholder:text-[#9aa6ba]"
               rows={1}
             />
             <Button
               type="submit"
               disabled={running || !canSubmit || !prompt.trim()}
-              className="h-10 w-10 shrink-0 px-0"
+              className="h-10 w-10 shrink-0 rounded-xl border-[#3478f6] bg-[#3478f6] px-0 hover:bg-[#2868df]"
               title="发送"
             >
               {running ? (
