@@ -70,6 +70,10 @@ describe("Ozon search index", () => {
     expect(parseIndexedOzonProduct({ ...indexedProduct, url: "https://example.com/product/1/" }, 1)).toBeNull();
     expect(parseIndexedOzonProduct({
       ...indexedProduct,
+      url: "https://www.ozon.ru/product/polo-mark-formelle-1607177448/features",
+    }, 1)?.sku).toBe("1607177448");
+    expect(parseIndexedOzonProduct({
+      ...indexedProduct,
       raw_content: "Материал\nСостав материала\n100% хлопок",
     }, 1)?.attributes).toEqual({ "Состав материала": "100% хлопок" });
   });

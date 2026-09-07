@@ -38,7 +38,8 @@ function productSku(url: string) {
   try {
     const parsed = new URL(url);
     if (parsed.hostname.replace(/^www\./, "") !== "ozon.ru" || !parsed.pathname.startsWith("/product/")) return null;
-    return parsed.pathname.match(/-(\d+)\/?$/)?.[1] ?? parsed.pathname.match(/\/product\/(\d+)\/?$/)?.[1] ?? null;
+    const productSlug = parsed.pathname.match(/^\/product\/([^/]+)/)?.[1];
+    return productSlug?.match(/(?:^|-)(\d+)$/)?.[1] ?? null;
   } catch {
     return null;
   }
