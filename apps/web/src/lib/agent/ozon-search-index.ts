@@ -103,9 +103,15 @@ function extractDescription(lines: string[], text: string) {
 
 export function parseIndexedOzonProduct(result: IndexedResult, position: number): OzonPublicProduct | null {
   if (!result.url) return null;
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(result.url);
+  } catch {
+    return null;
+  }
+  if (/\/(?:reviews|questions)(?:\/|$)/i.test(parsedUrl.pathname)) return null;
   const sku = productSku(result.url);
   if (!sku) return null;
-  const parsedUrl = new URL(result.url);
   const productSlug = parsedUrl.pathname.match(/^\/product\/([^/]+)/)?.[1];
   if (!productSlug) return null;
   const text = result.raw_content || result.content || "";
@@ -127,6 +133,16 @@ export function parseIndexedOzonProduct(result: IndexedResult, position: number)
     reviews: [],
     categoryPosition: position,
   };
+}
+
+export function uniqueUsableIndexedCompetitors(products: OzonPublicProduct[]) {
+  const seen = new Set<string>();
+  return products.filter((product) => {
+    const hasEvidence = Object.values(product.attributes).some((value) => value.trim()) || Boolean(product.description?.trim());
+    if (!hasEvidence || seen.has(product.sku)) return false;
+    seen.add(product.sku);
+    return true;
+  });
 }
 
 function normalizedCategoryTerm(value: string) {
@@ -239,10 +255,13 @@ export async function searchOzonIndexedCompetitors(params: {
         ? (payload as { results?: unknown }).results
         : null;
       if (!Array.isArray(searchResults)) throw new Error("tavily_invalid_results");
-      const indexed = searchResults
+      const parsed = searchResults
         .flatMap((item, index) => item && typeof item === "object" ? [parseIndexedOzonProduct(item as IndexedResult, index + 1)] : [])
-        .filter((item): item is OzonPublicProduct => Boolean(item))
-        .filter((item, index, items) => items.findIndex((candidate) => candidate.sku === item.sku) === index);
+        .filter((item): item is OzonPublicProduct => Boolean(item));
+      const indexed = uniqueUsableIndexedCompetitors(parsed);
+      const emptyEvidenceCount = new Set(parsed.filter((item) =>
+        !Object.values(item.attributes).some((value) => value.trim()) && !item.description?.trim(),
+      ).map((item) => item.sku)).size;
       const competitors = indexed
         .filter((item) => matchesTargetCategory({ title: item.title }, target))
         .filter((item) => !params.ownSkus.has(item.sku))
@@ -252,6 +271,7 @@ export async function searchOzonIndexedCompetitors(params: {
         const ownProduct = indexed.find((item) => item.sku === currentTarget.publicSku) ?? emptyOwnProduct(currentTarget);
         const warnings = [
           ...(rejectedCount ? [`已过滤 ${rejectedCount} 个无法证明属于 ${target.categoryNameRu} 的搜索结果`] : []),
+          ...(emptyEvidenceCount ? [`已过滤 ${emptyEvidenceCount} 个缺少有效属性和描述的搜索结果`] : []),
           ...(!competitors.length ? ["搜索索引没有返回有效同类目 Ozon 竞品"] : []),
         ];
         results.push({

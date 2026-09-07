@@ -19,7 +19,7 @@ import {
   type OzonCompetitorTarget,
   type OzonPublicProduct,
 } from "./ozon-public-crawler";
-import { searchOzonIndexedCompetitors } from "./ozon-search-index";
+import { searchOzonIndexedCompetitors, uniqueUsableIndexedCompetitors } from "./ozon-search-index";
 import { getProfitGuardrails } from "./policy";
 
 type FinanceLike = Pick<
@@ -402,10 +402,24 @@ export function cachedCompetitorReport(value: unknown) {
   const ownProduct = cachedPublicProduct(report.ownProduct);
   const competitors = (report.competitors as unknown[]).map(cachedPublicProduct);
   if (!ownProduct || competitors.some((product) => !product)) return null;
+  const usableCompetitors = uniqueUsableIndexedCompetitors(competitors as OzonPublicProduct[]);
+  if (!usableCompetitors.length) return null;
   return {
     ...report,
-    benchmarks: buildCompetitorBenchmarks(ownProduct, competitors as OzonPublicProduct[]),
+    competitors: usableCompetitors,
+    benchmarks: buildCompetitorBenchmarks(ownProduct, usableCompetitors),
   };
+}
+
+export function countUniqueCompetitors(reports: unknown[]) {
+  return new Set(reports.flatMap((report) => {
+    const competitors = record(report).competitors;
+    return Array.isArray(competitors)
+      ? competitors.map(cachedPublicProduct).filter((item): item is OzonPublicProduct => Boolean(item))
+        .filter((item) => Object.values(item.attributes).some((value) => value.trim()) || Boolean(item.description?.trim()))
+        .map((item) => item.sku)
+      : [];
+  })).size;
 }
 
 export function buildCompetitorBatchProposal(params: {
@@ -531,7 +545,7 @@ async function buildCompetitorPlaybooks(params: {
   for (const [categoryKey, group] of groups) {
     try {
       const [descriptionCategoryId, typeId] = categoryKey.split(":").map(Number);
-      const title = `类目属性经验 v3：${categoryKey}`;
+      const title = `类目属性经验 v4：${categoryKey}`;
       const cached = await prisma.competitorContentReport.findFirst({
         where: {
           tenantId: params.tenantId,

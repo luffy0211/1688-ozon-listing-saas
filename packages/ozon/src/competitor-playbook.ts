@@ -306,7 +306,7 @@ export function buildProductAttributeRecommendations(params: {
     }) ?? experience.commonValues[0] ?? null;
     const hasOwnEvidence = candidate ? containsCompleteValue(ownEvidence, candidate.value) : false;
     const dictionaryReady = !experience.dictionaryId || candidate?.dictionaryValueId;
-    if (candidate && hasOwnEvidence && dictionaryReady) {
+    if (params.playbook.sampleSize >= 3 && candidate && hasOwnEvidence && dictionaryReady) {
       const attribute = {
         id: experience.ozonAttributeId,
         values: [{
@@ -332,7 +332,9 @@ export function buildProductAttributeRecommendations(params: {
       suggestedValue: candidate?.value ?? null,
       dictionaryValueId: candidate?.dictionaryValueId ?? null,
       evidenceSource: candidate ? "COMPETITOR_ONLY" : "NONE",
-      reasonZh: experience.required
+      reasonZh: params.playbook.sampleSize < 3
+        ? "有效竞品样本少于 3 个，只能提示人工核对，不能生成修改操作。"
+        : experience.required
         ? "Ozon 必填属性缺失，但自家商品信息不足，需要人工确认真实值。"
         : "竞品经常填写该属性，但不能把竞品值直接当作自家商品事实。",
     };

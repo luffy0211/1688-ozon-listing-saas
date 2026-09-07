@@ -68,6 +68,7 @@ describe("Ozon search index", () => {
       categoryPosition: 1,
     }));
     expect(parseIndexedOzonProduct({ ...indexedProduct, url: "https://example.com/product/1/" }, 1)).toBeNull();
+    expect(parseIndexedOzonProduct({ ...indexedProduct, url: "not-a-url" }, 1)).toBeNull();
     expect(parseIndexedOzonProduct({
       ...indexedProduct,
       url: "https://ozon.ru/product/polo-mark-formelle-1607177448/features",
@@ -152,6 +153,31 @@ describe("Ozon search index", () => {
     });
     expect(result?.competitors.map((item) => item.sku)).toEqual(["1607177448"]);
     expect(result?.category?.name).toBe("Поло");
+  });
+
+  it("rejects review pages and products without attributes or descriptions", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      results: [
+        { ...indexedProduct, url: "https://www.ozon.ru/product/review-copy-201/reviews" },
+        {
+          ...indexedProduct,
+          url: "https://www.ozon.ru/product/empty-202/",
+          content: "Поло мужское",
+          raw_content: null,
+        },
+        { ...indexedProduct, url: "https://www.ozon.ru/product/valid-203/features" },
+      ],
+    }), { status: 200 }));
+
+    const [result] = await searchOzonIndexedCompetitors({
+      apiKey: "test-key",
+      targets: [target("own", "100")],
+      ownSkus: new Set(["100"]),
+      fetchImpl,
+    });
+
+    expect(result?.competitors.map((item) => item.sku)).toEqual(["203"]);
+    expect(result?.warnings).toContain("已过滤 1 个缺少有效属性和描述的搜索结果");
   });
 
   it("searches once per official category and rejects products from another type", async () => {

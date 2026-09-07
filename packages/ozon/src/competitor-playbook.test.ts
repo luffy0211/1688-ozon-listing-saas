@@ -122,6 +122,11 @@ describe("Ozon competitor attribute playbook", () => {
           attributes: { Материал: "Хлопок", Сезон: "Лето" },
           description: null,
         },
+        {
+          url: "https://www.ozon.ru/product/3/",
+          attributes: { Материал: "Хлопок", Сезон: "Лето" },
+          description: null,
+        },
       ],
     });
     const result = buildProductAttributeRecommendations({
@@ -161,6 +166,35 @@ describe("Ozon competitor attribute playbook", () => {
     expect(result.actionAttributes).toEqual([
       { id: 10, values: [{ value: "Хлопок", dictionaryValueId: 1001 }] },
     ]);
+  });
+
+  it("does not create an actionable addition from fewer than three samples", () => {
+    const playbook = buildCategoryAttributePlaybook({
+      descriptionCategoryId: 1,
+      typeId: 2,
+      categoryName: "Рубашки",
+      categoryAttributes: [categoryAttributes[0]!],
+      dictionaryValues: new Map([[10, [{ id: 1001, value: "Хлопок" }]]]),
+      competitors: [
+        { url: "https://www.ozon.ru/product/1/", attributes: { Материал: "Хлопок" }, description: null },
+        { url: "https://www.ozon.ru/product/2/", attributes: { Материал: "Хлопок" }, description: null },
+      ],
+    });
+
+    const result = buildProductAttributeRecommendations({
+      playbook,
+      product: {
+        offer_id: "offer-low-evidence",
+        description_category_id: 1,
+        type_id: 2,
+        name: "Рубашка, материал Хлопок",
+        attributes: [],
+      },
+    });
+
+    expect(result.actionableCount).toBe(0);
+    expect(result.actionAttributes).toBeNull();
+    expect(result.recommendations[0]).toMatchObject({ status: "NEEDS_CONFIRMATION" });
   });
 
   it("does not replace a populated own attribute with the competitor majority", () => {

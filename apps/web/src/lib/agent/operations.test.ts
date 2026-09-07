@@ -4,6 +4,7 @@ import {
   buildCompetitorBatchProposal,
   buildStoreDiagnosis,
   cachedCompetitorReport,
+  countUniqueCompetitors,
   lowContentRatingProducts,
   selectCompetitorTargets,
   summarizeFinanceTransactions,
@@ -204,6 +205,37 @@ describe("Ozon operations helpers", () => {
       ownProduct: { ...malformed, sku: "own", attributes: {} },
       competitors: [malformed],
     })).toBeNull();
+  });
+
+  it("deduplicates cached competitors and removes empty evidence", () => {
+    const product = (sku: string, attributes: Record<string, string>, description: string | null = null) => ({
+      sku,
+      url: `https://www.ozon.ru/product/${sku}/`,
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes,
+      description,
+      reviews: [],
+    });
+    const report = cachedCompetitorReport({
+      source: "ozon_search_index",
+      detailScope: "category_search_index_attributes_description_v3",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: product("own", {}),
+      competitors: [
+        product("1", { Материал: "Хлопок" }),
+        product("1", { Материал: "Хлопок" }),
+        product("2", {}),
+      ],
+    });
+
+    expect(report?.competitors).toHaveLength(1);
+    expect(countUniqueCompetitors([report, report])).toBe(1);
   });
 
   it("summarizes Ozon net payout and platform charges", () => {
