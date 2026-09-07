@@ -70,8 +70,11 @@ describe("Ozon search index", () => {
     expect(parseIndexedOzonProduct({ ...indexedProduct, url: "https://example.com/product/1/" }, 1)).toBeNull();
     expect(parseIndexedOzonProduct({
       ...indexedProduct,
-      url: "https://www.ozon.ru/product/polo-mark-formelle-1607177448/features",
-    }, 1)?.sku).toBe("1607177448");
+      url: "https://ozon.ru/product/polo-mark-formelle-1607177448/features",
+    }, 1)).toEqual(expect.objectContaining({
+      sku: "1607177448",
+      url: "https://www.ozon.ru/product/polo-mark-formelle-1607177448/",
+    }));
     expect(parseIndexedOzonProduct({
       ...indexedProduct,
       raw_content: "Материал\nСостав материала\n100% хлопок",
@@ -101,6 +104,24 @@ describe("Ozon search index", () => {
       "Мощность, Вт": "2200",
       "Материал корпуса": "Стекло",
     });
+  });
+
+  it("parses Tavily inline feature snippets without mixing adjacent fields", () => {
+    const result = parseIndexedOzonProduct({
+      ...indexedProduct,
+      raw_content: null,
+      content: "Сезон: На любой сезон. Материал: Хлопок. Состав материала: 100% хлопок. Коллекция: Базовая коллекция. Тип: Поло. Бренд в одежде и обуви: Polo Ralph Lauren. Описание: Мужское хлопковое поло.",
+    }, 1);
+
+    expect(result?.attributes).toEqual({
+      "Сезон": "На любой сезон",
+      "Материал": "Хлопок",
+      "Состав материала": "100% хлопок",
+      "Коллекция": "Базовая коллекция",
+      "Тип": "Поло",
+      "Бренд в одежде и обуви": "Polo Ralph Lauren",
+    });
+    expect(result?.description).toBe("Мужское хлопковое поло");
   });
 
   it("queries only the Ozon index and excludes own products", async () => {

@@ -50,7 +50,25 @@ function numberFromText(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function extractAttributes(lines: string[]) {
+function extractInlinePairs(text: string) {
+  const matches = [...text.matchAll(/(?:^|[.!?;]\s+)([\p{Lu}][\p{L}\p{N}\s,()/%+№-]{0,79}):\s*/gu)];
+  return Object.fromEntries(matches.flatMap((match, index) => {
+    const name = match[1]?.trim();
+    const next = matches[index + 1];
+    const value = text.slice(match.index + match[0].length, next?.index ?? text.length)
+      .trim()
+      .replace(/[.!?;]+$/u, "")
+      .trim();
+    return name && value && name.split(/\s+/).length <= 8 && value.length <= 500
+      ? [[name, value]]
+      : [];
+  }));
+}
+
+function extractAttributes(lines: string[], text: string) {
+  const inline = Object.fromEntries(
+    Object.entries(extractInlinePairs(text)).filter(([name]) => !SECTION_NAMES.has(name)),
+  );
   const known = Object.fromEntries(ATTRIBUTE_NAMES.flatMap((name) => {
     const index = lines.findIndex((line) => line === name || line.startsWith(`${name}:`));
     if (index < 0) return [];
@@ -60,7 +78,7 @@ function extractAttributes(lines: string[]) {
     return value ? [[name, value]] : [];
   }));
   const start = lines.findIndex((line) => /^Характеристики(?: товара)?$/i.test(line));
-  if (start < 0) return known;
+  if (start < 0) return { ...known, ...inline };
   const section = lines.slice(start + 1);
   const end = section.findIndex((line) => SECTION_NAMES.has(line));
   const candidates = section.slice(0, end < 0 ? undefined : end);
@@ -71,10 +89,12 @@ function extractAttributes(lines: string[]) {
     if (!name || !value || name.length > 100 || value.length > 500) continue;
     dynamic[name.replace(/:$/, "").trim()] = value.trim();
   }
-  return { ...dynamic, ...known };
+  return { ...dynamic, ...known, ...inline };
 }
 
-function extractDescription(lines: string[]) {
+function extractDescription(lines: string[], text: string) {
+  const inline = extractInlinePairs(text).Описание;
+  if (inline) return inline.slice(0, 4_000);
   const start = lines.findIndex((line) => line === "Описание");
   if (start < 0) return null;
   const end = lines.findIndex((line, index) => index > start && SECTION_NAMES.has(line));
@@ -85,13 +105,16 @@ export function parseIndexedOzonProduct(result: IndexedResult, position: number)
   if (!result.url) return null;
   const sku = productSku(result.url);
   if (!sku) return null;
+  const parsedUrl = new URL(result.url);
+  const productSlug = parsedUrl.pathname.match(/^\/product\/([^/]+)/)?.[1];
+  if (!productSlug) return null;
   const text = result.raw_content || result.content || "";
   const lines = text.split(/\r?\n/).map(cleanLine).filter(Boolean);
   const ratingMatch = text.match(/(\d[.,]\d)\s*[•·]\s*([\d\s]+)\s*(?:отзыв|оцен)/i);
   const priceMatch = text.match(/([\d][\d\s]*)\s*₽/);
   return {
     sku,
-    url: new URL(result.url).origin + new URL(result.url).pathname,
+    url: `https://www.ozon.ru/product/${productSlug}/`,
     title: cleanLine(result.title ?? sku).replace(/\s+купить\s+на\s+OZON.*$/i, ""),
     priceRub: priceMatch ? numberFromText(priceMatch[1]!) : null,
     oldPriceRub: null,
@@ -99,8 +122,8 @@ export function parseIndexedOzonProduct(result: IndexedResult, position: number)
     reviewCount: ratingMatch ? numberFromText(ratingMatch[2]!) : null,
     sellerName: null,
     imageUrls: [],
-    attributes: extractAttributes(lines),
-    description: extractDescription(lines),
+    attributes: extractAttributes(lines, text),
+    description: extractDescription(lines, text),
     reviews: [],
     categoryPosition: position,
   };

@@ -158,7 +158,7 @@ describe("Ozon operations helpers", () => {
     });
     const report = cachedCompetitorReport({
       source: "ozon_search_index",
-      detailScope: "category_search_index_attributes_description_v2",
+      detailScope: "category_search_index_attributes_description_v3",
       category: { url: "https://www.ozon.ru/search/?text=polo" },
       ownProduct: product("own", {}),
       competitors: [product("1", { Материал: "Хлопок" }), product("2", { Материал: "Хлопок" })],
@@ -199,7 +199,7 @@ describe("Ozon operations helpers", () => {
 
     expect(cachedCompetitorReport({
       source: "ozon_search_index",
-      detailScope: "category_search_index_attributes_description_v2",
+      detailScope: "category_search_index_attributes_description_v3",
       category: { url: "https://www.ozon.ru/search/?text=polo" },
       ownProduct: { ...malformed, sku: "own", attributes: {} },
       competitors: [malformed],

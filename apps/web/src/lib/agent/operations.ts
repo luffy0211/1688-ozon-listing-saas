@@ -364,7 +364,7 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-const COMPETITOR_DETAIL_SCOPE = "category_search_index_attributes_description_v2";
+const COMPETITOR_DETAIL_SCOPE = "category_search_index_attributes_description_v3";
 
 function cachedPublicProduct(value: unknown): OzonPublicProduct | null {
   const product = record(value);
@@ -531,7 +531,7 @@ async function buildCompetitorPlaybooks(params: {
   for (const [categoryKey, group] of groups) {
     try {
       const [descriptionCategoryId, typeId] = categoryKey.split(":").map(Number);
-      const title = `类目属性经验 v2：${categoryKey}`;
+      const title = `类目属性经验 v3：${categoryKey}`;
       const cached = await prisma.competitorContentReport.findFirst({
         where: {
           tenantId: params.tenantId,
