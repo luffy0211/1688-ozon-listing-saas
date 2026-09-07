@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attributeChangesFromPayload } from "./content-agent-chat";
+import { attributeChangesFromPayload, shouldShowCommandDeck } from "./content-agent-chat";
 
 describe("content agent action preview", () => {
   it("returns every attribute change needed for approval", () => {
@@ -45,5 +45,12 @@ describe("content agent action preview", () => {
 
   it("drops malformed changes instead of showing an unsafe approval preview", () => {
     expect(attributeChangesFromPayload({ recommendations: [{ offerId: "SKU-1" }] })).toEqual([]);
+  });
+});
+
+describe("content agent command deck", () => {
+  it("only shows before the user starts a conversation", () => {
+    expect(shouldShowCommandDeck([{ role: "assistant" }])).toBe(true);
+    expect(shouldShowCommandDeck([{ role: "assistant" }, { role: "user" }])).toBe(false);
   });
 });

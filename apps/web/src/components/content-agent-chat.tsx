@@ -60,6 +60,10 @@ type ChatMessage = {
   dataSources?: AgentInsightSource[];
 };
 
+export function shouldShowCommandDeck(messages: Array<Pick<ChatMessage, "role">>) {
+  return !messages.some((message) => message.role === "user");
+}
+
 type PersistedChatMessage = ChatMessage & {
   createdAt: string;
 };
@@ -691,10 +695,12 @@ export function ContentAgentChat({
           </div>
         )}
 
-        <AgentCommandDeck
-          disabled={!canSubmit || running}
-          onRun={(value) => void sendPrompt(value)}
-        />
+        {shouldShowCommandDeck(messages) ? (
+          <AgentCommandDeck
+            disabled={!canSubmit || running}
+            onRun={(value) => void sendPrompt(value)}
+          />
+        ) : null}
 
         {!agentConfig.configured ? (
           <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
