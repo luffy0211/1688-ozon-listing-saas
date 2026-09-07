@@ -99,7 +99,7 @@ export function Source1688CookieForm({
             onChange={(e) => setCookie(e.target.value)}
             placeholder="cna=...; aui=...; _m_h5_tk=..."
             required
-            className="min-h-28 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="min-h-28 w-full rounded-xl border border-[#d8e4f2] bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           />
         </label>
         <Button type="submit" disabled={loading}>
@@ -279,7 +279,7 @@ export function ShopSnapshotActions({
         </Button>
         <span className="text-sm text-gray-500">已选 {selected.length} 个</span>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-white bg-white/90 shadow-[0_8px_24px_rgba(48,78,124,0.07)]">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
             <tr>

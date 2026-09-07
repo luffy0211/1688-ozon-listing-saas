@@ -237,7 +237,7 @@ export function WorkflowPublishProgress({
 
       {items.length ? (
         <>
-          <div className="mb-5 rounded-md border border-gray-200 bg-gray-50 p-4">
+          <div className="mb-5 rounded-xl border border-[#e1eaf4] bg-[#f7faff] p-4">
             <div className="mb-2 flex items-center justify-between text-sm">
               <span className="font-medium text-gray-700">总进度</span>
               <span className="tabular-nums text-gray-500">{progress}%</span>

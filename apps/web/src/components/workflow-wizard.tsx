@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   CheckCircle2,
@@ -108,9 +108,9 @@ const steps = [
 
 function ProductImage({ src }: { src: string | null }) {
   return src ? (
-    <img src={src} alt="" className="h-36 w-full rounded-md border bg-white object-contain" />
+    <img src={src} alt="" className="h-36 w-full rounded-xl border border-[#e1eaf4] bg-white object-contain" />
   ) : (
-    <div className="flex h-28 w-full items-center justify-center rounded-md bg-gray-100 text-xs text-gray-400">
+    <div className="flex h-28 w-full items-center justify-center rounded-xl bg-[#f2f6fb] text-xs text-gray-400">
       无图片
     </div>
   );
@@ -163,7 +163,7 @@ function CollectPanel({
   }
 
   return (
-    <form onSubmit={submit} className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+    <form onSubmit={submit} className="mb-4 rounded-2xl border border-[#e0e9f4] bg-[#f7faff] p-4">
       <div className="mb-3 flex flex-wrap gap-2">
         {[
           ["product", "单品链接"],
@@ -174,8 +174,8 @@ function CollectPanel({
             type="button"
             onClick={() => setMode(id as "product" | "shop")}
             className={cn(
-              "h-9 rounded-md border px-3 text-sm font-medium",
-              mode === id ? "border-blue-500 bg-white text-blue-700" : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100",
+              "h-9 rounded-xl border px-3 text-sm font-medium",
+              mode === id ? "border-[#9bbcff] bg-white text-[#2465dd] shadow-sm" : "border-transparent bg-white/60 text-gray-600 hover:bg-white",
             )}
           >
             {label}
@@ -219,6 +219,10 @@ function ProductDetailModal({
   onClose: () => void;
 }) {
   const [activeImage, setActiveImage] = useState<string | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const images = item?.imageUrls.length ? item.imageUrls : item?.imageUrl ? [item.imageUrl] : [];
   const currentImage = activeImage && images.includes(activeImage) ? activeImage : images[0] ?? null;
 
@@ -227,28 +231,54 @@ function ProductDetailModal({
   }, [item?.id]);
 
   useEffect(() => {
-    if (!item) return;
+    if (!item) return undefined;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab" || !modalRef.current) return;
+      const focusable = Array.from(
+        modalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (!focusable.length) return;
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [item, onClose]);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
+  }, [item]);
 
   if (!item) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 p-4" role="dialog" aria-modal="true">
-      <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 p-4" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
+      <div ref={modalRef} className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-white bg-white shadow-[0_24px_70px_rgba(31,53,88,0.22)]">
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold text-gray-950">{item.title}</h3>
+            <h3 id="product-detail-title" className="truncate text-base font-semibold text-gray-950">{item.title}</h3>
             <p className="mt-1 text-xs text-gray-500">Offer ID: {item.offerId}</p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-gray-500 hover:bg-[#f1f5fb] hover:text-gray-900"
             aria-label="关闭详情"
             title="关闭详情"
           >
@@ -258,7 +288,7 @@ function ProductDetailModal({
 
         <div className="grid max-h-[calc(90vh-73px)] gap-5 overflow-auto p-5 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-3">
-            <div className="flex aspect-square max-h-[58vh] items-center justify-center rounded-md border border-gray-200 bg-white">
+            <div className="flex aspect-square max-h-[58vh] items-center justify-center rounded-xl border border-[#e1eaf4] bg-white">
               {currentImage ? (
                 <img src={currentImage} alt="" className="max-h-full max-w-full object-contain" />
               ) : (
@@ -291,28 +321,28 @@ function ProductDetailModal({
               <div className="mt-1 text-sm font-medium leading-6 text-gray-950">{item.title}</div>
             </div>
             <dl className="grid grid-cols-2 gap-3 text-sm">
-              <div className="rounded-md border border-gray-200 p-3">
+              <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
                 <dt className="text-xs text-gray-500">店铺</dt>
                 <dd className="mt-1 truncate font-medium text-gray-950">{item.shopName}</dd>
               </div>
-              <div className="rounded-md border border-gray-200 p-3">
+              <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
                 <dt className="text-xs text-gray-500">图片</dt>
                 <dd className="mt-1 font-medium text-gray-950">{item.assetCount} 张</dd>
               </div>
-              <div className="rounded-md border border-gray-200 p-3">
+              <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
                 <dt className="text-xs text-gray-500">任务</dt>
                 <dd className="mt-1"><StatusBadge status={item.jobStatus ?? "PENDING"} /></dd>
               </div>
-              <div className="rounded-md border border-gray-200 p-3">
+              <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
                 <dt className="text-xs text-gray-500">发布</dt>
                 <dd className="mt-1"><StatusBadge status={item.draftStatus ?? "PENDING"} /></dd>
               </div>
             </dl>
-            <div className="rounded-md border border-gray-200 p-3">
+            <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
               <div className="text-xs text-gray-500">售价</div>
               <div className="mt-1 text-lg font-semibold text-gray-950">{item.priceRub ? `${item.priceRub} RUB` : "-"}</div>
             </div>
-            <div className="rounded-md border border-gray-200 p-3">
+            <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
               <div className="mb-2 text-xs font-medium text-gray-500">商品属性</div>
               {item.attributes.length ? (
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
@@ -327,7 +357,7 @@ function ProductDetailModal({
                 <div className="text-xs text-gray-400">暂无属性</div>
               )}
             </div>
-            <div className="rounded-md border border-gray-200 p-3">
+            <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] p-3">
               <div className="mb-2 text-xs font-medium text-gray-500">规格</div>
               {item.skus.length ? (
                 <div className="space-y-2">
@@ -351,7 +381,7 @@ function ProductDetailModal({
                   href={item.sourceUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]"
                 >
                   <ExternalLink className="h-4 w-4" aria-hidden="true" />
                   打开 1688
@@ -481,7 +511,7 @@ export function WorkflowWizard({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm md:grid-cols-4">
+      <div className="grid gap-3 rounded-2xl border border-white bg-white/80 p-3 shadow-[0_8px_24px_rgba(48,78,124,0.07)] md:grid-cols-4">
         {steps.map((step, index) => {
           const Icon = step.icon;
           const active = currentStep === step.id;
@@ -492,13 +522,13 @@ export function WorkflowWizard({
               type="button"
               onClick={() => setCurrentStep(step.id)}
               className={cn(
-                "flex min-w-0 items-center gap-3 rounded-md border px-3 py-3 text-left transition-colors",
-                active ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50",
+                "flex min-w-0 items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all",
+                active ? "border-[#9bbcff] bg-[#eaf1ff] shadow-sm" : "border-transparent bg-[#f8faff] hover:border-[#dbe6f3] hover:bg-white",
               )}
             >
               <span
                 className={cn(
-                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-md",
+                  "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
                   active ? "bg-blue-600 text-white" : done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500",
                 )}
               >
@@ -526,7 +556,7 @@ export function WorkflowWizard({
           {snapshots.length ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {snapshots.map((item) => (
-                <div key={item.id} className="rounded-md border border-gray-200 p-3">
+                <div key={item.id} className="rounded-xl border border-[#e1eaf4] bg-white p-3 shadow-[0_6px_18px_rgba(48,78,124,0.05)]">
                   <ProductImage src={item.imageUrl} />
                   <div className="mt-3 line-clamp-2 text-sm font-medium text-gray-950">{item.title}</div>
                   <div className="mt-2 flex items-center justify-between gap-2 text-xs text-gray-500">
@@ -569,27 +599,25 @@ export function WorkflowWizard({
                 return (
                   <div
                     key={product.id}
-                    role="button"
-                    tabIndex={disabled ? -1 : 0}
-                    onClick={() => toggleProduct(product)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        toggleProduct(product);
-                      }
-                    }}
                     className={cn(
-                      "relative rounded-md border p-3 transition-all",
-                      disabled ? "border-gray-200 bg-gray-50 opacity-70" : "cursor-pointer hover:shadow-md",
-                      selected ? "border-blue-500 bg-blue-50 ring-2 ring-blue-100" : "border-gray-200 bg-white",
+                      "relative rounded-xl border p-3 transition-all",
+                      disabled ? "border-[#e1eaf4] bg-[#f4f7fb] opacity-70" : "hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(48,78,124,0.10)]",
+                      selected ? "border-[#75a0f8] bg-[#edf3ff] ring-2 ring-[#cbdcff]" : "border-[#e1eaf4] bg-white",
                     )}
                   >
-                    <div className={cn(
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      aria-pressed={selected}
+                      aria-label={`${selected ? "取消选择" : "选择"}商品：${product.title}`}
+                      onClick={() => toggleProduct(product)}
+                      className={cn(
                       "absolute right-3 top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2",
                       selected ? "border-blue-600 bg-blue-600 text-white" : "border-gray-300 bg-white/90 text-transparent",
-                    )}>
-                      <CheckCircle2 className="h-4 w-4" />
-                    </div>
+                      )}
+                    >
+                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
                     <ProductImage src={product.imageUrl} />
                     <div className="mt-3 line-clamp-2 text-sm font-medium text-gray-950">{product.title}</div>
                     <div className="mt-1 text-xs text-gray-500">{product.offerId}</div>
@@ -598,19 +626,13 @@ export function WorkflowWizard({
                       <StatusBadge status={product.latestDraftStatus ?? product.latestJobStatus ?? "PENDING"} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <span
-                        onClick={(event) => {
-                          event.stopPropagation();
-                        }}
+                      <Button
+                        variant="outline"
+                        onClick={() => setDetailItem(productDetails.get(product.id) ?? null)}
                       >
-                        <Button
-                          variant="outline"
-                          onClick={() => setDetailItem(productDetails.get(product.id) ?? null)}
-                        >
-                          <Eye className="h-4 w-4" aria-hidden="true" />
-                          详情
-                        </Button>
-                      </span>
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                        详情
+                      </Button>
                       {disabled ? <span className="text-sm text-gray-500">{product.latestDraftStatus === "SUBMITTED" ? "已提交" : "处理中"}</span> : null}
                     </div>
                   </div>

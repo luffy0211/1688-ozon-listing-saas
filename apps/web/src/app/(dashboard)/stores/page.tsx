@@ -18,7 +18,7 @@ export default async function StoresPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Ozon 店铺" description="配置用于生成草稿和提交上架的 Ozon API 信息。">
-        <Link href="/settings" className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href="/settings" className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           返回配置中心
         </Link>
       </PageHeader>

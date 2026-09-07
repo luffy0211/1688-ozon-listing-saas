@@ -662,19 +662,36 @@ export function ContentAgentChat({
   return (
     <div className="flex h-[calc(100vh-136px)] w-full gap-4">
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white bg-white/45 shadow-[0_14px_40px_rgba(45,78,128,0.08)]">
-        {stores.length > 1 ? (
-          <div className="flex shrink-0 items-center justify-end gap-2 border-b border-[#e3ebf5] bg-white/65 px-4 py-2 md:px-5">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={startNewChat}
-              disabled={running}
-              title="新对话"
-              className="lg:hidden"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              新对话
-            </Button>
+        <div className="flex shrink-0 items-center justify-end gap-2 border-b border-[#e3ebf5] bg-white/65 px-4 py-2 md:px-5">
+          <select
+            aria-label="历史对话"
+            value={selectedSessionId}
+            onChange={(event) => {
+              if (event.target.value === "new") startNewChat();
+              else setSelectedSessionId(event.target.value);
+            }}
+            disabled={running}
+            className="h-9 min-w-0 flex-1 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm text-[#52627b] shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:hidden"
+          >
+            <option value="new">新对话</option>
+            {sessionList.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title ?? session.id}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={startNewChat}
+            disabled={running}
+            title="新对话"
+            className="lg:hidden"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            新对话
+          </Button>
+          {stores.length > 1 ? (
             <div className="w-48">
               <Select value={selectedStoreId} onChange={setSelectedStoreId}>
                 {stores.map((store) => (
@@ -685,15 +702,8 @@ export function ContentAgentChat({
                 ))}
               </Select>
             </div>
-          </div>
-        ) : (
-          <div className="flex justify-end border-b border-[#e3ebf5] bg-white/65 px-4 py-2 lg:hidden">
-            <Button type="button" variant="outline" onClick={startNewChat} disabled={running} title="新对话">
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              新对话
-            </Button>
-          </div>
-        )}
+          ) : null}
+        </div>
 
         {shouldShowCommandDeck(messages) ? (
           <AgentCommandDeck

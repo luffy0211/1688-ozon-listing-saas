@@ -98,9 +98,9 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           return (
             <div className="flex min-w-[320px] items-center gap-3">
               {item.imageUrl ? (
-                <img src={item.imageUrl} alt="" className="h-16 w-16 rounded-md border bg-white object-contain" />
+                <img src={item.imageUrl} alt="" className="h-16 w-16 rounded-xl border border-[#e1eaf4] bg-white object-contain" />
               ) : (
-                <div className="h-16 w-16 rounded-md border bg-gray-100" />
+                <div className="h-16 w-16 rounded-xl border border-[#e1eaf4] bg-[#f2f6fb]" />
               )}
               <div className="min-w-0">
                 <Link href={`/products/${item.id}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
@@ -176,7 +176,7 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
             <div className="flex flex-wrap items-center gap-2">
               <Link
                 href={`/products/${item.id}`}
-                className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]"
               >
                 <Eye className="h-4 w-4" aria-hidden="true" />
                 详情
@@ -221,14 +221,14 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 rounded-lg border border-gray-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_220px_180px_auto]">
+      <div className="grid gap-3 rounded-2xl border border-white bg-white/85 p-3 shadow-[0_8px_24px_rgba(48,78,124,0.07)] md:grid-cols-[minmax(0,1fr)_220px_180px_auto]">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索标题、Offer ID、店铺"
-            className="h-9 w-full rounded-md border border-gray-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="h-9 w-full rounded-xl border border-[#d8e4f2] bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           />
         </label>
         <Select value={shop} onChange={setShop}>
@@ -254,9 +254,9 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
       {filteredRows.length === 0 ? (
         <EmptyState title="没有匹配的商品" description="调整搜索词、店铺或状态筛选后再查看。" />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-2xl border border-white bg-white/90 shadow-[0_8px_24px_rgba(48,78,124,0.07)]">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
+            <thead className="border-b border-[#e4ebf4] bg-[#f6f9fd] text-xs uppercase text-gray-500">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
@@ -269,7 +269,7 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className={cn("hover:bg-gray-50", row.getIsSelected() && "bg-blue-50/50")}>
+                <tr key={row.id} className={cn("transition-colors hover:bg-[#f7faff]", row.getIsSelected() && "bg-[#edf3ff]")}>
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-4 py-3 align-middle">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

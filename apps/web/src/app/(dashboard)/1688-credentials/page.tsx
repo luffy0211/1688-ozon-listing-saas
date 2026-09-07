@@ -34,7 +34,7 @@ export default async function Source1688CredentialsPage() {
         title="1688 登录信息"
         description="维护采集用 Cookie。登录信息单独配置，不混入采集、选品、上架主流程。"
       >
-        <Link className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href="/settings">
+        <Link className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href="/settings">
           返回配置中心
         </Link>
       </PageHeader>

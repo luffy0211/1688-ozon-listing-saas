@@ -72,11 +72,11 @@ export default async function DashboardPage() {
         title="上架工作台"
         description="先看今天需要处理什么；具体操作进入自动化工作流。"
       >
-        <Link className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href="/workflow">
+        <Link className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href="/workflow">
           <GitBranch className="h-4 w-4" aria-hidden="true" />
           自动化工作流
         </Link>
-        <Link className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700" href="/shops">
+        <Link className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#3478f6] px-3 text-sm font-medium text-white shadow-[0_8px_20px_rgba(52,120,246,0.18)] hover:bg-[#2868df]" href="/shops">
           <Store className="h-4 w-4" aria-hidden="true" />
           去采集选品
         </Link>
@@ -91,7 +91,7 @@ export default async function DashboardPage() {
                 配置集中在设置页；完成后，运营人员主要使用自动化工作流。
               </div>
             </div>
-            <Link className="inline-flex h-9 items-center rounded-md bg-amber-600 px-3 text-sm font-medium text-white hover:bg-amber-700" href="/settings">
+            <Link className="inline-flex h-9 items-center rounded-xl bg-amber-600 px-3 text-sm font-medium text-white hover:bg-amber-700" href="/settings">
               去完成设置
             </Link>
           </div>
@@ -118,7 +118,7 @@ export default async function DashboardPage() {
                   <tr key={product.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex min-w-[260px] items-center gap-3">
-                        {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
+                        {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-xl border border-[#e1eaf4] bg-white object-contain" /> : <div className="h-14 w-14 rounded-xl bg-[#f2f6fb]" />}
                         <div className="min-w-0">
                           <Link href={`/products/${product.id}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
                             {product.title ?? product.offerId}
@@ -130,7 +130,7 @@ export default async function DashboardPage() {
                     <td className="px-4 py-3">{product.shop?.shopName ?? "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <Link className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href={`/products/${product.id}`}>
+                        <Link className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href={`/products/${product.id}`}>
                           <Eye className="h-4 w-4" aria-hidden="true" />
                           详情
                         </Link>
@@ -159,7 +159,7 @@ export default async function DashboardPage() {
                   <tr key={draft.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <div className="flex min-w-[260px] items-center gap-3">
-                        {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
+                        {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-xl border border-[#e1eaf4] bg-white object-contain" /> : <div className="h-14 w-14 rounded-xl bg-[#f2f6fb]" />}
                         <div className="min-w-0">
                           <Link href={`/products/${draft.productId}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
                             {draft.titleRu ?? draft.product.title ?? draft.product.offerId}

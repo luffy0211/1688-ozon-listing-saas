@@ -56,7 +56,7 @@ export default async function ProductsPage() {
         title="商品池"
         description="管理已经选入池的商品，批量转换并提交到 Ozon。"
       >
-        <Link className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700" href="/shops">
+        <Link className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#3478f6] px-3 text-sm font-medium text-white shadow-[0_8px_20px_rgba(52,120,246,0.18)] hover:bg-[#2868df]" href="/shops">
           <Plus className="h-4 w-4" aria-hidden="true" />
           去采集选品
         </Link>
@@ -70,7 +70,7 @@ export default async function ProductsPage() {
 
       {rows.length === 0 ? (
         <EmptyState title="商品池为空" description="先采集 1688 店铺，再选择商品导入商品池。">
-          <Link className="inline-flex h-9 items-center rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700" href="/shops">
+          <Link className="inline-flex h-9 items-center rounded-xl bg-[#3478f6] px-3 text-sm font-medium text-white hover:bg-[#2868df]" href="/shops">
             去采集选品
           </Link>
         </EmptyState>

@@ -42,11 +42,11 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
   return (
     <div className="space-y-6">
       <PageHeader title={product.title ?? product.offerId} description={`Offer ID: ${product.offerId}`}>
-        <Link href="/products" className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href="/products" className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           返回商品池
         </Link>
         {product.sourceUrl ? (
-          <a className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href={product.sourceUrl} target="_blank">
+          <a className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href={product.sourceUrl} target="_blank">
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
             打开 1688
           </a>
@@ -172,7 +172,7 @@ export default async function ProductDetailPage({ params }: { params: { id: stri
             </dl>
           </Card>
 
-          <details className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <details className="rounded-2xl border border-white bg-white/85 p-5 shadow-[0_8px_24px_rgba(48,78,124,0.07)]">
             <summary className="cursor-pointer text-sm font-semibold text-gray-950">调试数据</summary>
             <pre className="mt-4 max-h-96 overflow-auto rounded-md bg-gray-950 p-4 text-xs leading-5 text-gray-100">
               {jsonPreview(product.productFacts[0]?.normalizedJson)}

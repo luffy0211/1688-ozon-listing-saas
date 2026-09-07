@@ -70,7 +70,7 @@ export default async function AnalyticsPage({
         <EmptyState title="还没有 Ozon 店铺" description="先连接 Ozon 店铺，数据看板才能读取商品、库存和订单数据。">
           <Link
             href="/stores"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#3478f6] px-3 text-sm font-medium text-white shadow-[0_8px_20px_rgba(52,120,246,0.18)] hover:bg-[#2868df]"
           >
             <Store className="h-4 w-4" aria-hidden="true" />
             连接 Ozon 店铺
@@ -126,7 +126,7 @@ export default async function AnalyticsPage({
                   <div key={item.date} className="grid grid-cols-[88px_minmax(0,1fr)_56px] items-center gap-3 text-sm">
                     <div className="text-gray-500">{item.date.slice(5)}</div>
                     <div className="h-3 overflow-hidden rounded-full bg-gray-100">
-                      <div className="h-full bg-blue-600" style={{ width: `${(total / orderMax) * 100}%` }} />
+                    <div className="h-full bg-[#3478f6]" style={{ width: `${(total / orderMax) * 100}%` }} />
                     </div>
                     <div className="text-right font-medium text-gray-900">{total}</div>
                   </div>
@@ -197,9 +197,9 @@ export default async function AnalyticsPage({
                 <td className="px-4 py-3">
                   <div className="flex min-w-[280px] items-center gap-3">
                     {product.imageUrl ? (
-                      <img src={product.imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" />
+                      <img src={product.imageUrl} alt="" className="h-14 w-14 rounded-xl border border-[#e1eaf4] bg-white object-contain" />
                     ) : (
-                      <div className="h-12 w-12 rounded-md bg-gray-100" />
+                      <div className="h-12 w-12 rounded-xl bg-[#f2f6fb]" />
                     )}
                     <div className="min-w-0">
                       <div className="line-clamp-2 font-medium text-gray-950">{product.name ?? product.offerId}</div>

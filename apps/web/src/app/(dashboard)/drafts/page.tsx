@@ -48,7 +48,7 @@ export default async function DraftsPage() {
         title="待发布"
         description="集中检查已经生成的 Ozon 草稿；只有待发布状态的草稿会显示确认上架按钮。"
       >
-        <Link className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href="/products">
+        <Link className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href="/products">
           返回商品池
         </Link>
       </PageHeader>
