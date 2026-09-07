@@ -5,6 +5,7 @@ import {
   extractProductPage,
   extractSecondLevelCategory,
   crawlOzonCategoryCompetitors,
+  mergeCategoryCardWithDetail,
 } from "./ozon-public-crawler";
 
 const states = (entries: Record<string, unknown>) =>
@@ -152,5 +153,45 @@ describe("Ozon public category crawler", () => {
     expect(result.images).toEqual({ ownCount: 1, medianCount: 2.5 });
     expect(result.missingTitleTerms).toContain("летнее");
     expect(result.missingAttributes).toContain("Сезон");
+  });
+
+  it("enriches only attributes and description from product detail", () => {
+    const card = {
+      sku: "200",
+      url: "https://www.ozon.ru/product/summer-dress-200/",
+      title: "Summer dress",
+      priceRub: 1590,
+      oldPriceRub: 2490,
+      rating: 4.8,
+      reviewCount: 321,
+      sellerName: null,
+      imageUrls: ["https://cdn.test/card.jpg"],
+      attributes: {},
+      description: null,
+      reviews: [],
+      categoryPosition: 2,
+    };
+    const detail = {
+      ...card,
+      url: "https://www.ozon.ru/product/200/",
+      sellerName: "Fashion Store",
+      imageUrls: ["https://cdn.test/detail-1.jpg", "https://cdn.test/detail-2.jpg"],
+      attributes: { Материал: "Шифон", Сезон: "Лето" },
+      description: "Летнее платье",
+      reviews: [{ rating: 5, text: "Хорошее платье" }],
+      categoryPosition: undefined,
+    };
+
+    expect(mergeCategoryCardWithDetail(card, detail)).toEqual(expect.objectContaining({
+      url: card.url,
+      categoryPosition: 2,
+      title: card.title,
+      priceRub: card.priceRub,
+      sellerName: null,
+      attributes: detail.attributes,
+      description: detail.description,
+      reviews: [],
+      imageUrls: card.imageUrls,
+    }));
   });
 });

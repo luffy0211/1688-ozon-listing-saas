@@ -36,6 +36,12 @@ describe("Ozon operations helpers", () => {
       source: "ozon_public_category",
       category: { url: "https://www.ozon.ru/category/example-1/" },
       competitors: [{ sku: "1" }],
+    })).toBeNull();
+    expect(cachedCompetitorReport({
+      source: "ozon_public_category",
+      detailScope: "attributes_description",
+      category: { url: "https://www.ozon.ru/category/example-1/" },
+      competitors: [{ sku: "1" }],
     })).toBeTruthy();
   });
 
@@ -107,6 +113,36 @@ describe("Ozon operations helpers", () => {
         }) as never,
       ),
     ).toEqual([{ offerId: "stocked", title: "Stocked", publicSku: "9004", quantity: 0, revenueRub: 0 }]);
+  });
+
+  it("falls back to hidden inventory when a store has no sales or visible products", () => {
+    expect(
+      selectCompetitorTargets(
+        summary({
+          products: [
+            { offerId: "missing-sku", name: "Missing SKU", publicSku: null, visible: false, archived: false, stock: 99 },
+            { offerId: "archived", name: "Archived", publicSku: "9005", visible: false, archived: true, stock: 50 },
+            { offerId: "hidden-low", name: "Hidden low", publicSku: "9006", visible: false, archived: false, stock: 3 },
+            { offerId: "hidden-high", name: "Hidden high", publicSku: "9007", visible: false, archived: false, stock: 12 },
+          ],
+        }) as never,
+      ),
+    ).toEqual([
+      { offerId: "hidden-high", title: "Hidden high", publicSku: "9007", quantity: 0, revenueRub: 0 },
+      { offerId: "hidden-low", title: "Hidden low", publicSku: "9006", quantity: 0, revenueRub: 0 },
+    ]);
+  });
+
+  it("can analyze an unpublished product when the store has no stock", () => {
+    expect(
+      selectCompetitorTargets(
+        summary({
+          products: [
+            { offerId: "draft", name: "Draft product", publicSku: "9008", visible: false, archived: false, stock: 0 },
+          ],
+        }) as never,
+      ),
+    ).toEqual([{ offerId: "draft", title: "Draft product", publicSku: "9008", quantity: 0, revenueRub: 0 }]);
   });
 
   it("sorts low content-rating products and keeps Ozon improvement evidence", () => {

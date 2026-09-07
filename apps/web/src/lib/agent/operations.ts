@@ -171,7 +171,6 @@ export function lowContentRatingProducts(
 export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
   const top = summary.topProducts
     .filter((item) => item.offerId && item.name)
-    .slice(0, 5)
     .map((item) => {
       const product = summary.products.find((entry) => entry.offerId === item.offerId);
       return {
@@ -181,12 +180,18 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
         quantity: item.quantity,
         revenueRub: item.revenueRub,
       };
-    });
+    })
+    .filter((item) => item.publicSku)
+    .slice(0, 5);
   if (top.length) return top;
 
-  return summary.products
-    .filter((item) => item.visible && !item.archived && item.stock > 0 && item.name)
-    .sort((a, b) => b.stock - a.stock)
+  const candidates = summary.products
+    .filter((item) => !item.archived && item.name && item.publicSku)
+    .sort((a, b) => b.stock - a.stock);
+  const visible = candidates.filter((item) => item.visible && item.stock > 0);
+  const stocked = candidates.filter((item) => item.stock > 0);
+
+  return (visible.length ? visible : stocked.length ? stocked : candidates)
     .slice(0, 5)
     .map((item) => ({
       offerId: item.offerId,
@@ -298,9 +303,12 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+const COMPETITOR_DETAIL_SCOPE = "attributes_description";
+
 export function cachedCompetitorReport(value: unknown) {
   const payload = record(value);
   return payload.source === "ozon_public_category" &&
+    payload.detailScope === COMPETITOR_DETAIL_SCOPE &&
     Array.isArray(payload.competitors) &&
     payload.competitors.length > 0 &&
     Boolean(record(payload.category).url)
@@ -429,6 +437,7 @@ export async function analyzeOzonCompetitors(params: {
         createdBy: params.userId,
         reportJson: {
           source: "ozon_public_category",
+          detailScope: COMPETITOR_DETAIL_SCOPE,
           storeId: store.id,
           target: result.target,
           category: result.category,
@@ -442,6 +451,7 @@ export async function analyzeOzonCompetitors(params: {
     });
     reports.push({
       source: "ozon_public_category",
+      detailScope: COMPETITOR_DETAIL_SCOPE,
       target: result.target,
       category: result.category,
       ownProduct: result.ownProduct,

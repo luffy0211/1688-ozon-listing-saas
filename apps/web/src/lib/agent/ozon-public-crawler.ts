@@ -302,6 +302,17 @@ export function extractProductPage(states: WidgetStates, sku: string): OzonPubli
   };
 }
 
+export function mergeCategoryCardWithDetail(
+  card: OzonPublicProduct,
+  detail: OzonPublicProduct,
+): OzonPublicProduct {
+  return {
+    ...card,
+    attributes: Object.keys(detail.attributes).length ? detail.attributes : card.attributes,
+    description: detail.description ?? card.description,
+  };
+}
+
 function median(values: Array<number | null>) {
   const sorted = values.filter((value): value is number => value !== null).sort((a, b) => a - b);
   if (!sorted.length) return null;
@@ -419,7 +430,19 @@ export async function crawlOzonCategoryCompetitors(params: {
       const cards = categoryData?.widgetStates
         ? extractCategoryProducts(categoryData.widgetStates, params.ownSkus).slice(0, 20)
         : [];
-      const competitors = cards.slice(0, params.limitPerProduct ?? 5);
+      const competitors: OzonPublicProduct[] = [];
+      for (const card of cards.slice(0, params.limitPerProduct ?? 5)) {
+        const detailData = await fetchJson(relativeOzonPath(card.url));
+        if (!detailData?.widgetStates) {
+          warnings.push(`竞品 ${card.sku} 详情读取失败，已使用类目卡片数据`);
+          competitors.push(card);
+          continue;
+        }
+        competitors.push(mergeCategoryCardWithDetail(
+          card,
+          extractProductPage(detailData.widgetStates, card.sku),
+        ));
+      }
       if (!competitors.length) warnings.push("同二级类目没有采集到有效竞品");
       results.push({
         target,
