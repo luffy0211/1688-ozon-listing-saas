@@ -3,12 +3,10 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Bot,
   Check,
   Loader2,
   Plus,
   Send,
-  ShieldCheck,
   X,
 } from "lucide-react";
 import { Badge, Button, Select, cn } from "./ui";
@@ -658,25 +656,10 @@ export function ContentAgentChat({
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-136px)] max-w-[1500px] gap-4">
+    <div className="flex h-[calc(100vh-136px)] w-full gap-4">
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white bg-white/45 shadow-[0_14px_40px_rgba(45,78,128,0.08)]">
-        <div className="flex items-center justify-between gap-3 border-b border-[#e3ebf5] bg-white/65 px-4 py-3 md:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#3478f6] text-white shadow-[0_8px_20px_rgba(52,120,246,0.22)]">
-              <Bot className="h-[18px] w-[18px]" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-bold text-[#17223d]">
-                Ozon 运营 Agent
-              </div>
-              <div className="mt-0.5 flex items-center gap-1.5 truncate text-xs font-medium text-[#8290a8]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[#36bd8c]" />
-                在线 · 诊断、竞品与审批执行
-              </div>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
+        {stores.length > 1 ? (
+          <div className="flex shrink-0 items-center justify-end gap-2 border-b border-[#e3ebf5] bg-white/65 px-4 py-2 md:px-5">
             <Button
               type="button"
               variant="outline"
@@ -688,25 +671,25 @@ export function ContentAgentChat({
               <Plus className="h-4 w-4" aria-hidden="true" />
               新对话
             </Button>
-            {stores.length > 1 ? (
-              <div className="w-48">
-                <Select value={selectedStoreId} onChange={setSelectedStoreId}>
-                  {stores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {store.name}
-                      {store.isDefault ? " / 默认" : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : null}
-            <span className="hidden rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-2.5 py-1 text-xs font-semibold text-[#168864] sm:inline-flex">
-              <ShieldCheck className="mr-1 h-3 w-3" aria-hidden="true" />
-              改动需确认
-            </span>
-            <span className="hidden rounded-full border border-[#dbe6fb] bg-[#f2f6fd] px-2.5 py-1 text-xs font-semibold text-[#52627b] sm:inline-flex">读取直接执行</span>
+            <div className="w-48">
+              <Select value={selectedStoreId} onChange={setSelectedStoreId}>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                    {store.isDefault ? " / 默认" : ""}
+                  </option>
+                ))}
+              </Select>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex justify-end border-b border-[#e3ebf5] bg-white/65 px-4 py-2 lg:hidden">
+            <Button type="button" variant="outline" onClick={startNewChat} disabled={running} title="新对话">
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              新对话
+            </Button>
+          </div>
+        )}
 
         <AgentCommandDeck
           disabled={!canSubmit || running}
@@ -729,7 +712,7 @@ export function ContentAgentChat({
         ) : null}
 
         <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(240,247,255,0.75),rgba(248,251,255,0.35))] px-4 py-4 pr-3 md:px-5">
-          <div className="mx-auto max-w-5xl space-y-4 pb-4">
+          <div className="w-full space-y-4 pb-4">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -781,7 +764,7 @@ export function ContentAgentChat({
         </div>
 
         <form onSubmit={submitPrompt} className="border-t border-[#e3ebf5] bg-white/75 p-3 md:px-5">
-          <div className="mx-auto flex max-w-5xl items-end gap-2 rounded-2xl border border-[#d8e4f2] bg-white p-2 shadow-[0_10px_30px_rgba(46,80,132,0.10)] focus-within:border-[#9bbcff] focus-within:ring-4 focus-within:ring-[#3478f6]/10">
+          <div className="flex w-full items-end gap-2 rounded-2xl border border-[#d8e4f2] bg-white p-2 shadow-[0_10px_30px_rgba(46,80,132,0.10)] focus-within:border-[#9bbcff] focus-within:ring-4 focus-within:ring-[#3478f6]/10">
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}

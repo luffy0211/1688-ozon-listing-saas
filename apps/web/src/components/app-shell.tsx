@@ -33,6 +33,7 @@ export function AppShell({
   children: ReactNode;
 }) {
   const pathname = usePathname();
+  const isAgentPage = pathname.startsWith("/agent/");
 
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,#dff7ff_0%,#f6f8ff_48%,#eeeafd_100%)] p-0 text-[#14213d] lg:p-3">
@@ -103,26 +104,46 @@ export function AppShell({
         <div className="min-h-[calc(100vh-24px)] overflow-hidden bg-[#f8fbff]/85 shadow-[0_20px_60px_rgba(48,88,145,0.10)] backdrop-blur-xl lg:rounded-[28px] lg:border lg:border-white/80">
           <header className="sticky top-0 z-20 border-b border-[#e3ebf5] bg-white/80 backdrop-blur-xl">
             <div className="flex h-16 items-center justify-between gap-3 px-4 md:px-6">
-              <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
+              <Link href={isAgentPage ? "/agent/content" : "/dashboard"} className="flex items-center gap-2 lg:hidden">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#3478f6] text-white">
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  {isAgentPage ? <Bot className="h-4 w-4" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
                 </span>
-                <span className="text-sm font-bold">Ozon 运营中心</span>
+                <span className="text-sm font-bold">{isAgentPage ? "Ozon 运营 Agent" : "Ozon 运营中心"}</span>
               </Link>
               <div className="hidden items-center gap-3 lg:flex">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f1f5fb] text-[#52627b]">
-                  <PackageSearch className="h-4 w-4" aria-hidden="true" />
+                <span className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl",
+                  isAgentPage ? "bg-[#3478f6] text-white" : "bg-[#f1f5fb] text-[#52627b]",
+                )}>
+                  {isAgentPage ? <Bot className="h-4 w-4" aria-hidden="true" /> : <PackageSearch className="h-4 w-4" aria-hidden="true" />}
                 </span>
-                <div className="flex h-9 items-center gap-2 rounded-xl bg-white px-3 text-sm font-semibold text-[#26334d] shadow-[0_4px_14px_rgba(55,84,130,0.08)]">
-                  Ozon 店铺工作区
-                  <ChevronDown className="h-3.5 w-3.5 text-[#9aa6ba]" aria-hidden="true" />
-                </div>
+                {isAgentPage ? (
+                  <div>
+                    <div className="text-sm font-bold text-[#26334d]">Ozon 运营 Agent</div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-[#8290a8]">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[#36bd8c]" />
+                      在线 · 诊断、竞品与审批执行
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex h-9 items-center gap-2 rounded-xl bg-white px-3 text-sm font-semibold text-[#26334d] shadow-[0_4px_14px_rgba(55,84,130,0.08)]">
+                    Ozon 店铺工作区
+                    <ChevronDown className="h-3.5 w-3.5 text-[#9aa6ba]" aria-hidden="true" />
+                  </div>
+                )}
               </div>
               <div className="flex min-w-0 items-center gap-2">
-                <span className="hidden items-center gap-1.5 rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-3 py-1.5 text-xs font-semibold text-[#168864] sm:inline-flex">
-                  <span className="h-2 w-2 rounded-full bg-[#36bd8c]" />
-                  系统在线
-                </span>
+                {isAgentPage ? (
+                  <>
+                    <span className="hidden rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-2.5 py-1 text-xs font-semibold text-[#168864] sm:inline-flex">改动需确认</span>
+                    <span className="hidden rounded-full border border-[#dbe6fb] bg-[#f2f6fd] px-2.5 py-1 text-xs font-semibold text-[#52627b] md:inline-flex">读取直接执行</span>
+                  </>
+                ) : (
+                  <span className="hidden items-center gap-1.5 rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-3 py-1.5 text-xs font-semibold text-[#168864] sm:inline-flex">
+                    <span className="h-2 w-2 rounded-full bg-[#36bd8c]" />
+                    系统在线
+                  </span>
+                )}
                 <Link
                   href="/settings"
                   aria-label="设置"
@@ -156,7 +177,7 @@ export function AppShell({
               })}
             </nav>
           </header>
-          <main className="mx-auto max-w-[1600px] px-4 py-5 md:px-6 md:py-6">{children}</main>
+          <main className="w-full px-4 py-5 md:px-6 md:py-6">{children}</main>
         </div>
       </div>
     </div>

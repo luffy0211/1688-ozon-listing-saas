@@ -78,16 +78,16 @@ export function AgentCommandDeck({
   onRun: (prompt: string) => void;
 }) {
   return (
-    <section className="border-b border-[#e3ebf5] bg-[linear-gradient(135deg,rgba(229,247,255,0.72),rgba(241,236,255,0.68))] px-4 py-5 md:px-6">
-      <div className="mx-auto max-w-5xl">
+    <section className="border-b border-[#e3ebf5] bg-[linear-gradient(135deg,rgba(229,247,255,0.72),rgba(241,236,255,0.68))] px-4 py-3 md:px-5">
+      <div className="w-full">
         <div className="flex items-center gap-1.5 text-xs font-bold text-[#3478f6]">
           <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
           AI ECOMMERCE COPILOT
         </div>
-        <h1 className="mt-2 text-2xl font-bold text-[#15213b] md:text-3xl">今天想先优化哪一部分？</h1>
-        <p className="mt-1.5 text-sm text-[#708099]">读取真实店铺和竞品数据，执行商品修改前由你确认。</p>
+        <h1 className="mt-1 text-xl font-bold text-[#15213b]">今天想先优化哪一部分？</h1>
+        <p className="mt-1 text-xs text-[#708099]">读取真实店铺和竞品数据，执行商品修改前由你确认。</p>
       </div>
-      <div className="mx-auto mt-4 grid max-w-5xl gap-3 md:grid-cols-3">
+      <div className="mt-3 grid w-full gap-3 md:grid-cols-3">
         {commands.map((command) => {
           const Icon = command.icon;
           return (
@@ -98,7 +98,7 @@ export function AgentCommandDeck({
               onClick={() => onRun(command.prompt)}
               title={command.title}
               className={cn(
-                "group flex min-h-24 items-center gap-3 rounded-2xl border p-4 text-left shadow-[0_8px_24px_rgba(52,80,124,0.07)] transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(52,80,124,0.11)] disabled:cursor-not-allowed disabled:opacity-50",
+                "group flex min-h-16 items-center gap-3 rounded-2xl border p-3 text-left shadow-[0_8px_24px_rgba(52,80,124,0.07)] transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(52,80,124,0.11)] disabled:cursor-not-allowed disabled:opacity-50",
                 command.className,
               )}
             >
