@@ -62,6 +62,31 @@ describe("Ozon search index", () => {
     }, 1)?.attributes).toEqual({ "Состав материала": "100% хлопок" });
   });
 
+  it("parses arbitrary category attributes from the characteristics section", () => {
+    const result = parseIndexedOzonProduct({
+      ...indexedProduct,
+      raw_content: `
+# Электрический чайник
+Характеристики
+Объем, л
+1.7
+Мощность, Вт
+2200
+Материал корпуса
+Стекло
+Описание
+Чайник с подсветкой.
+Отзывы
+`,
+    }, 1);
+
+    expect(result?.attributes).toEqual({
+      "Объем, л": "1.7",
+      "Мощность, Вт": "2200",
+      "Материал корпуса": "Стекло",
+    });
+  });
+
   it("queries only the Ozon index and excludes own products", async () => {
     const fetchImpl = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({
       results: [
