@@ -109,6 +109,9 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("分析最近销量最高商品的竞品", null)).toBe(
       "analyze_ozon_competitors",
     );
+    expect(requiredOzonToolForPrompt("根据我的店铺商品做一个竞品分析，分析5个商品数据", null)).toBe(
+      "analyze_ozon_competitors",
+    );
   });
 
   it("requires promotion data for campaign requests", () => {

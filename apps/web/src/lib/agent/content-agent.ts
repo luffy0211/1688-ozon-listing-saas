@@ -426,11 +426,11 @@ function ownStoreDataIntent(prompt: string) {
 }
 
 export function requiredOzonToolForPrompt(prompt: string, offerId: string | null) {
-  if (/(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt)) {
-    return "diagnose_ozon_store";
-  }
   if (/(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt)) {
     return "analyze_ozon_competitors";
+  }
+  if (/(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt)) {
+    return "diagnose_ozon_store";
   }
   if (/(?:活动|促销).{0,8}(?:规则|流程|sop)|(?:报名规则|报名流程)/i.test(prompt)) {
     return "compile_promotion_policy";
@@ -723,7 +723,7 @@ export async function runOzonContentAgent(params: {
         try {
           const result = await diagnoseOzonStore({
             tenantId: params.tenantId,
-            storeId: storeId ?? params.storeId,
+            storeId: params.storeId ?? storeId,
           });
           toolCalls.push({
             name: "diagnose_ozon_store",
@@ -769,7 +769,7 @@ export async function runOzonContentAgent(params: {
           const result = await analyzeOzonCompetitors({
             tenantId: params.tenantId,
             userId: params.userId,
-            storeId: storeId ?? params.storeId,
+            storeId: params.storeId ?? storeId,
           });
           const proposal = buildCompetitorBatchProposal({
             storeId: result.store.id,
