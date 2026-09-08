@@ -214,7 +214,6 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
         const right = totals(b);
         return right.revenue - left.revenue || right.quantity - left.quantity || right.stock - left.stock;
       })
-      .slice(0, 5)
       .map((items) => items[0]!)
       .map((item) => ({
         offerId: item.offerId,
@@ -413,7 +412,7 @@ function cachedPublicProduct(value: unknown): OzonPublicProduct | null {
     : null;
 }
 
-export function cachedCompetitorReport(value: unknown) {
+export function cachedCompetitorReport(value: unknown, minimumCompetitors = 1) {
   const payload = record(value);
   const report = payload.source === "ozon_search_index" &&
     payload.detailScope === COMPETITOR_DETAIL_SCOPE &&
@@ -429,6 +428,11 @@ export function cachedCompetitorReport(value: unknown) {
   if (!ownProduct || competitors.some((product) => !product)) return null;
   const usableCompetitors = uniqueUsableIndexedCompetitors(competitors as OzonPublicProduct[]);
   if (!usableCompetitors.length) return null;
+  const requestedCount = Number(report.competitorsPerCategory);
+  if (
+    usableCompetitors.length < minimumCompetitors &&
+    (!Number.isInteger(requestedCount) || requestedCount < minimumCompetitors)
+  ) return null;
   return {
     ...report,
     competitors: usableCompetitors,
@@ -647,6 +651,7 @@ export async function analyzeOzonCompetitors(params: {
   tenantId: string;
   userId: string;
   storeId?: string | null;
+  competitorsPerCategory: number;
 }) {
   const store = await resolveStore(params.tenantId, params.storeId);
   const client = clientFor(store);
@@ -682,9 +687,12 @@ export async function analyzeOzonCompetitors(params: {
       take: 10,
     });
     const cachedReport = cached.find(
-      (item) => record(item.reportJson).storeId === store.id && cachedCompetitorReport(item.reportJson),
+      (item) => record(item.reportJson).storeId === store.id &&
+        cachedCompetitorReport(item.reportJson, params.competitorsPerCategory),
     );
-    const reused = cachedReport ? cachedCompetitorReport(cachedReport.reportJson) : null;
+    const reused = cachedReport
+      ? cachedCompetitorReport(cachedReport.reportJson, params.competitorsPerCategory)
+      : null;
     if (reused) {
       reports.push({ ...reused, cached: true });
       continue;
@@ -699,7 +707,7 @@ export async function analyzeOzonCompetitors(params: {
         apiKey: env.tavilyApiKey,
         targets: pending,
         ownSkus: new Set(summary.products.map((item) => item.publicSku).filter((sku): sku is string => Boolean(sku))),
-        limitPerProduct: 5,
+        limitPerProduct: params.competitorsPerCategory,
       });
     } catch (error) {
       warnings.push(`Ozon 搜索索引采集失败：${error instanceof Error ? error.message : String(error)}`);
@@ -773,6 +781,7 @@ export async function analyzeOzonCompetitors(params: {
         reportJson: {
           source: "ozon_search_index",
           detailScope: COMPETITOR_DETAIL_SCOPE,
+          competitorsPerCategory: params.competitorsPerCategory,
           storeId: store.id,
           target: result.target,
           category: result.category,
@@ -787,6 +796,7 @@ export async function analyzeOzonCompetitors(params: {
     reports.push({
       source: "ozon_search_index",
       detailScope: COMPETITOR_DETAIL_SCOPE,
+      competitorsPerCategory: params.competitorsPerCategory,
       target: result.target,
       category: result.category,
       ownProduct: result.ownProduct,
@@ -809,6 +819,7 @@ export async function analyzeOzonCompetitors(params: {
   return {
     store: { id: store.id, name: store.name },
     periodDays: 30,
+    competitorsPerCategory: params.competitorsPerCategory,
     source: "Tavily / Ozon 搜索引擎收录页面",
     capturedAt: now.toISOString(),
     reports,

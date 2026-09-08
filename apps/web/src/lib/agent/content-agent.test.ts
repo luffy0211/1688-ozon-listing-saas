@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  competitorsPerCategoryFromPrompt,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
   normalizeOzonProductContent,
@@ -83,6 +84,14 @@ describe("normalizeOzonProductContent", () => {
 });
 
 describe("content agent tool enforcement helpers", () => {
+  it("reads the requested competitor count per category", () => {
+    expect(competitorsPerCategoryFromPrompt("每个类目分析 8 个竞品")).toBe(8);
+    expect(competitorsPerCategoryFromPrompt("分析五个同类竞品")).toBe(5);
+    expect(competitorsPerCategoryFromPrompt("每个类目 7 个")).toBe(7);
+    expect(competitorsPerCategoryFromPrompt("5个")).toBe(5);
+    expect(competitorsPerCategoryFromPrompt("分析店铺竞品")).toBeNull();
+  });
+
   it("requires a store snapshot for own-store data questions", () => {
     expect(requiredOzonToolForPrompt("自己店铺现在有多少商品？", null)).toBe(
       "get_ozon_store_snapshot",
@@ -106,12 +115,13 @@ describe("content agent tool enforcement helpers", () => {
   });
 
   it("requires competitor evidence for competitor analysis", () => {
-    expect(requiredOzonToolForPrompt("分析最近销量最高商品的竞品", null)).toBe(
+    expect(requiredOzonToolForPrompt("每个类目分析5个竞品", null)).toBe(
       "analyze_ozon_competitors",
     );
     expect(requiredOzonToolForPrompt("根据我的店铺商品做一个竞品分析，分析5个商品数据", null)).toBe(
       "analyze_ozon_competitors",
     );
+    expect(requiredOzonToolForPrompt("分析店铺竞品", null)).toBeNull();
   });
 
   it("requires promotion data for campaign requests", () => {

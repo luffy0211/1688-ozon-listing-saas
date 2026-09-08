@@ -380,7 +380,7 @@ function buildInstructions(offerId: string | null) {
     "如果工具没有返回某个字段，就明确说不知道或当前 API 未返回，不要猜测、不要编造。",
     "用户要求店铺诊断时，必须调用 diagnose_ozon_store；只根据工具返回的 Ozon 数据解释问题，不把净回款称为真实利润。",
     "店铺诊断返回 lowContentRatingProducts 时，按评分从低到高说明 Ozon 官方改进条件。最多选择最紧急的 3 个商品，依次调用 get_ozon_product_content 和 propose_content_draft，生成标题或描述优化待确认动作；没有真实新图片或明确属性值时只建议，不创建图片或属性写动作。",
-    "用户要求竞品分析时，必须调用 analyze_ozon_competitors；该工具先统计自家店铺正在售卖的 Ozon 官方类目，每个主要类目选择一个代表商品，再比较搜索引擎收录的同类目 Ozon 商品页。竞品结论必须带页面证据，不得复制竞品整段文案。",
+    "用户要求竞品分析时，先确认用户明确说明每个类目分析多少个竞品，允许 1 至 10 个；未说明时只询问数量，不调用工具。说明后必须调用 analyze_ozon_competitors；该工具统计自家店铺全部正在售卖的 Ozon 官方类目，每个类目选择一个代表商品，再比较搜索引擎收录的同类目 Ozon 商品页。竞品结论必须带页面证据，不得复制竞品整段文案。",
     "竞品分析工具已经生成确定性的类目属性经验、Ozon 官方字段映射和自家商品建议。回复固定分成：类目填写经验、自家商品修改建议、待确认批量操作。不要把分析改写成属性冲突报告。",
     "竞品总数必须使用工具返回的 uniqueCompetitorCount，不得把多个自家商品共享的同一竞品重复相加；类目有效样本少于 3 个时必须明确标为证据不足。",
     "竞品多数值只是经验，不是自家商品事实。只有工具返回 status=ADD 的建议有自家商品证据并可进入待确认操作；NEEDS_CONFIRMATION 只能提示人工补充，COMPLETE 不修改，UNMAPPED 不执行。",
@@ -425,9 +425,26 @@ function ownStoreDataIntent(prompt: string) {
   );
 }
 
+function competitorAnalysisIntent(prompt: string) {
+  return /(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt);
+}
+
+export function competitorsPerCategoryFromPrompt(prompt: string) {
+  const match =
+    prompt.match(/([1-9]\d?|[一二三四五六七八九十])\s*个?\s*(?:同类)?(?:竞品|商品(?:数据)?)/i) ??
+    prompt.match(/每(?:个)?(?:二级)?类目.{0,12}([1-9]\d?|[一二三四五六七八九十])\s*个?/i) ??
+    prompt.trim().match(/^([1-9]\d?|[一二三四五六七八九十])\s*个?$/);
+  if (!match?.[1]) return null;
+  const chineseNumbers: Record<string, number> = {
+    一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+  };
+  const count = chineseNumbers[match[1]] ?? Number(match[1]);
+  return Number.isInteger(count) && count >= 1 && count <= 10 ? count : null;
+}
+
 export function requiredOzonToolForPrompt(prompt: string, offerId: string | null) {
-  if (/(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt)) {
-    return "analyze_ozon_competitors";
+  if (competitorAnalysisIntent(prompt)) {
+    return competitorsPerCategoryFromPrompt(prompt) ? "analyze_ozon_competitors" : null;
   }
   if (/(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt)) {
     return "diagnose_ozon_store";
@@ -616,6 +633,7 @@ export async function runOzonContentAgent(params: {
 }) {
   const prompt = redactSensitiveText(params.prompt);
   const offerId = extractOfferId(prompt);
+  const competitorsPerCategory = competitorsPerCategoryFromPrompt(prompt);
   const session = await ensureSession({
     tenantId: params.tenantId,
     userId: params.userId,
@@ -761,15 +779,22 @@ export async function runOzonContentAgent(params: {
     const analyzeCompetitorsTool = tool({
       name: "analyze_ozon_competitors",
       description:
-        "Select up to five major selling categories from the own Ozon store, choose one representative product per category, build category attribute playbooks from indexed same-category competitors, and persist one human-approval batch when safe evidence-backed additions exist. It never writes to Ozon directly.",
+        "Read every selling category from the own Ozon store, choose one representative product per category, collect the user-requested number of indexed same-category competitors, build category attribute playbooks, and persist one human-approval batch when safe evidence-backed additions exist. Ask for a per-category competitor count from 1 to 10 before calling. It never writes to Ozon directly.",
       parameters: z.object({ storeId: z.string().nullable() }),
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
         try {
+          if (!competitorsPerCategory) {
+            throw new ContentAgentInputError(
+              "competitor_count_required",
+              "请说明每个类目需要分析多少个竞品，支持 1 至 10 个。",
+            );
+          }
           const result = await analyzeOzonCompetitors({
             tenantId: params.tenantId,
             userId: params.userId,
             storeId: params.storeId ?? storeId,
+            competitorsPerCategory,
           });
           const proposal = buildCompetitorBatchProposal({
             storeId: result.store.id,

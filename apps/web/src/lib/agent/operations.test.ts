@@ -182,6 +182,34 @@ describe("Ozon operations helpers", () => {
     })).toBeNull();
   });
 
+  it("reuses competitor cache only when it covers the requested per-category count", () => {
+    const product = (sku: string) => ({
+      sku,
+      url: `https://www.ozon.ru/product/${sku}/`,
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes: { Материал: "Хлопок" },
+      description: null,
+      reviews: [],
+    });
+    const report = {
+      source: "ozon_search_index",
+      detailScope: "category_search_index_attributes_description_v3",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: product("own"),
+      competitors: [product("1")],
+      competitorsPerCategory: 3,
+    };
+
+    expect(cachedCompetitorReport(report, 3)).not.toBeNull();
+    expect(cachedCompetitorReport(report, 5)).toBeNull();
+  });
+
   it("rejects cached competitor attributes with invalid value types", () => {
     const malformed = {
       sku: "1",
@@ -323,6 +351,21 @@ describe("Ozon operations helpers", () => {
         categoryPathRu: [],
       },
     ]);
+  });
+
+  it("keeps one representative for every selling category", () => {
+    const products = Array.from({ length: 6 }, (_, index) => ({
+      offerId: `offer-${index}`,
+      name: `Product ${index}`,
+      publicSku: `sku-${index}`,
+      visible: true,
+      archived: false,
+      stock: 10 - index,
+      descriptionCategoryId: 17027904,
+      typeId: 93000 + index,
+    }));
+
+    expect(selectCompetitorTargets(summary({ products }) as never)).toHaveLength(6);
   });
 
   it("falls back to visible stocked products when category data is unavailable", () => {
