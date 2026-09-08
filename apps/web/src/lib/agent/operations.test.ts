@@ -283,28 +283,49 @@ describe("Ozon operations helpers", () => {
     expect(diagnosis).not.toHaveProperty("profit");
   });
 
-  it("selects top sellers first and falls back to visible stocked products", () => {
+  it("selects one top-selling representative per store category", () => {
     expect(
       selectCompetitorTargets(
         summary({
-          topProducts: [{ offerId: "best", name: "Best", quantity: 8, revenueRub: 900 }],
+          topProducts: [
+            { offerId: "best", name: "Best", quantity: 8, revenueRub: 900 },
+            { offerId: "same-category", name: "Same category", quantity: 6, revenueRub: 700 },
+            { offerId: "other-category", name: "Other category", quantity: 4, revenueRub: 500 },
+          ],
           products: [
             { offerId: "best", name: "Best", publicSku: "9001", visible: true, archived: false, stock: 2, descriptionCategoryId: 17027904, typeId: 93337 },
-            { offerId: "fallback", name: "Fallback", publicSku: "9002", visible: true, archived: false, stock: 9 },
+            { offerId: "same-category", name: "Same category", publicSku: "9002", visible: true, archived: false, stock: 9, descriptionCategoryId: 17027904, typeId: 93337 },
+            { offerId: "other-category", name: "Other category", publicSku: "9003", visible: true, archived: false, stock: 5, descriptionCategoryId: 17027904, typeId: 94444 },
           ],
         }) as never,
       ),
-    ).toEqual([{
-      offerId: "best",
-      title: "Best",
-      publicSku: "9001",
-      quantity: 8,
-      revenueRub: 900,
-      descriptionCategoryId: 17027904,
-      typeId: 93337,
-      categoryNameRu: null,
-      categoryPathRu: [],
-    }]);
+    ).toEqual([
+      {
+        offerId: "best",
+        title: "Best",
+        publicSku: "9001",
+        quantity: 8,
+        revenueRub: 900,
+        descriptionCategoryId: 17027904,
+        typeId: 93337,
+        categoryNameRu: null,
+        categoryPathRu: [],
+      },
+      {
+        offerId: "other-category",
+        title: "Other category",
+        publicSku: "9003",
+        quantity: 4,
+        revenueRub: 500,
+        descriptionCategoryId: 17027904,
+        typeId: 94444,
+        categoryNameRu: null,
+        categoryPathRu: [],
+      },
+    ]);
+  });
+
+  it("falls back to visible stocked products when category data is unavailable", () => {
 
     expect(
       selectCompetitorTargets(

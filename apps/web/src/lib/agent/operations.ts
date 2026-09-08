@@ -178,40 +178,65 @@ export function lowContentRatingProducts(
 }
 
 export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
-  const top = summary.topProducts
-    .filter((item) => item.offerId && item.name)
-    .map((item) => {
-      const product = summary.products.find((entry) => entry.offerId === item.offerId);
-      return {
-        offerId: item.offerId,
-        title: item.name!,
-        publicSku: product?.publicSku ?? null,
-        quantity: item.quantity,
-        revenueRub: item.revenueRub,
-        descriptionCategoryId: product?.descriptionCategoryId ?? null,
-        typeId: product?.typeId ?? null,
-        categoryNameRu: null,
-        categoryPathRu: [],
-      };
-    })
-    .filter((item) => item.publicSku)
-    .slice(0, 5);
-  if (top.length) return top;
-
+  const sales = new Map(summary.topProducts.map((item) => [item.offerId, item]));
   const candidates = summary.products
     .filter((item) => !item.archived && item.name && item.publicSku)
-    .sort((a, b) => b.stock - a.stock);
+    .sort((a, b) => {
+      const aSales = sales.get(a.offerId);
+      const bSales = sales.get(b.offerId);
+      return (bSales?.revenueRub ?? 0) - (aSales?.revenueRub ?? 0) ||
+        (bSales?.quantity ?? 0) - (aSales?.quantity ?? 0) ||
+        b.stock - a.stock;
+    });
   const visible = candidates.filter((item) => item.visible && item.stock > 0);
   const stocked = candidates.filter((item) => item.stock > 0);
+  const pool = visible.length ? visible : stocked.length ? stocked : candidates;
+  const categorized = pool.filter((item) => item.descriptionCategoryId && item.typeId);
 
-  return (visible.length ? visible : stocked.length ? stocked : candidates)
+  if (categorized.length) {
+    const categories = new Map<string, typeof categorized>();
+    categorized.forEach((item) => {
+      const key = `${item.descriptionCategoryId}:${item.typeId}`;
+      categories.set(key, [...(categories.get(key) ?? []), item]);
+    });
+
+    return [...categories.values()]
+      .sort((a, b) => {
+        const totals = (items: typeof categorized) => items.reduce(
+          (total, item) => ({
+            revenue: total.revenue + (sales.get(item.offerId)?.revenueRub ?? 0),
+            quantity: total.quantity + (sales.get(item.offerId)?.quantity ?? 0),
+            stock: total.stock + item.stock,
+          }),
+          { revenue: 0, quantity: 0, stock: 0 },
+        );
+        const left = totals(a);
+        const right = totals(b);
+        return right.revenue - left.revenue || right.quantity - left.quantity || right.stock - left.stock;
+      })
+      .slice(0, 5)
+      .map((items) => items[0]!)
+      .map((item) => ({
+        offerId: item.offerId,
+        title: item.name!,
+        publicSku: item.publicSku,
+        quantity: sales.get(item.offerId)?.quantity ?? 0,
+        revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
+        descriptionCategoryId: item.descriptionCategoryId ?? null,
+        typeId: item.typeId ?? null,
+        categoryNameRu: null,
+        categoryPathRu: [],
+      }));
+  }
+
+  return pool
     .slice(0, 5)
     .map((item) => ({
       offerId: item.offerId,
       title: item.name!,
       publicSku: item.publicSku,
-      quantity: 0,
-      revenueRub: 0,
+      quantity: sales.get(item.offerId)?.quantity ?? 0,
+      revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
       descriptionCategoryId: item.descriptionCategoryId ?? null,
       typeId: item.typeId ?? null,
       categoryNameRu: null,
