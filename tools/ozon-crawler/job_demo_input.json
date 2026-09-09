@@ -1,0 +1,19 @@
+{
+  "requestId": "demo-polo-001",
+  "storeId": "store-001",
+  "topN": 3,
+  "scanPages": 2,
+  "categories": [
+    {
+      "categoryKey": "200000933:93194",
+      "descriptionCategoryId": 200000933,
+      "typeId": 93194,
+      "categoryNameRu": "Поло",
+      "gender": "Мужской",
+      "ageGroup": "Взрослые",
+      "productType": "Поло",
+      "referencePriceRub": 1299
+    }
+  ],
+  "excludeSkus": []
+}
