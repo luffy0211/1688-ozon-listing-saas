@@ -61,7 +61,7 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 /** Server Component / Route Handler 中读取当前会话。 */
 export async function getSession(): Promise<SessionPayload | null> {
-  const token = cookies().get(SESSION_COOKIE)?.value;
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return verifySession(token);
 }
 

@@ -7,10 +7,8 @@ import { get1688Cookies } from "@/lib/credential-1688";
 import { detailToSourceProductImport } from "@/lib/import-1688";
 import { importProduct } from "@/lib/services";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await sessionFromRequest(req);
   if (!session) return unauthorized();
   const tenantId = session.tenantId;

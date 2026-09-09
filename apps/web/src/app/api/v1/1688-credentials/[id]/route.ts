@@ -4,10 +4,8 @@ import { ok, notFound, unauthorized, forbidden } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 
 /** 删除 1688 登录态。 */
-export async function DELETE(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await sessionFromRequest(_req);
   if (!session) return unauthorized();
   const tenantId = session.tenantId;

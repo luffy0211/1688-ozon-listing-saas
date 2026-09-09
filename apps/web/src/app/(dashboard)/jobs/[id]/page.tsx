@@ -6,7 +6,8 @@ import { Card, EmptyState, MetricCard, PageHeader, ProgressBar, SectionHeader, T
 import { PostButton, PublishDraftButton } from "@/components/api-actions";
 import { StatusBadge, statusLabel, stepLabel } from "@/components/status";
 
-export default async function JobDetailPage({ params }: { params: { id: string } }) {
+export default async function JobDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await requireUser();
   if (!user.tenantId) {
     return <PageHeader title="任务详情" description="管理员账号请进入平台管理。" />;

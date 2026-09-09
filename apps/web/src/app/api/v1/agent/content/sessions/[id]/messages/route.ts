@@ -35,10 +35,8 @@ function dataSourcesFromRun(run: { toolCallsJson: unknown } | null | undefined) 
     : [];
 }
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const requestSession = await sessionFromRequest(req);
   if (!requestSession) return unauthorized();
   if (!requestSession.tenantId) return forbidden();
@@ -148,10 +146,8 @@ export async function GET(
   });
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const requestSession = await sessionFromRequest(req);
   if (!requestSession) return unauthorized();
   if (!requestSession.tenantId) return forbidden();
