@@ -25,6 +25,7 @@ import time
 import uuid
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # --------------------------------------------------------------------------
 # 配置（可按需改成命令行/配置文件）
@@ -558,7 +559,9 @@ def resolve_category_url(fetcher, cat):
     child = _discover_subcategory(fetcher, parent, pt)
     if child:
         return (child, warn)
-    return (parent, warn + ("（未找到子分类，使用大类）" if warn else "未找到细分分类，使用大类页"))
+    if warn:
+        return (parent, warn + "（未找到子分类，使用大类）")
+    return (parent, "未找到细分分类，使用大类页")
 
 
 def _price_number(detail, card):
@@ -569,12 +572,50 @@ def _price_number(detail, card):
     return int(n) if n else None
 
 
+PRODUCT_TYPE_ALIASES = {
+    "платья": "платье",
+    "рубашки": "рубашка",
+    "футболки": "футболка",
+}
+
+
+def _normalize_product_type(value):
+    value = clean(str(value or "")).casefold()
+    return PRODUCT_TYPE_ALIASES.get(value, value)
+
+
+def _observed_product_type(detail):
+    for name, value in (detail.get("attributes") or {}).items():
+        if clean(str(name)).casefold() in {"тип", "тип товара"}:
+            return clean(str(value))
+    return None
+
+
+def _matches_product_type(detail, cat):
+    expected = cat.get("productType") or cat.get("categoryNameRu")
+    if not expected:
+        return True, None
+    observed = _observed_product_type(detail)
+    if not observed:
+        return False, None
+    expected = _normalize_product_type(expected)
+    observed_types = {
+        _normalize_product_type(value)
+        for value in re.split(r"\s*[/,;]\s*", observed)
+    }
+    return expected in observed_types, observed
+
+
 def run_job(fetcher, job, args):
     """执行一次契约任务，返回结果 dict（与输入 requestId 对应）"""
-    now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not isinstance(job, dict) or not isinstance(job.get("categories") or [], list):
+        raise ValueError("job.categories 必须是数组")
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     exclude = {str(s) for s in (job.get("excludeSkus") or [])}
     top_n = int(job.get("topN") or 5)
     pages = int(job.get("scanPages") or 5)
+    if top_n < 1 or pages < 1:
+        raise ValueError("topN 和 scanPages 必须大于 0")
     result = {
         "requestId": job.get("requestId", ""),
         "capturedAt": now,
@@ -587,6 +628,7 @@ def run_job(fetcher, job, args):
             "categoryKey": cat.get("categoryKey", ""),
             "scannedCount": 0,
             "eligibleCount": 0,
+            "filteredMismatchedCount": 0,
             "competitors": [],
             "warnings": ([warn] if warn else []),
         }
@@ -599,7 +641,7 @@ def run_job(fetcher, job, args):
             if path.startswith("/search/"):
                 url = ("https://www.ozon.ru" + path) if page <= 1 else (
                     "https://www.ozon.ru" + path + "&page=" + str(page))
-            print(f"[job-scan] {url}")
+            print(f"[job-scan] {url}", file=sys.stderr)
             try:
                 html_text = fetcher.get(url)
             except Exception as e:
@@ -627,7 +669,9 @@ def run_job(fetcher, job, args):
             ranked.append((c, rev, rat))
         ranked.sort(key=lambda x: (x[1], x[2]), reverse=True)
         # 抓取详情并组装 competitor
-        for i, (c, rev, rat) in enumerate(ranked[:top_n], 1):
+        for c, rev, rat in ranked:
+            if len(cat_res["competitors"]) >= top_n:
+                break
             detail = {}
             try:
                 dh = fetcher.get(detail_url(c["product_id"]),
@@ -640,10 +684,18 @@ def run_job(fetcher, job, args):
                         detail["attributes"] = full
                 time.sleep(args.interval)
             except Exception as e:
-                print(f"[warn] 详情失败 id={c['product_id']}: {str(e)[:100]}")
+                print(f"[warn] 详情失败 id={c['product_id']}: {str(e)[:100]}", file=sys.stderr)
                 cat_res["warnings"].append(f"id={c['product_id']} 详情抓取失败")
                 continue
-            hot = bool(c.get("labels") and any("хит" in x.lower() for x in c["labels"])) or rev >= 10000
+            matches, _ = _matches_product_type(detail, cat)
+            if not matches:
+                cat_res["filteredMismatchedCount"] += 1
+                continue
+            hot = bool(c.get("labels") and any(
+                any(token in label.casefold() for token in ("хит", "бестселлер"))
+                for label in c["labels"]
+            ))
+            review_count = int(_to_num(detail.get("review_count")) or rev)
             comp = {
                 "publicRank": len(cat_res["competitors"]) + 1,
                 "sku": c["product_id"],
@@ -657,8 +709,9 @@ def run_job(fetcher, job, args):
                 "productType": cat.get("productType") or cat.get("categoryNameRu"),
                 "priceRub": _price_number(detail, c),
                 "rating": float(_to_num(detail.get("rating")) or rat),
-                "reviewCount": int(_to_num(detail.get("review_count")) or rev),
+                "reviewCount": review_count,
                 "hotBadge": hot,
+                "popularityProxy": hot or review_count >= 10000,
                 "sellerName": detail.get("seller"),
                 "brand": detail.get("brand") or None,
                 "attributes": detail.get("attributes") or {},
@@ -710,7 +763,7 @@ def main():
         jar = cand
 
     fetcher = Fetcher(jar, proxy=args.proxy)
-    print(f"[info] cookie: {jar}\n[info] proxy: {args.proxy}")
+    print(f"[info] cookie: {jar}\n[info] proxy: {args.proxy}", file=sys.stderr)
 
     if args.job:
         with open(args.job, encoding="utf-8") as f:
@@ -720,7 +773,7 @@ def main():
         if args.out:
             with open(args.out, "w", encoding="utf-8") as fo:
                 fo.write(out_txt)
-            print(f"[job] 已写入 {args.out}")
+            print(f"[job] 已写入 {args.out}", file=sys.stderr)
         print(out_txt)
         return
 

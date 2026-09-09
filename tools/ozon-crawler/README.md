@@ -77,9 +77,9 @@ python ozon_crawler.py --job job_input.json --out job_output.json --tsv cookies.
 }
 ```
 
-执行流程：每个 category 自动解析为可扫描的网页分类（内置 Поло 等映射 + 按 gender/ageGroup 选父类 + 大类目录自动发现细分；亦可在 category 对象里加内部可选字段 `ozonCategoryUrl`/`ozonQuery` 直接指定入口）→ 扫 `scanPages` 页 → 排除 `excludeSkus` → 按评价数+评分排序取 `topN` → 逐条抓详情（标题/描述/价格/评分/评价数/卖家/品牌/全量属性）→ 输出契约 JSON（`requestId`/`capturedAt`/`rankingType`/`categories[].competitors[]`，见 `job_demo_output.json`），打印到 stdout。
+执行流程：每个 category 自动解析为可扫描的网页分类（内置 Поло 等映射 + 按 gender/ageGroup 选父类 + 大类目录自动发现细分；亦可在 category 对象里加内部可选字段 `ozonCategoryUrl`/`ozonQuery` 直接指定入口）→ 扫 `scanPages` 页 → 排除 `excludeSkus` → 按评价数+评分排序 → 逐条抓详情并核对 `productType` → 过滤错类目商品并继续补位，直到返回 `topN` 或候选耗尽 → 输出契约 JSON。stdout 只输出 JSON，运行日志输出到 stderr。
 
-> 说明：`hotBadge` 为“列表页热销/新品徽章 或 评价数≥1万”的近似标记（Ozon 不公开真实销量与类目排名）；个别详情抓取失败会记入 `warnings` 并跳过，不影响其余竞品。
+> 说明：`hotBadge` 只表示列表页真实热销徽章；`popularityProxy` 表示“热销徽章或评价数≥1万”的公开热度代理信号（Ozon 不公开真实销量与类目排名）。`filteredMismatchedCount` 是详情商品类型与目标不一致的过滤数量；详情抓取失败会记入 `warnings`。
 
 ### 参数
 
