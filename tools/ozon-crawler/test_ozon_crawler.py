@@ -36,7 +36,7 @@ class OzonCrawlerJobTests(unittest.TestCase):
             {
                 "product_id": "100",
                 "url": "/product/wrong-100/",
-                "title": "Мужская футболка",
+                "title": "Мужское поло с ошибочным типом",
                 "price": "1000",
                 "rating": "4.9",
                 "reviews": "20000",
@@ -85,6 +85,52 @@ class OzonCrawlerJobTests(unittest.TestCase):
         self.assertEqual(1, category["filteredMismatchedCount"])
         self.assertFalse(category["competitors"][0]["hotBadge"])
         self.assertTrue(category["competitors"][0]["popularityProxy"])
+
+    def test_job_prioritizes_matching_card_titles_before_fetching_details(self):
+        cards = [
+            {
+                "product_id": "100",
+                "url": "/product/tshirt-100/",
+                "title": "Мужская футболка",
+                "price": "1000",
+                "rating": "4.9",
+                "reviews": "20000",
+                "labels": [],
+            },
+            {
+                "product_id": "200",
+                "url": "/product/polo-200/",
+                "title": "Мужское поло",
+                "price": "1100",
+                "rating": "4.8",
+                "reviews": "15000",
+                "labels": [],
+            },
+        ]
+        job = {
+            "requestId": "test",
+            "topN": 1,
+            "scanPages": 1,
+            "categories": [{"categoryKey": "1:2", "productType": "Поло"}],
+        }
+        args = SimpleNamespace(interval=0)
+
+        with (
+            mock.patch.object(ozon_crawler, "resolve_category_url", return_value=("/category/polo/", None)),
+            mock.patch.object(ozon_crawler, "parse_cards", return_value=cards),
+            mock.patch.object(
+                ozon_crawler,
+                "parse_detail",
+                return_value={"attributes": {"Тип": "Поло"}},
+            ) as parse_detail,
+            mock.patch.object(ozon_crawler, "extract_sh", return_value=None),
+        ):
+            result = ozon_crawler.run_job(JobFetcher(), job, args)
+
+        category = result["categories"][0]
+        self.assertEqual(["200"], [item["sku"] for item in category["competitors"]])
+        self.assertEqual(1, parse_detail.call_count)
+        self.assertEqual(0, category["filteredMismatchedCount"])
 
     def test_job_cli_writes_only_json_to_stdout(self):
         with tempfile.TemporaryDirectory() as temp_dir:

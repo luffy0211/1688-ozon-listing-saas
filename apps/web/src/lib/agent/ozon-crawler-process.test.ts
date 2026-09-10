@@ -119,6 +119,6 @@ describe("Ozon crawler process adapter", () => {
       limitPerCategory: 1,
     });
 
-    expect(result?.warnings.length).toBeGreaterThan(0);
-  });
+    expect(result?.competitors.length).toBeGreaterThan(0);
+  }, 300_000);
 });

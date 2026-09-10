@@ -584,6 +584,12 @@ def _normalize_product_type(value):
     return PRODUCT_TYPE_ALIASES.get(value, value)
 
 
+def _card_title_matches_product_type(card, cat):
+    expected = _normalize_product_type(cat.get("productType") or cat.get("categoryNameRu"))
+    title = clean(str(card.get("title") or "")).casefold()
+    return bool(expected and expected in title)
+
+
 def _observed_product_type(detail):
     for name, value in (detail.get("attributes") or {}).items():
         if clean(str(name)).casefold() in {"тип", "тип товара"}:
@@ -667,7 +673,10 @@ def run_job(fetcher, job, args):
             rev = _to_num(c.get("reviews")) or 0.0
             rat = _to_num(c.get("rating")) or 0.0
             ranked.append((c, rev, rat))
-        ranked.sort(key=lambda x: (x[1], x[2]), reverse=True)
+        ranked.sort(
+            key=lambda x: (_card_title_matches_product_type(x[0], cat), x[1], x[2]),
+            reverse=True,
+        )
         # 抓取详情并组装 competitor
         for c, rev, rat in ranked:
             if len(cat_res["competitors"]) >= top_n:
