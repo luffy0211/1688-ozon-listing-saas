@@ -6,10 +6,8 @@ import { sessionFromRequest } from "@/lib/request-session";
 
 export const runtime = "nodejs";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await sessionFromRequest(req);
   if (!session) return unauthorized();
   if (!session.tenantId) return forbidden();

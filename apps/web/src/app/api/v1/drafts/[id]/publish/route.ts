@@ -10,10 +10,8 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await sessionFromRequest(req);
   if (!session) return unauthorized();
   const tenantId = session.tenantId;

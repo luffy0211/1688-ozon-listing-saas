@@ -25,13 +25,14 @@ function normalizeStatus(value: string | undefined): ShopFollowStatus | "ALL" {
     : "NEW";
 }
 
-export default async function ShopDetailPage({
-  params,
-  searchParams,
-}: {
-  params: { id: string };
-  searchParams?: { status?: string };
-}) {
+export default async function ShopDetailPage(
+  props: {
+    params: Promise<{ id: string }>;
+    searchParams?: Promise<{ status?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
   const user = await requireUser();
   if (!user.tenantId) {
     return <PageHeader title="选品列表" description="管理员账号请进入平台管理。" />;

@@ -12,7 +12,8 @@ function jsonPreview(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
-export default async function ProductDetailPage({ params }: { params: { id: string } }) {
+export default async function ProductDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const user = await requireUser();
   if (!user.tenantId) {
     return <PageHeader title="商品详情" description="管理员账号请进入平台管理。" />;

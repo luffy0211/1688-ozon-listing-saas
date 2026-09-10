@@ -55,10 +55,8 @@ function isSameRunMode(productStatus: string, autoPublish: boolean) {
   return productStatus === (autoPublish ? "publishing" : "draft_generating");
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await sessionFromRequest(req);
   if (!session) return unauthorized();
   const tenantId = session.tenantId;

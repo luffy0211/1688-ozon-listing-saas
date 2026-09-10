@@ -7,9 +7,7 @@ const nextConfig = {
     "@saas/xiangji",
     "@saas/storage",
   ],
-  experimental: {
-    serverComponentsExternalPackages: ["@prisma/client", "bullmq", "ioredis", "playwright"],
-  },
+  serverExternalPackages: ["@prisma/client", "bullmq", "ioredis", "playwright"],
   reactStrictMode: true,
 };
 
