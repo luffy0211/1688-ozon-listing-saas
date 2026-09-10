@@ -37,6 +37,7 @@ describe("Ozon crawler process adapter", () => {
         gender: "Мужской",
         ageGroup: "Взрослые",
         productType: "Поло",
+        ozonQuery: "Поло мужские",
       }],
       excludeSkus: ["999"],
     });
@@ -75,6 +76,9 @@ describe("Ozon crawler process adapter", () => {
         scannedCount: 20,
         eligibleCount: 18,
         filteredMismatchedCount: 2,
+        filteredDemographicCount: 1,
+        missingDemographicCount: 4,
+        deduplicatedVariantCount: 3,
         warnings: [],
         competitors: [{
           publicRank: 1,
@@ -103,7 +107,12 @@ describe("Ozon crawler process adapter", () => {
         attributes: { "Тип": "Поло", "Материал": "Хлопок" },
         reviews: [],
       }],
-      warnings: ["已过滤 2 个详情类型不匹配的商品"],
+      warnings: [
+        "已过滤 2 个详情类型不匹配的商品",
+        "已过滤 1 个性别或年龄不匹配的商品",
+        "有 4 个商品缺少性别属性，已按严格匹配规则排除",
+        "已合并 3 个重复商品变体",
+      ],
     });
     expect(result?.benchmarks?.content.attributePatterns).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "Материал" })]),

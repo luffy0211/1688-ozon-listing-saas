@@ -37,6 +37,9 @@ const crawlerOutputSchema = z.object({
     scannedCount: z.number().int().nonnegative(),
     eligibleCount: z.number().int().nonnegative(),
     filteredMismatchedCount: z.number().int().nonnegative(),
+    filteredDemographicCount: z.number().int().nonnegative().optional(),
+    missingDemographicCount: z.number().int().nonnegative().optional(),
+    deduplicatedVariantCount: z.number().int().nonnegative().optional(),
     warnings: z.array(z.string()),
     competitors: z.array(competitorSchema),
   })),
@@ -66,6 +69,16 @@ function genderFromPath(pathParts: string[]) {
   if (value.includes("дет") || value.includes("девоч") || value.includes("мальч")) return "Детский";
   if (value.includes("муж")) return "Мужской";
   return null;
+}
+
+function categorySearchQuery(name: string, gender: string | null, path: string[]) {
+  if (!gender) return [...new Set([...path.slice(-2), name])].join(" ");
+  const genderWord = gender === "Мужской"
+    ? "мужские"
+    : gender === "Женский"
+      ? "женские"
+      : "детские";
+  return `${name} ${genderWord}`;
 }
 
 function ownProduct(target: OzonCompetitorTarget): OzonPublicProduct {
@@ -106,10 +119,10 @@ export function buildOzonCrawlerJob(params: {
       typeId: target.typeId!,
       categoryNameRu: target.categoryNameRu,
       productType: target.categoryNameRu,
+      ozonQuery: categorySearchQuery(target.categoryNameRu, gender, categoryPath),
     };
     if (!gender) {
-      const ozonQuery = [...new Set([...categoryPath.slice(-2), target.categoryNameRu])].join(" ");
-      return [{ ...category, ozonQuery }];
+      return [category];
     }
     return [{
       ...category,
@@ -159,6 +172,15 @@ export function parseOzonCrawlerOutput(
       ...(result?.warnings ?? []),
       ...(result?.filteredMismatchedCount
         ? [`已过滤 ${result.filteredMismatchedCount} 个详情类型不匹配的商品`]
+        : []),
+      ...(result?.filteredDemographicCount
+        ? [`已过滤 ${result.filteredDemographicCount} 个性别或年龄不匹配的商品`]
+        : []),
+      ...(result?.missingDemographicCount
+        ? [`有 ${result.missingDemographicCount} 个商品缺少性别属性，已按严格匹配规则排除`]
+        : []),
+      ...(result?.deduplicatedVariantCount
+        ? [`已合并 ${result.deduplicatedVariantCount} 个重复商品变体`]
         : []),
       ...(!result ? ["采集器未返回该类目结果"] : []),
     ];

@@ -542,7 +542,8 @@ def resolve_category_url(fetcher, cat):
         return (u if u.startswith("/") else "/" + u, None)
     if cat.get("ozonQuery"):
         from urllib.parse import quote
-        return ("/search/?text=" + quote(cat["ozonQuery"]) + "&" + GLOBAL_PARAM, None)
+        return ("/search/?deny_category_prediction=true&force_spell=true&"
+                + GLOBAL_PARAM + "&text=" + quote(cat["ozonQuery"]), None)
     # 2) 内置/自动发现
     gender = cat.get("gender") or ""
     age = (cat.get("ageGroup") or "").lower()
@@ -597,6 +598,49 @@ def _observed_product_type(detail):
     return None
 
 
+def _observed_attribute(detail, names):
+    normalized_names = {clean(name).casefold() for name in names}
+    for name, value in (detail.get("attributes") or {}).items():
+        if clean(str(name)).casefold() in normalized_names:
+            return clean(str(value))
+    return None
+
+
+def _matches_demographics(detail, cat):
+    expected = clean(str(cat.get("gender") or "")).casefold()
+    if not expected:
+        return True, False
+    observed = _observed_attribute(detail, {"Пол"})
+    if not observed:
+        return False, True
+    value = observed.casefold()
+    male = "муж" in value
+    female = "жен" in value
+    child = "мальчик" in value or "девоч" in value or "дет" in value
+    if "дет" in expected:
+        gender_matches = child
+    elif "жен" in expected:
+        gender_matches = female and not male and not child
+    else:
+        gender_matches = male and not female and not child
+    if not gender_matches:
+        return False, False
+    age = _observed_attribute(detail, {"Возрастная группа", "Возраст"})
+    expected_age = clean(str(cat.get("ageGroup") or "")).casefold()
+    if age and "взрос" in expected_age and "дет" in age.casefold():
+        return False, False
+    return True, False
+
+
+def _variant_key(card, detail, review_count):
+    # ponytail: public title, seller and review count approximate a variant family until Ozon exposes model IDs.
+    title = clean(str(card.get("title") or detail.get("title_full") or "")).casefold()
+    seller = clean(str(detail.get("seller") or "")).casefold()
+    if not seller:
+        return None
+    return title, seller, review_count
+
+
 def _matches_product_type(detail, cat):
     expected = cat.get("productType") or cat.get("categoryNameRu")
     if not expected:
@@ -635,6 +679,9 @@ def run_job(fetcher, job, args):
             "scannedCount": 0,
             "eligibleCount": 0,
             "filteredMismatchedCount": 0,
+            "filteredDemographicCount": 0,
+            "missingDemographicCount": 0,
+            "deduplicatedVariantCount": 0,
             "competitors": [],
             "warnings": ([warn] if warn else []),
         }
@@ -678,6 +725,7 @@ def run_job(fetcher, job, args):
             reverse=True,
         )
         # 抓取详情并组装 competitor
+        seen_variants = set()
         for c, rev, rat in ranked:
             if len(cat_res["competitors"]) >= top_n:
                 break
@@ -700,11 +748,22 @@ def run_job(fetcher, job, args):
             if not matches:
                 cat_res["filteredMismatchedCount"] += 1
                 continue
+            demographics_match, demographics_missing = _matches_demographics(detail, cat)
+            if not demographics_match:
+                counter = "missingDemographicCount" if demographics_missing else "filteredDemographicCount"
+                cat_res[counter] += 1
+                continue
             hot = bool(c.get("labels") and any(
                 any(token in label.casefold() for token in ("хит", "бестселлер"))
                 for label in c["labels"]
             ))
             review_count = int(_to_num(detail.get("review_count")) or rev)
+            variant_key = _variant_key(c, detail, review_count)
+            if variant_key is not None and variant_key in seen_variants:
+                cat_res["deduplicatedVariantCount"] += 1
+                continue
+            if variant_key is not None:
+                seen_variants.add(variant_key)
             comp = {
                 "publicRank": len(cat_res["competitors"]) + 1,
                 "sku": c["product_id"],
