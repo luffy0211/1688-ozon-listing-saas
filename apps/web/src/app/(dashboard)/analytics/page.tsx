@@ -38,11 +38,12 @@ function maxOrderCount(items: Array<{ fbs: number; fbo: number }>) {
   return Math.max(1, ...items.map((item) => item.fbs + item.fbo));
 }
 
-export default async function AnalyticsPage({
-  searchParams,
-}: {
-  searchParams?: { storeId?: string };
-}) {
+export default async function AnalyticsPage(
+  props: {
+    searchParams?: Promise<{ storeId?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
   const user = await requireUser();
   if (!user.tenantId) {
     return <PageHeader title="数据看板" description="管理员账号请进入平台管理。" />;

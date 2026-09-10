@@ -3,10 +3,8 @@ import { ok, fail, unauthorized, forbidden } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 import { updateShopSnapshotStatus } from "@/lib/services";
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
+export async function PATCH(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await sessionFromRequest(req);
   if (!session) return unauthorized();
   const tenantId = session.tenantId;
