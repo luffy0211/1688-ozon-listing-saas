@@ -18,6 +18,7 @@ import {
   buildCompetitorBatchProposal,
   countUniqueCompetitors,
   diagnoseOzonStore,
+  summarizeProductRecommendations,
 } from "./operations";
 import { promotionPolicySchema } from "./promotion-policy";
 import {
@@ -58,6 +59,7 @@ export type ContentAgentDataSource = {
   actionCount?: number | null;
   candidateCount?: number | null;
   competitorReportCount?: number | null;
+  analyzedProductCount?: number | null;
   financeDataAvailable?: boolean | null;
   lowContentRatingCount?: number | null;
   issues?: string[];
@@ -380,7 +382,8 @@ function buildInstructions(offerId: string | null) {
     "如果工具没有返回某个字段，就明确说不知道或当前 API 未返回，不要猜测、不要编造。",
     "用户要求店铺诊断时，必须调用 diagnose_ozon_store；只根据工具返回的 Ozon 数据解释问题，不把净回款称为真实利润。",
     "店铺诊断返回 lowContentRatingProducts 时，按评分从低到高说明 Ozon 官方改进条件。最多选择最紧急的 3 个商品，依次调用 get_ozon_product_content 和 propose_content_draft，生成标题或描述优化待确认动作；没有真实新图片或明确属性值时只建议，不创建图片或属性写动作。",
-    "用户要求竞品分析时，先确认用户明确说明每个类目分析多少个竞品，允许 1 至 10 个；未说明时只询问数量，不调用工具。说明后必须调用 analyze_ozon_competitors；该工具统计自家店铺全部正在售卖的 Ozon 官方类目，每个类目选择一个代表商品，再比较搜索引擎收录的同类目 Ozon 商品页。竞品结论必须带页面证据，不得复制竞品整段文案。",
+    "用户要求竞品分析时，先确认用户明确说明每个类目分析多少个竞品，允许 1 至 10 个；未说明时只询问数量，不调用工具。说明后必须调用 analyze_ozon_competitors；该工具统计自家店铺全部未归档 Ozon 官方类目，每个类目选择一个代表商品获取竞品证据，再用类目经验诊断该类目的全部自家商品。竞品结论必须带页面证据，不得复制竞品整段文案。",
+    "竞品分析默认复用已经保存的证据；只有用户明确要求重新采集或刷新竞品时才调用本地 Ozon 采集器，采集器不可用时才回退 Tavily。",
     "竞品分析工具已经生成确定性的类目属性经验、Ozon 官方字段映射和自家商品建议。回复固定分成：类目填写经验、自家商品修改建议、待确认批量操作。不要把分析改写成属性冲突报告。",
     "竞品总数必须使用工具返回的 uniqueCompetitorCount，不得把多个自家商品共享的同一竞品重复相加；类目有效样本少于 3 个时必须明确标为证据不足。",
     "竞品多数值只是经验，不是自家商品事实。只有工具返回 status=ADD 的建议有自家商品证据并可进入待确认操作；NEEDS_CONFIRMATION 只能提示人工补充，COMPLETE 不修改，UNMAPPED 不执行。",
@@ -427,6 +430,10 @@ function ownStoreDataIntent(prompt: string) {
 
 function competitorAnalysisIntent(prompt: string) {
   return /(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt);
+}
+
+export function shouldRefreshCompetitorEvidence(prompt: string) {
+  return /(?:重新|再次|强制).{0,6}(?:采集|搜索|抓取)|刷新.{0,6}(?:竞品|证据|数据)/i.test(prompt);
 }
 
 export function competitorsPerCategoryFromPrompt(prompt: string) {
@@ -542,11 +549,12 @@ export function contentAgentDataSourcesFromToolCalls(
       if (call.name === "analyze_ozon_competitors") {
         return {
           toolName: call.name,
-          label: "Ozon 搜索索引相似竞品",
+          label: "Ozon 同类竞品证据",
           status: call.error ? "error" : "ok",
           at: call.at,
           storeName: stringFromRecord(output, "storeName"),
           competitorReportCount: numberFromRecord(output, "reportCount"),
+          analyzedProductCount: numberFromRecord(output, "analyzedProductCount"),
           competitorCount: numberFromRecord(output, "competitorCount"),
           categories: stringArray(output.categories),
           error: call.error ?? null,
@@ -779,7 +787,7 @@ export async function runOzonContentAgent(params: {
     const analyzeCompetitorsTool = tool({
       name: "analyze_ozon_competitors",
       description:
-        "Read every selling category from the own Ozon store, choose one representative product per category, collect the user-requested number of indexed same-category competitors, build category attribute playbooks, and persist one human-approval batch when safe evidence-backed additions exist. Ask for a per-category competitor count from 1 to 10 before calling. It never writes to Ozon directly.",
+        "Read every non-archived category from the own Ozon store, choose one representative per category for competitor evidence, then diagnose every own product in those categories. Reuse saved evidence unless the user explicitly requests a refresh. It never writes to Ozon directly.",
       parameters: z.object({ storeId: z.string().nullable() }),
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
@@ -795,6 +803,7 @@ export async function runOzonContentAgent(params: {
             userId: params.userId,
             storeId: params.storeId ?? storeId,
             competitorsPerCategory,
+            refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
           });
           const proposal = buildCompetitorBatchProposal({
             storeId: result.store.id,
@@ -813,16 +822,21 @@ export async function runOzonContentAgent(params: {
           createdActionIds.push(...created.map((item) => item.id));
           const reportRecords = result.reports.map(rawRecord);
           const competitorCount = countUniqueCompetitors(result.reports);
+          const diagnosisSummary = summarizeProductRecommendations(result.productRecommendations);
           const categories = [...new Set(reportRecords
             .map((report) => stringField(rawRecord(report.category).name))
             .filter((name): name is string => Boolean(name)))];
           toolCalls.push({
             name: "analyze_ozon_competitors",
             at,
-            input: { storeId: storeId ?? params.storeId ?? null },
+            input: {
+              storeId: storeId ?? params.storeId ?? null,
+              refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
+            },
             output: {
               storeName: result.store.name,
               reportCount: result.reports.length,
+              analyzedProductCount: result.analyzedProductCount,
               competitorCount,
               categories,
               playbookCount: result.categoryPlaybooks.length,
@@ -834,9 +848,15 @@ export async function runOzonContentAgent(params: {
             },
           });
           return {
-            ...result,
+            store: result.store,
+            competitorsPerCategory: result.competitorsPerCategory,
+            source: result.source,
+            capturedAt: result.capturedAt,
             uniqueCompetitorCount: competitorCount,
             categories,
+            categoryPlaybooks: result.categoryPlaybooks.map((item) => item.playbook),
+            diagnosisSummary,
+            warnings: result.warnings,
             pendingBatchAction: created[0]
               ? { id: created[0].id, title: created[0].title, status: created[0].status }
               : null,

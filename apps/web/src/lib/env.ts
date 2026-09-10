@@ -18,6 +18,13 @@ export const env = {
     process.env.AGENT_COMPETITOR_CACHE_HOURS ?? "24",
   ),
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
+  ozonCrawlerPython: process.env.OZON_CRAWLER_PYTHON ?? "python",
+  ozonCrawlerScript: process.env.OZON_CRAWLER_SCRIPT ?? "",
+  ozonCrawlerCookieJar: process.env.OZON_CRAWLER_COOKIE_JAR ?? "",
+  ozonCrawlerCookieTsv: process.env.OZON_CRAWLER_COOKIE_TSV ?? "",
+  ozonCrawlerProxy: process.env.OZON_CRAWLER_PROXY ?? "socks5h://127.0.0.1:10808",
+  ozonCrawlerScanPages: Math.max(1, Number(process.env.OZON_CRAWLER_SCAN_PAGES ?? "5") || 5),
+  ozonCrawlerTimeoutMs: Math.max(30_000, Number(process.env.OZON_CRAWLER_TIMEOUT_MS ?? "900000") || 900_000),
   xiangjiApiBase: process.env.XIANGJI_API_BASE ?? "https://api.tosoiot.com",
   xiangjiMock: process.env.XIANGJI_MOCK === "true",
 };

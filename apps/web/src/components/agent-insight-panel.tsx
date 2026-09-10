@@ -28,6 +28,7 @@ export type AgentInsightSource = {
   actionCount?: number | null;
   candidateCount?: number | null;
   competitorReportCount?: number | null;
+  analyzedProductCount?: number | null;
   competitorCount?: number | null;
   categories?: string[];
   financeDataAvailable?: boolean | null;
@@ -196,7 +197,7 @@ function CompetitorInsight({ source }: { source: AgentInsightSource }) {
         <ScanSearch className="h-4 w-4" aria-hidden="true" /> 搜索索引竞品雷达
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <Metric label="分析自家商品" value={source.competitorReportCount ?? 0} accent="#087f78" />
+        <Metric label="分析自家商品" value={source.analyzedProductCount ?? 0} accent="#087f78" />
         <Metric label="有效竞品样本" value={source.competitorCount ?? 0} accent="#f5c842" />
         <Metric label="搜索词覆盖" value={source.categories?.length ?? 0} accent="#d858a8" />
       </div>
