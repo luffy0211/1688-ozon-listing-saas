@@ -56,14 +56,14 @@ export default function LoginPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const json = await res.json().catch(() => null);
       if (!res.ok) {
+        const json = await res.json().catch(() => null);
         setError(json?.error?.message ?? "登录失败，请检查账号密码或服务状态");
         setLoading(false);
         return;
       }
       persistLogin();
-      window.location.href = "/products";
+      window.location.assign("/products");
     } catch {
       setError("登录失败，请确认后端和数据库服务已经启动");
       setLoading(false);
