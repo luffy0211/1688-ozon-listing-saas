@@ -6,8 +6,11 @@ import {
   cachedCompetitorReport,
   countUniqueCompetitors,
   lowContentRatingProducts,
+  selectCompetitorDiagnosisTargets,
   selectCompetitorTargets,
+  summarizeProductRecommendations,
   summarizeFinanceTransactions,
+  targetsWithoutCompetitorEvidence,
 } from "./operations";
 
 const categoryTree = [
@@ -45,6 +48,17 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("Ozon operations helpers", () => {
+  it("falls back only for categories without crawler evidence", () => {
+    const targets = [
+      { descriptionCategoryId: 10, typeId: 20, offerId: "a" },
+      { descriptionCategoryId: 10, typeId: 30, offerId: "b" },
+    ];
+    const results = [{ target: targets[0], competitors: [{ sku: "competitor-a" }] }];
+
+    expect(targetsWithoutCompetitorEvidence(targets as never, results as never))
+      .toEqual([targets[1]]);
+  });
+
   it("builds one approval-gated batch from evidence-backed attribute additions", () => {
     const proposal = buildCompetitorBatchProposal({
       storeId: "store-1",
@@ -108,6 +122,40 @@ describe("Ozon operations helpers", () => {
       },
     });
     expect(proposal?.payload.recommendations).toHaveLength(1);
+  });
+
+  it("summarizes full-store recommendations without returning every completed attribute", () => {
+    const summary = summarizeProductRecommendations([
+      {
+        offerId: "offer-1",
+        productId: "1",
+        categoryKey: "10:20",
+        categoryMatches: true,
+        recommendations: [
+          { status: "COMPLETE", ozonNameRu: "Материал" },
+          { status: "ADD", ozonNameRu: "Тип", suggestedValue: "Поло" },
+        ],
+        actionableCount: 1,
+        actionAttributes: [{ id: 1, values: [{ value: "Поло" }] }],
+      },
+      {
+        offerId: "offer-2",
+        productId: "2",
+        categoryKey: "10:20",
+        categoryMatches: true,
+        recommendations: [{ status: "NEEDS_CONFIRMATION", ozonNameRu: "Состав" }],
+        actionableCount: 0,
+        actionAttributes: null,
+      },
+    ] as never);
+
+    expect(summary).toMatchObject({
+      productCount: 2,
+      actionableProductCount: 1,
+      needsConfirmationProductCount: 1,
+      statusCounts: { COMPLETE: 1, ADD: 1, NEEDS_CONFIRMATION: 1, UNMAPPED: 0 },
+    });
+    expect(summary.actionableProducts).toHaveLength(1);
   });
 
   it("does not create a batch when every suggestion needs confirmation", () => {
@@ -207,6 +255,7 @@ describe("Ozon operations helpers", () => {
     };
 
     expect(cachedCompetitorReport(report, 3)).not.toBeNull();
+    expect(cachedCompetitorReport({ ...report, source: "ozon_http_crawler" }, 3)).not.toBeNull();
     expect(cachedCompetitorReport(report, 5)).toBeNull();
   });
 
@@ -366,6 +415,43 @@ describe("Ozon operations helpers", () => {
     }));
 
     expect(selectCompetitorTargets(summary({ products }) as never)).toHaveLength(6);
+  });
+
+  it("keeps hidden non-archived categories when visible products exist", () => {
+    const targets = selectCompetitorTargets(summary({
+      products: [
+        { offerId: "visible", name: "Visible", publicSku: "sku-1", visible: true, archived: false, stock: 5, descriptionCategoryId: 17027904, typeId: 93337 },
+        { offerId: "hidden-category", name: "Hidden category", publicSku: "sku-2", visible: false, archived: false, stock: 0, descriptionCategoryId: 17027904, typeId: 94444 },
+      ],
+    }) as never);
+
+    expect(targets.map((target) => target.offerId)).toEqual(["visible", "hidden-category"]);
+  });
+
+  it("diagnoses every non-archived store product in the analyzed categories", () => {
+    const representatives = [{
+      offerId: "representative",
+      title: "Representative",
+      publicSku: "sku-1",
+      quantity: 3,
+      revenueRub: 300,
+      descriptionCategoryId: 17027904,
+      typeId: 93337,
+      categoryNameRu: "Поло",
+      categoryPathRu: ["Одежда", "Мужская одежда", "Поло"],
+    }];
+
+    expect(selectCompetitorDiagnosisTargets(summary({
+      products: [
+        { offerId: "representative", name: "Representative", publicSku: "sku-1", visible: true, archived: false, stock: 5, descriptionCategoryId: 17027904, typeId: 93337 },
+        { offerId: "hidden", name: "Hidden", publicSku: "sku-2", visible: false, archived: false, stock: 0, descriptionCategoryId: 17027904, typeId: 93337 },
+        { offerId: "archived", name: "Archived", publicSku: "sku-3", visible: false, archived: true, stock: 0, descriptionCategoryId: 17027904, typeId: 93337 },
+        { offerId: "other-category", name: "Other", publicSku: "sku-4", visible: true, archived: false, stock: 8, descriptionCategoryId: 17027904, typeId: 94444 },
+      ],
+    }) as never, representatives)).toEqual([
+      expect.objectContaining({ offerId: "representative", categoryNameRu: "Поло" }),
+      expect.objectContaining({ offerId: "hidden", categoryNameRu: "Поло" }),
+    ]);
   });
 
   it("falls back to visible stocked products when category data is unavailable", () => {

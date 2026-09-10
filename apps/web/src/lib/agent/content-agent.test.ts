@@ -5,6 +5,7 @@ import {
   contentAgentDataSourcesFromToolCalls,
   normalizeOzonProductContent,
   requiredOzonToolForPrompt,
+  shouldRefreshCompetitorEvidence,
 } from "./content-agent";
 
 describe("contentAgentModelSettings", () => {
@@ -84,6 +85,12 @@ describe("normalizeOzonProductContent", () => {
 });
 
 describe("content agent tool enforcement helpers", () => {
+  it("refreshes Tavily evidence only when the user explicitly requests it", () => {
+    expect(shouldRefreshCompetitorEvidence("使用之前采集的信息做全店诊断")).toBe(false);
+    expect(shouldRefreshCompetitorEvidence("重新采集竞品，每个类目5个")).toBe(true);
+    expect(shouldRefreshCompetitorEvidence("刷新竞品数据，每个类目5个")).toBe(true);
+  });
+
   it("reads the requested competitor count per category", () => {
     expect(competitorsPerCategoryFromPrompt("每个类目分析 8 个竞品")).toBe(8);
     expect(competitorsPerCategoryFromPrompt("分析五个同类竞品")).toBe(5);
@@ -159,5 +166,25 @@ describe("content agent tool enforcement helpers", () => {
         error: null,
       },
     ]);
+  });
+
+  it("shows the full-store competitor diagnosis product count", () => {
+    const sources = contentAgentDataSourcesFromToolCalls([{
+      name: "analyze_ozon_competitors",
+      at: "2026-09-08T10:30:32.031Z",
+      output: {
+        storeName: "真实 Ozon 店铺",
+        reportCount: 5,
+        analyzedProductCount: 87,
+        competitorCount: 20,
+        categories: ["Поло", "Худи"],
+      },
+    }]);
+
+    expect(sources[0]).toMatchObject({
+      competitorReportCount: 5,
+      analyzedProductCount: 87,
+      competitorCount: 20,
+    });
   });
 });
