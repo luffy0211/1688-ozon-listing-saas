@@ -109,6 +109,31 @@ function attributesFromPayload(value: unknown): OzonAttribute[] | null {
   return attributes.length ? attributes : null;
 }
 
+const OZON_WRITE_ACTION_TYPES = new Set<AgentActionType>([
+  "UPDATE_PRICE",
+  "UPDATE_STOCK",
+  "UPDATE_IMAGES",
+  "UPDATE_ATTRIBUTES",
+  "UPDATE_CATEGORY",
+  "PUBLISH_DRAFT",
+  "CONTENT_DRAFT",
+  "ARCHIVE_PRODUCT",
+  "UNARCHIVE_PRODUCT",
+  "DELETE_PRODUCT",
+  "BULK_PRODUCT_UPDATE",
+  "PROMOTION_ENROLLMENT",
+]);
+
+function requiresRealOzonSubmit(actionType: AgentActionType) {
+  return OZON_WRITE_ACTION_TYPES.has(actionType);
+}
+
+function assertRealOzonSubmitEnabled(actionType: AgentActionType) {
+  if (requiresRealOzonSubmit(actionType) && process.env.ENABLE_REAL_OZON_SUBMIT !== "true") {
+    throw new Error("real_ozon_submit_disabled");
+  }
+}
+
 export function validateCompetitorBatchPayload(value: unknown) {
   const payload = asRecord(value);
   if (payload.source !== "competitor_attribute_playbook") return;
@@ -1125,6 +1150,7 @@ export async function executeApprovedAgentAction(params: {
         metaJson: { type: action.type } as never,
       },
     });
+    assertRealOzonSubmitEnabled(action.type);
     if (action.type === "PROMOTION_POLICY") {
       return await executePromotionPolicyAction({ ...params, action });
     }

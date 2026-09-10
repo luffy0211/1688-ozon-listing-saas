@@ -70,7 +70,7 @@ describe("executeApprovedAgentAction", () => {
     })).toThrow("competitor_batch_attributes_only");
   });
 
-  it("does not mark approved content drafts as executed without a real Ozon write", async () => {
+  it("blocks approved content drafts when real Ozon writes are disabled", async () => {
     prisma.agentAction.findFirst.mockResolvedValue({
       id: "action-1",
       tenantId: "tenant-1",
@@ -82,7 +82,7 @@ describe("executeApprovedAgentAction", () => {
       id: "action-1",
       type: "CONTENT_DRAFT",
       status: "FAILED",
-      error: "missing_store_id",
+      error: "real_ozon_submit_disabled",
     });
 
     const result = await executeApprovedAgentAction({
@@ -96,7 +96,7 @@ describe("executeApprovedAgentAction", () => {
       where: { id: "action-1" },
       data: {
         status: "FAILED",
-        error: "missing_store_id",
+        error: "real_ozon_submit_disabled",
       },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith(
@@ -124,7 +124,7 @@ describe("executeApprovedAgentAction", () => {
     expect(prisma.agentAction.update).not.toHaveBeenCalled();
   });
 
-  it("fails approved mutating actions when no real executor exists", async () => {
+  it("blocks approved price updates when real Ozon writes are disabled", async () => {
     prisma.agentAction.findFirst.mockResolvedValue({
       id: "action-2",
       tenantId: "tenant-1",
@@ -135,7 +135,7 @@ describe("executeApprovedAgentAction", () => {
       id: "action-2",
       type: "UPDATE_PRICE",
       status: "FAILED",
-      error: "missing_store_id",
+      error: "real_ozon_submit_disabled",
     });
 
     const result = await executeApprovedAgentAction({
@@ -149,7 +149,7 @@ describe("executeApprovedAgentAction", () => {
       where: { id: "action-2" },
       data: {
         status: "FAILED",
-        error: "missing_store_id",
+        error: "real_ozon_submit_disabled",
       },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith(
@@ -194,6 +194,7 @@ describe("executeApprovedAgentAction", () => {
   });
 
   it("records partial Ozon promotion activation results", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
     prisma.agentAction.findFirst.mockResolvedValue({
       id: "enroll-1",
       tenantId: "tenant-1",
@@ -272,6 +273,7 @@ describe("executeApprovedAgentAction", () => {
   });
 
   it("marks an enrollment failed when Ozon rejects every product", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
     prisma.agentAction.findFirst.mockResolvedValue({
       id: "enroll-3",
       tenantId: "tenant-1",
