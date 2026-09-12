@@ -1,5 +1,7 @@
 import {
   buildCompetitorBenchmarks,
+  inferOzonCategoryName,
+  isUsableCompetitorEvidence,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -135,11 +137,10 @@ export function parseIndexedOzonProduct(result: IndexedResult, position: number)
   };
 }
 
-export function uniqueUsableIndexedCompetitors(products: OzonPublicProduct[]) {
+export function uniqueUsableIndexedCompetitors(products: OzonPublicProduct[], target?: OzonCompetitorTarget | null) {
   const seen = new Set<string>();
   return products.filter((product) => {
-    const hasEvidence = Object.values(product.attributes).some((value) => value.trim()) || Boolean(product.description?.trim());
-    if (!hasEvidence || seen.has(product.sku)) return false;
+    if (!isUsableCompetitorEvidence(product, target) || seen.has(product.sku)) return false;
     seen.add(product.sku);
     return true;
   });
@@ -164,9 +165,10 @@ function categoryTerms(value: string) {
 }
 
 function matchesTargetCategory(result: IndexedResult, target: OzonCompetitorTarget) {
-  if (!target.categoryNameRu) return false;
+  const categoryName = inferOzonCategoryName(target);
+  if (!categoryName) return false;
   const titleTerms = new Set(categoryTerms(result.title ?? ""));
-  const typeAlternatives = target.categoryNameRu
+  const typeAlternatives = categoryName
     .split(/\s+(?:и|или)\s+|[,/]+/iu)
     .map(categoryTerms)
     .filter((terms) => terms.length > 0);
@@ -177,7 +179,7 @@ function matchesTargetCategory(result: IndexedResult, target: OzonCompetitorTarg
 }
 
 function categorySearchLabel(target: OzonCompetitorTarget) {
-  return [...new Set([...(target.categoryPathRu ?? []).slice(-2), target.categoryNameRu].filter(Boolean))]
+  return [...new Set([...(target.categoryPathRu ?? []).slice(-2), inferOzonCategoryName(target)].filter(Boolean))]
     .join(" ");
 }
 
@@ -212,7 +214,8 @@ export async function searchOzonIndexedCompetitors(params: {
   const grouped = new Map<string, OzonCompetitorTarget[]>();
 
   params.targets.forEach((target) => {
-    if (!target.descriptionCategoryId || !target.typeId || !target.categoryNameRu) {
+    const categoryName = inferOzonCategoryName(target);
+    if (!target.descriptionCategoryId || !target.typeId || !categoryName) {
       results.push({
         target,
         category: null,
@@ -229,11 +232,12 @@ export async function searchOzonIndexedCompetitors(params: {
 
   for (const targets of grouped.values()) {
     const target = targets[0]!;
+    const categoryName = inferOzonCategoryName(target)!;
     const label = categorySearchLabel(target);
     const category = {
-      name: target.categoryNameRu!,
+      name: categoryName,
       url: `https://www.ozon.ru/search/?text=${encodeURIComponent(label)}`,
-      path: target.categoryPathRu ?? [target.categoryNameRu!],
+      path: target.categoryPathRu?.length ? target.categoryPathRu : [categoryName],
     };
     try {
       const response = await fetchImpl("https://api.tavily.com/search", {
@@ -258,9 +262,9 @@ export async function searchOzonIndexedCompetitors(params: {
       const parsed = searchResults
         .flatMap((item, index) => item && typeof item === "object" ? [parseIndexedOzonProduct(item as IndexedResult, index + 1)] : [])
         .filter((item): item is OzonPublicProduct => Boolean(item));
-      const indexed = uniqueUsableIndexedCompetitors(parsed);
+      const indexed = uniqueUsableIndexedCompetitors(parsed, target);
       const emptyEvidenceCount = new Set(parsed.filter((item) =>
-        !Object.values(item.attributes).some((value) => value.trim()) && !item.description?.trim(),
+        !isUsableCompetitorEvidence(item, target),
       ).map((item) => item.sku)).size;
       const competitors = indexed
         .filter((item) => matchesTargetCategory({ title: item.title }, target))
@@ -270,8 +274,8 @@ export async function searchOzonIndexedCompetitors(params: {
       targets.forEach((currentTarget) => {
         const ownProduct = indexed.find((item) => item.sku === currentTarget.publicSku) ?? emptyOwnProduct(currentTarget);
         const warnings = [
-          ...(rejectedCount ? [`已过滤 ${rejectedCount} 个无法证明属于 ${target.categoryNameRu} 的搜索结果`] : []),
-          ...(emptyEvidenceCount ? [`已过滤 ${emptyEvidenceCount} 个缺少有效属性和描述的搜索结果`] : []),
+          ...(rejectedCount ? [`已过滤 ${rejectedCount} 个无法证明属于 ${categoryName} 的搜索结果`] : []),
+          ...(emptyEvidenceCount ? [`已过滤 ${emptyEvidenceCount} 个无效或不匹配的搜索结果`] : []),
           ...(!competitors.length ? ["搜索索引没有返回有效同类目 Ozon 竞品"] : []),
         ];
         results.push({

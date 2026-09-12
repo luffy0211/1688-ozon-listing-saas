@@ -504,51 +504,187 @@ KIDS_CATEGORY = "/category/detskaya-odezhda-7580/"
 PRODUCT_SLUG_KEYWORDS = {
     "Поло": "polo", "Футболка": "futbolk", "Футболки": "futbolk",
     "Рубашка": "rubashk", "Рубашки": "rubashk",
+    "Лонгслив": "longsliv", "Лонгсливы": "longsliv",
     "Платье": "plat", "Платья": "plat",
     "Брюки": "bryuki", "Шорты": "short", "Джинсы": "dzhins",
-    "Свитшот": "svitshot", "Худи": "hudi", "Куртка": "kurtk",
+    "Свитшот": "svitshot", "Толстовка": "tolstovk", "Толстовки": "tolstovk",
+    "Худи": "hudi", "Куртка": "kurtk",
+}
+PRECISE_CATEGORY_PATHS = {
+    ("мужской", "поло"): "/category/futbolki-i-polo-muzhskie-7558/?sorting=rating&text=%D0%9F%D0%BE%D0%BB%D0%BE%20%D0%BC%D1%83%D0%B6%D1%81%D0%BA%D0%B8%D0%B5",
+    ("мужской", "футболка"): "/category/futbolki-muzhskie-7559/?sorting=rating",
 }
 
 
-def _discover_subcategory(fetcher, parent_path, product_type):
-    """在大类页目录里找 product_type 对应的子分类页（返回 /category/.../ 路径或 None）"""
+def _category_page_url(path, page):
+    sep = "&" if "?" in path else "?"
+    if page <= 1:
+        return "https://www.ozon.ru" + path + sep + GLOBAL_PARAM
+    return "https://www.ozon.ru" + path + sep + f"page={page}&" + GLOBAL_PARAM
+
+
+def _known_category_path(gender, product_type):
+    gender_key = clean(str(gender or "")).casefold()
+    type_key = _normalize_product_type(product_type)
+    return PRECISE_CATEGORY_PATHS.get((gender_key, type_key))
+
+
+def _search_path(query):
+    from urllib.parse import quote
+    return ("/search/?deny_category_prediction=true&force_spell=true&"
+            + GLOBAL_PARAM + "&text=" + quote(query))
+
+
+def _category_keyword(product_type):
     kw = None
     for name, slug in PRODUCT_SLUG_KEYWORDS.items():
         if product_type and name.lower() in str(product_type).lower():
             kw = slug
             break
-    if not kw:
+    return kw
+
+
+TRANSLIT = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+    "ы": "y", "э": "e", "ю": "yu", "я": "ya", "ъ": "", "ь": "",
+})
+
+
+def _category_slug_tokens(product_type):
+    text = clean(str(product_type or "")).casefold()
+    tokens = []
+    known = _category_keyword(text)
+    if known:
+        tokens.append(known)
+    for word in re.findall(r"[а-яёa-z0-9]+", text):
+        slug = word.translate(TRANSLIT)
+        if len(slug) >= 4 and slug not in tokens:
+            tokens.append(slug[:7])
+            if slug[:4] not in tokens:
+                tokens.append(slug[:4])
+    return tokens
+
+
+def _gender_slug(gender, age_group):
+    text = f"{gender or ''} {age_group or ''}".casefold()
+    if "дет" in text or "мальчик" in text or "девоч" in text:
+        return "detsk"
+    if "жен" in text:
+        return "zhensk"
+    if "муж" in text:
+        return "muzhsk"
+    return None
+
+
+def _extract_category_paths(html_text):
+    text = html_text.replace("\\u002F", "/").replace("\\/", "/")
+    paths = []
+    seen = set()
+    for m in re.finditer(r'(/category/[^"\'<>\\?#]+(?:\?[^"\'<>\\]*)?)', text):
+        u = ihtml.unescape(m.group(1))
+        u = re.sub(r"^https?://www\.ozon\.ru", "", u)
+        u = re.sub(r"[),.;]+$", "", u)
+        if u in seen:
+            continue
+        seen.add(u)
+        paths.append(u)
+    return paths
+
+
+def _with_rating_sort(path):
+    if "sorting=" in path:
+        return path
+    return path + ("&" if "?" in path else "?") + "sorting=rating"
+
+
+def _score_category_path(path, product_type, gender, age_group, parent_path=None):
+    low = path.casefold()
+    kw = _category_keyword(product_type)
+    tokens = _category_slug_tokens(product_type)
+    gender_kw = _gender_slug(gender, age_group)
+    score = 0
+    if parent_path and re.sub(r"\?.*$", "", low) == re.sub(r"\?.*$", "", parent_path.casefold()):
+        score -= 2
+    if kw and kw in low:
+        score += 5
+    for token in tokens:
+        if token in low and token != kw:
+            score += 2
+    if gender_kw and gender_kw in low:
+        score += 3
+    if gender_kw == "muzhsk" and ("zhensk" in low or "detsk" in low):
+        score -= 6
+    if gender_kw == "zhensk" and ("muzhsk" in low or "detsk" in low):
+        score -= 6
+    if gender_kw == "detsk" and ("muzhsk" in low or "zhensk" in low):
+        score -= 3
+    if re.search(r"-\d+/?(?:\?|$)", low):
+        score += 1
+    return score
+
+
+def _best_category_path(paths, product_type, gender, age_group, parent_path=None):
+    ranked = sorted(
+        ((path, _score_category_path(path, product_type, gender, age_group, parent_path)) for path in paths),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if not ranked or ranked[0][1] < 5:
+        return None
+    return _with_rating_sort(ranked[0][0])
+
+
+def _discover_subcategory(fetcher, parent_path, product_type, gender=None, age_group=None):
+    """在 Ozon 页面里找 product_type 对应的子分类页（返回 /category/.../ 路径或 None）"""
+    if not _category_slug_tokens(product_type):
         return None
     try:
         html_text = fetcher.get("https://www.ozon.ru" + parent_path + "?" + GLOBAL_PARAM)
     except Exception:
         return None
-    seen = set()
-    for m in re.finditer(r'href="(/category/[^"?#]+)"', html_text):
-        u = m.group(1)
-        if u in seen:
-            continue
-        seen.add(u)
-        if kw in u.lower() and u != parent_path:
-            return u
-    return None
+    return _best_category_path(_extract_category_paths(html_text), product_type, gender, age_group, parent_path)
+
+
+def _discover_category_from_search(fetcher, cat):
+    """从 Ozon 搜索结果页自动找更准确的分类页，避免一直扫混乱搜索结果。"""
+    query = cat.get("ozonQuery") or " ".join(
+        str(v) for v in (cat.get("categoryNameRu"), cat.get("productType"), cat.get("gender")) if v
+    )
+    if not query.strip():
+        return None
+    try:
+        html_text = fetcher.get("https://www.ozon.ru" + _search_path(query))
+    except Exception:
+        return None
+    return _best_category_path(
+        _extract_category_paths(html_text),
+        cat.get("productType") or cat.get("categoryNameRu"),
+        cat.get("gender"),
+        cat.get("ageGroup"),
+    )
 
 
 def resolve_category_url(fetcher, cat):
     """把契约类目对象解析成可扫描的网页分类路径。返回 (path, warning)"""
-    # 1) 调用方可选提供的直链/查询词（内部约定，契约外的可选字段）
+    # 1) 调用方可选提供的直链（内部约定，契约外的可选字段）
     if cat.get("ozonCategoryUrl"):
         u = cat["ozonCategoryUrl"]
         return (u if u.startswith("/") else "/" + u, None)
-    if cat.get("ozonQuery"):
-        from urllib.parse import quote
-        return ("/search/?deny_category_prediction=true&force_spell=true&"
-                + GLOBAL_PARAM + "&text=" + quote(cat["ozonQuery"]), None)
+    if cat.get("ozonQuery") and not any(
+        cat.get(key) for key in ("gender", "ageGroup", "productType", "categoryNameRu")
+    ):
+        return _search_path(cat["ozonQuery"]), None
     # 2) 内置/自动发现
     gender = cat.get("gender") or ""
     age = (cat.get("ageGroup") or "").lower()
     pt = cat.get("productType") or cat.get("categoryNameRu") or ""
     warn = None
+    known = _known_category_path(gender, pt)
+    if known:
+        return known, None
     if "дет" in age or "дет" in gender.lower() or "дет" in pt.lower():
         parent = KIDS_CATEGORY
     else:
@@ -557,9 +693,14 @@ def resolve_category_url(fetcher, cat):
         if not parent:
             parent = "/category/muzhskaya-odezhda-7542/"
             warn = "无法识别 gender，回退男装大类"
-    child = _discover_subcategory(fetcher, parent, pt)
+    child = _discover_subcategory(fetcher, parent, pt, gender, age)
     if child:
         return (child, warn)
+    discovered = _discover_category_from_search(fetcher, cat)
+    if discovered:
+        return (discovered, warn or "已从 Ozon 搜索页自动发现细分类目")
+    if cat.get("ozonQuery"):
+        return (_search_path(cat["ozonQuery"]), warn or "未找到细分分类，使用搜索兜底")
     if warn:
         return (parent, warn + "（未找到子分类，使用大类）")
     return (parent, "未找到细分分类，使用大类页")
@@ -578,6 +719,19 @@ PRODUCT_TYPE_ALIASES = {
     "рубашки": "рубашка",
     "футболки": "футболка",
 }
+KNOWN_PRODUCT_TYPES = {
+    "поло",
+    "футболка",
+    "рубашка",
+    "лонгслив",
+    "толстовка",
+    "худи",
+    "платье",
+}
+INVALID_EVIDENCE_RE = re.compile(
+    r"нет соединения|выключите vpn|инцидент|обновить страницу|captcha|access denied|challenge|antibot|warning\s+похоже",
+    re.I,
+)
 
 
 def _normalize_product_type(value):
@@ -589,6 +743,42 @@ def _card_title_matches_product_type(card, cat):
     expected = _normalize_product_type(cat.get("productType") or cat.get("categoryNameRu"))
     title = clean(str(card.get("title") or "")).casefold()
     return bool(expected and expected in title)
+
+
+def _card_title_product_type_mismatch(card, cat):
+    expected = _normalize_product_type(cat.get("productType") or cat.get("categoryNameRu"))
+    title = clean(str(card.get("title") or "")).casefold()
+    if not expected or expected in title:
+        return False
+    return any(product_type in title for product_type in KNOWN_PRODUCT_TYPES)
+
+
+def _card_title_demographics_mismatch(card, cat):
+    expected = clean(str(cat.get("gender") or "")).casefold()
+    if not expected:
+        return False
+    title = clean(str(card.get("title") or "")).casefold()
+    return _text_demographics_mismatch(title, expected)
+
+
+def _detail_text_demographics_mismatch(detail, cat):
+    expected = clean(str(cat.get("gender") or "")).casefold()
+    if not expected:
+        return False
+    text = " ".join(clean(str(detail.get(k) or "")).casefold()
+                    for k in ("title_full", "name", "description"))
+    return _text_demographics_mismatch(text, expected)
+
+
+def _text_demographics_mismatch(text, expected):
+    child = re.search(r"дет|девоч|мальчик|мальчиков|школьн|новорожден|подростк", text)
+    female = re.search(r"женск|женский|женская|женские|женщин", text)
+    male = re.search(r"мужск|мужской|мужская|мужские|мужчин", text)
+    if "дет" in expected:
+        return bool((male or female) and not child)
+    if "жен" in expected:
+        return bool((male and not female) or child)
+    return bool((female and not male) or child)
 
 
 def _observed_product_type(detail):
@@ -656,6 +846,23 @@ def _matches_product_type(detail, cat):
     return expected in observed_types, observed
 
 
+def _invalid_competitor_evidence(detail):
+    attrs = detail.get("attributes") or {}
+    text = "\n".join([
+        clean(str(detail.get("title_full") or "")),
+        clean(str(detail.get("name") or "")),
+        clean(str(detail.get("description") or "")),
+        *[f"{k}\n{v}" for k, v in attrs.items()],
+    ])
+    if INVALID_EVIDENCE_RE.search(text):
+        return True
+    real_attrs = [
+        (name, value) for name, value in attrs.items()
+        if clean(str(name)) and clean(str(value)) and not re.match(r"^image\s*\d+$", clean(str(name)), re.I)
+    ]
+    return not real_attrs and not clean(str(detail.get("description") or ""))
+
+
 def run_job(fetcher, job, args):
     """执行一次契约任务，返回结果 dict（与输入 requestId 对应）"""
     if not isinstance(job, dict) or not isinstance(job.get("categories") or [], list):
@@ -680,6 +887,7 @@ def run_job(fetcher, job, args):
             "eligibleCount": 0,
             "filteredMismatchedCount": 0,
             "filteredDemographicCount": 0,
+            "filteredInvalidEvidenceCount": 0,
             "missingDemographicCount": 0,
             "deduplicatedVariantCount": 0,
             "competitors": [],
@@ -689,8 +897,7 @@ def run_job(fetcher, job, args):
         pool = {}
         seen = set()
         for page in range(1, pages + 1):
-            url = ("https://www.ozon.ru" + path + "?"
-                   + (GLOBAL_PARAM if page <= 1 else f"page={page}&" + GLOBAL_PARAM))
+            url = _category_page_url(path, page)
             if path.startswith("/search/"):
                 url = ("https://www.ozon.ru" + path) if page <= 1 else (
                     "https://www.ozon.ru" + path + "&page=" + str(page))
@@ -729,6 +936,12 @@ def run_job(fetcher, job, args):
         for c, rev, rat in ranked:
             if len(cat_res["competitors"]) >= top_n:
                 break
+            if _card_title_product_type_mismatch(c, cat):
+                cat_res["filteredMismatchedCount"] += 1
+                continue
+            if _card_title_demographics_mismatch(c, cat):
+                cat_res["filteredDemographicCount"] += 1
+                continue
             detail = {}
             try:
                 dh = fetcher.get(detail_url(c["product_id"]),
@@ -743,6 +956,12 @@ def run_job(fetcher, job, args):
             except Exception as e:
                 print(f"[warn] 详情失败 id={c['product_id']}: {str(e)[:100]}", file=sys.stderr)
                 cat_res["warnings"].append(f"id={c['product_id']} 详情抓取失败")
+                continue
+            if _invalid_competitor_evidence(detail):
+                cat_res["filteredInvalidEvidenceCount"] += 1
+                continue
+            if _detail_text_demographics_mismatch(detail, cat):
+                cat_res["filteredDemographicCount"] += 1
                 continue
             matches, _ = _matches_product_type(detail, cat)
             if not matches:

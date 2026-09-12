@@ -1,3 +1,17 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+for (const envPath of [resolve(process.cwd(), ".env"), resolve(process.cwd(), "../../.env")]) {
+  if (!existsSync(/* turbopackIgnore: true */ envPath)) continue;
+  for (const line of readFileSync(/* turbopackIgnore: true */ envPath, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    const key = match?.[1];
+    const value = match?.[2];
+    if (!key || value === undefined || process.env[key]) continue;
+    process.env[key] = value.replace(/^['"]|['"]$/g, "");
+  }
+}
+
 export const env = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",

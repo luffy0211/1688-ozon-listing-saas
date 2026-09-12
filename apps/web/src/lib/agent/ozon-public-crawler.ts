@@ -36,6 +36,8 @@ export type OzonCompetitorTarget = {
   typeId?: number | null;
   categoryNameRu?: string | null;
   categoryPathRu?: string[];
+  gender?: string | null;
+  ageGroup?: string | null;
 };
 
 export type OzonCategoryCompetitorResult = {
@@ -46,6 +48,122 @@ export type OzonCategoryCompetitorResult = {
   benchmarks: ReturnType<typeof buildCompetitorBenchmarks> | null;
   warnings: string[];
 };
+
+const TYPE_NAME_BY_ID = new Map([
+  [93148, "Лонгслив"],
+  [93194, "Поло"],
+  [93209, "Рубашка"],
+  [93232, "Толстовка"],
+  [93253, "Худи"],
+]);
+
+export function inferOzonCategoryName(target: OzonCompetitorTarget) {
+  return target.categoryNameRu || TYPE_NAME_BY_ID.get(Number(target.typeId)) || null;
+}
+
+export function inferOzonGender(target: OzonCompetitorTarget) {
+  if (target.gender) return target.gender;
+  const categoryText = [
+    ...(target.categoryPathRu ?? []),
+    inferOzonCategoryName(target) ?? "",
+  ].join(" ");
+  const categoryGender = genderFromText(categoryText);
+  if (categoryGender) return categoryGender;
+  if (!/одежд|поло|футбол|рубаш|лонгслив|толстов|худи/i.test(categoryText)) return null;
+  return genderFromText(target.title ?? "");
+}
+
+function genderFromText(value: string | null | undefined) {
+  const text = String(value ?? "").toLocaleLowerCase("ru-RU");
+  if (/дет|девоч|мальч|школь/.test(text)) return "Детский";
+  if (/жен/.test(text)) return "Женский";
+  if (/муж/.test(text)) return "Мужской";
+  return null;
+}
+
+const INVALID_EVIDENCE_RE = /нет соединения|выключите vpn|инцидент|обновить страницу|captcha|access denied|challenge|antibot|warning\s+похоже/i;
+const PSEUDO_ATTRIBUTE_RE = /^image\s*\d+$/i;
+
+function normalizedType(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase("ru-RU")
+    .replace(/ё/g, "е")
+    .replace(/(?:иями|ями|ами|ого|ему|ими|ыми|ая|яя|ое|ее|ый|ий|ой|ые|ие|ых|их|ую|юю|ом|ем|ам|ям|ах|ях|ов|ев|ей|ы|и|а|я|у|ю|е|о)$/u, "");
+}
+
+function productTypeValues(value: string) {
+  return new Set(
+    value.split(/\s+(?:и|или)\s+|[,/;|]+/iu)
+      .map((item) => normalizedType(item.trim()))
+      .filter((item) => item.length >= 3),
+  );
+}
+
+function attributeValue(product: OzonPublicProduct, names: string[]) {
+  const normalizedNames = new Set(names.map((name) => name.toLocaleLowerCase("ru-RU")));
+  return Object.entries(product.attributes).find(([name]) =>
+    normalizedNames.has(name.toLocaleLowerCase("ru-RU")),
+  )?.[1] ?? null;
+}
+
+function textDemographicsMismatch(text: string, expectedGender: string) {
+  const lower = text.toLocaleLowerCase("ru-RU");
+  const child = /дет|девоч|мальчик|мальчиков|школьн|новорожден|подрост/.test(lower);
+  const female = /женск|женский|женская|женские|женщин/.test(lower);
+  const male = /мужск|мужской|мужская|мужские|мужчин/.test(lower);
+  const expected = expectedGender.toLocaleLowerCase("ru-RU");
+  if (expected.includes("дет")) return Boolean((male || female) && !child);
+  if (expected.includes("жен")) return Boolean((male && !female) || child);
+  if (expected.includes("муж")) return Boolean((female && !male) || child);
+  return false;
+}
+
+function genderValueMatches(observed: string, expectedGender: string) {
+  const value = observed.toLocaleLowerCase("ru-RU");
+  const expected = expectedGender.toLocaleLowerCase("ru-RU");
+  const male = value.includes("муж");
+  const female = value.includes("жен");
+  const child = /дет|девоч|мальчик|подрост/.test(value);
+  if (expected.includes("дет")) return child;
+  if (expected.includes("жен")) return female && !male && !child;
+  if (expected.includes("муж")) return male && !female && !child;
+  return true;
+}
+
+export function isUsableCompetitorEvidence(product: OzonPublicProduct, target?: OzonCompetitorTarget | null) {
+  const allText = [
+    product.title,
+    product.description ?? "",
+    ...Object.entries(product.attributes).flat(),
+  ].join("\n");
+  if (INVALID_EVIDENCE_RE.test(allText)) return false;
+  const realAttributes = Object.entries(product.attributes)
+    .filter(([name, value]) => name.trim() && value.trim() && !PSEUDO_ATTRIBUTE_RE.test(name));
+  if (!realAttributes.length && !product.description?.trim()) return false;
+
+  if (!target) return true;
+  const expectedType = inferOzonCategoryName(target);
+  const observedType = attributeValue(product, ["Тип", "Тип товара"]);
+  if (expectedType && observedType) {
+    const expected = productTypeValues(expectedType);
+    const observed = productTypeValues(observedType);
+    if (expected.size && observed.size && ![...expected].some((item) => observed.has(item))) return false;
+  }
+
+  const expectedGender = inferOzonGender(target);
+  if (expectedGender) {
+    const text = [product.title, product.description ?? ""].join("\n");
+    if (textDemographicsMismatch(text, expectedGender)) return false;
+    const observedGender = attributeValue(product, ["Пол"]);
+    if (observedGender && !genderValueMatches(observedGender, expectedGender)) return false;
+    const age = attributeValue(product, ["Возрастная группа", "Возраст"]);
+    if (age && (target.ageGroup ?? "").toLocaleLowerCase("ru-RU").includes("взрос") && /дет|подрост/.test(age.toLocaleLowerCase("ru-RU"))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 function record(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value)

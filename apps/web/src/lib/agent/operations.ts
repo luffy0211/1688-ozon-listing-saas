@@ -15,6 +15,7 @@ import {
 import { env } from "@/lib/env";
 import {
   buildCompetitorBenchmarks,
+  isUsableCompetitorEvidence,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -482,7 +483,11 @@ export function cachedCompetitorReport(value: unknown, minimumCompetitors = 1) {
   const ownProduct = cachedPublicProduct(report.ownProduct);
   const competitors = (report.competitors as unknown[]).map(cachedPublicProduct);
   if (!ownProduct || competitors.some((product) => !product)) return null;
-  const usableCompetitors = uniqueUsableIndexedCompetitors(competitors as OzonPublicProduct[]);
+  const target = record(report.target);
+  const usableCompetitors = uniqueUsableIndexedCompetitors(
+    competitors as OzonPublicProduct[],
+    target ? target as OzonCompetitorTarget : null,
+  );
   if (!usableCompetitors.length) return null;
   const requestedCount = Number(report.competitorsPerCategory);
   if (
@@ -602,6 +607,7 @@ async function buildCompetitorPlaybooks(params: {
   reports: unknown[];
   refreshEvidence: boolean;
   capturedAt: Date;
+  minimumCompetitors: number;
 }) {
   if (!params.products.length) {
     return { playbookReports: [], productRecommendations: [], warnings: [] as string[] };
@@ -609,6 +615,7 @@ async function buildCompetitorPlaybooks(params: {
   const offerIds = params.products.map((target) => target.offerId);
   let infoItems: OzonProductInfoItem[] = [];
   let attributeItems: OzonProductInfoItem[] = [];
+  const warnings: string[] = [];
   try {
     const batches = Array.from(
       { length: Math.ceil(offerIds.length / 100) },
@@ -621,11 +628,7 @@ async function buildCompetitorPlaybooks(params: {
     infoItems = productBatches.flatMap(([items]) => items);
     attributeItems = productBatches.flatMap(([, items]) => items);
   } catch (error) {
-    return {
-      playbookReports: [],
-      productRecommendations: [],
-      warnings: [`自家商品属性读取失败：${error instanceof Error ? error.message : String(error)}`],
-    };
+    warnings.push(`自家商品属性读取失败：${error instanceof Error ? error.message : String(error)}`);
   }
   const infoByOffer = new Map(infoItems.map((item) => [item.offer_id, item]));
   const attributesByOffer = new Map(attributeItems.map((item) => [item.offer_id, item]));
@@ -643,7 +646,28 @@ async function buildCompetitorPlaybooks(params: {
     products: OzonProductInfoItem[];
     competitors: Map<string, OzonPublicProduct>;
   }>();
-  const warnings: string[] = [];
+
+  params.reports.forEach((report) => {
+    const item = record(report);
+    const target = record(item.target);
+    if (!target) return;
+    const key = competitorCategoryKey({
+      descriptionCategoryId: Number(target.descriptionCategoryId) || null,
+      typeId: Number(target.typeId) || null,
+    });
+    if (!key) return;
+    const categoryName = String(record(item.category).name ?? target.categoryNameRu ?? target.title ?? key);
+    const group = groups.get(key) ?? {
+      categoryName,
+      products: [],
+      competitors: new Map<string, OzonPublicProduct>(),
+    };
+    const competitors = Array.isArray(item.competitors) ? item.competitors : [];
+    competitors.map(cachedPublicProduct).filter((product): product is OzonPublicProduct => Boolean(product))
+      .filter((product) => isUsableCompetitorEvidence(product, target as OzonCompetitorTarget))
+      .forEach((product) => group.competitors.set(product.url, product));
+    groups.set(key, group);
+  });
 
   params.products.forEach((target) => {
     const product = mergedProductInfo(
@@ -666,6 +690,7 @@ async function buildCompetitorPlaybooks(params: {
     };
     const competitors = Array.isArray(report?.competitors) ? report.competitors : [];
     competitors.map(cachedPublicProduct).filter((item): item is OzonPublicProduct => Boolean(item))
+      .filter((item) => isUsableCompetitorEvidence(item, target))
       .forEach((item) => group.competitors.set(item.url, item));
     group.products.push(product);
     groups.set(key, group);
@@ -685,13 +710,26 @@ async function buildCompetitorPlaybooks(params: {
         orderBy: { createdAt: "desc" },
       });
       let playbook = parseCategoryAttributePlaybook(cached?.reportJson);
+      if (playbook && playbook.sampleSize < params.minimumCompetitors) {
+        warnings.push(`${group.categoryName}：缓存类目经验样本 ${playbook.sampleSize}/${params.minimumCompetitors}，已忽略`);
+        playbook = null;
+      }
       let reportId = cached?.id ?? null;
       if (!playbook) {
         if (!group.competitors.size) {
           warnings.push(`${group.categoryName}：没有有效竞品属性样本，未生成类目经验`);
           continue;
         }
-        const categoryAttributes = await params.client.getCategoryAttributes(descriptionCategoryId!, typeId!);
+        if (group.competitors.size < params.minimumCompetitors) {
+          warnings.push(`${group.categoryName}：有效竞品样本 ${group.competitors.size}/${params.minimumCompetitors}，未生成类目经验`);
+          continue;
+        }
+        const categoryAttributes = await params.client
+          .getCategoryAttributes(descriptionCategoryId!, typeId!)
+          .catch((error) => {
+            warnings.push(`${group.categoryName}：Ozon 官方属性读取失败，已生成未映射竞品经验：${error instanceof Error ? error.message : String(error)}`);
+            return [];
+          });
         const competitors = [...group.competitors.values()].map((item) => ({
           url: item.url,
           attributes: item.attributes,
@@ -969,6 +1007,7 @@ export async function analyzeOzonCompetitors(params: {
     reports,
     refreshEvidence: Boolean(params.refreshEvidence),
     capturedAt: now,
+    minimumCompetitors: params.competitorsPerCategory,
   });
 
   const reportSources = new Set(reports.map((report) => String(record(report).source)));

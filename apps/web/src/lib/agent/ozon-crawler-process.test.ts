@@ -38,8 +38,52 @@ describe("Ozon crawler process adapter", () => {
         ageGroup: "Взрослые",
         productType: "Поло",
         ozonQuery: "Поло мужские",
+        ozonCategoryUrl: "/category/futbolki-i-polo-muzhskie-7558/?sorting=rating&text=%D0%9F%D0%BE%D0%BB%D0%BE%20%D0%BC%D1%83%D0%B6%D1%81%D0%BA%D0%B8%D0%B5",
       }],
       excludeSkus: ["999"],
+    });
+  });
+
+  it("infers menswear from the representative title when the category path is generic", () => {
+    const job = buildOzonCrawlerJob({
+      requestId: "run-title-gender",
+      targets: [{
+        ...target,
+        title: "Мужское поло с коротким рукавом",
+        categoryPathRu: ["Одежда", "Одежда", "Поло"],
+      }],
+      ownSkus: new Set(["999"]),
+      topN: 5,
+      scanPages: 2,
+    });
+
+    expect(job.categories[0]).toMatchObject({
+      gender: "Мужской",
+      ageGroup: "Взрослые",
+      ozonQuery: "Поло мужские",
+      ozonCategoryUrl: "/category/futbolki-i-polo-muzhskie-7558/?sorting=rating&text=%D0%9F%D0%BE%D0%BB%D0%BE%20%D0%BC%D1%83%D0%B6%D1%81%D0%BA%D0%B8%D0%B5",
+    });
+  });
+
+  it("uses known Ozon type ids when the category tree lookup failed", () => {
+    const job = buildOzonCrawlerJob({
+      requestId: "run-type-fallback",
+      targets: [{
+        ...target,
+        title: "Мужское поло с коротким рукавом",
+        categoryNameRu: null,
+        categoryPathRu: [],
+      }],
+      ownSkus: new Set(),
+      topN: 5,
+      scanPages: 2,
+    });
+
+    expect(job.categories[0]).toMatchObject({
+      categoryNameRu: "Поло",
+      productType: "Поло",
+      gender: "Мужской",
+      ozonCategoryUrl: "/category/futbolki-i-polo-muzhskie-7558/?sorting=rating&text=%D0%9F%D0%BE%D0%BB%D0%BE%20%D0%BC%D1%83%D0%B6%D1%81%D0%BA%D0%B8%D0%B5",
     });
   });
 
@@ -117,6 +161,51 @@ describe("Ozon crawler process adapter", () => {
     expect(result?.benchmarks?.content.attributePatterns).toEqual(
       expect.arrayContaining([expect.objectContaining({ name: "Материал" })]),
     );
+  });
+
+  it("drops crawler error pages before building benchmarks", () => {
+    const [result] = parseOzonCrawlerOutput({
+      requestId: "run-1",
+      capturedAt: "2026-09-10T00:00:00Z",
+      rankingType: "public_popularity_proxy",
+      categories: [{
+        categoryKey: "200000933:93194",
+        scannedCount: 2,
+        eligibleCount: 2,
+        filteredMismatchedCount: 0,
+        filteredInvalidEvidenceCount: 0,
+        warnings: [],
+        competitors: [
+          {
+            publicRank: 1,
+            sku: "bad",
+            url: "https://www.ozon.ru/product/bad/",
+            title: "warning Похоже",
+            description: null,
+            priceRub: null,
+            rating: null,
+            reviewCount: null,
+            sellerName: null,
+            attributes: { "Image 1": "нет соединения\nВыключите VPN\nИнцидент: test" },
+          },
+          {
+            publicRank: 2,
+            sku: "good",
+            url: "https://www.ozon.ru/product/good/",
+            title: "Поло мужское",
+            description: "Мужское поло.",
+            priceRub: 1000,
+            rating: 4.9,
+            reviewCount: 100,
+            sellerName: null,
+            attributes: { Тип: "Поло", Материал: "Хлопок" },
+          },
+        ],
+      }],
+    }, [target]);
+
+    expect(result?.competitors.map((item) => item.sku)).toEqual(["good"]);
+    expect(result?.warnings).toContain("已过滤 1 个无效竞品详情页");
   });
 
   const processTest = process.env.RUN_OZON_CRAWLER_PROCESS_TEST === "true" ? it : it.skip;

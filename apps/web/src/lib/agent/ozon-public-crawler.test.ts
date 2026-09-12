@@ -4,6 +4,7 @@ import {
   extractCategoryProducts,
   extractProductPage,
   extractSecondLevelCategory,
+  isUsableCompetitorEvidence,
   crawlOzonCategoryCompetitors,
   mergeCategoryCardWithDetail,
 } from "./ozon-public-crawler";
@@ -204,6 +205,49 @@ describe("Ozon public category crawler", () => {
       commonValues: [{ value: "Хлопок", count: 2 }],
     });
     expect(result.content.descriptions.availableCount).toBe(2);
+  });
+
+  it("rejects Ozon error pages and demographic mismatches as competitor evidence", () => {
+    const product = {
+      sku: "1",
+      url: "https://www.ozon.ru/product/1/",
+      title: "Характеристики Худи",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes: { "Image 1": "warning\nПохоже, нет соединения\nВыключите VPN\nИнцидент: test" },
+      description: null,
+      reviews: [],
+    };
+
+    expect(isUsableCompetitorEvidence(product, {
+      offerId: "own",
+      title: "Мужское худи",
+      publicSku: "own-sku",
+      quantity: 0,
+      revenueRub: 0,
+      categoryNameRu: "Худи",
+      gender: "Мужской",
+      ageGroup: "Взрослые",
+    })).toBe(false);
+
+    expect(isUsableCompetitorEvidence({
+      ...product,
+      title: "Рубашка Gloria Jeans для мальчиков подростков",
+      attributes: { Тип: "Рубашка", Пол: "Мужской" },
+    }, {
+      offerId: "own",
+      title: "Мужская рубашка",
+      publicSku: "own-sku",
+      quantity: 0,
+      revenueRub: 0,
+      categoryNameRu: "Рубашка",
+      gender: "Мужской",
+      ageGroup: "Взрослые",
+    })).toBe(false);
   });
 
   it("enriches only attributes and description from product detail", () => {

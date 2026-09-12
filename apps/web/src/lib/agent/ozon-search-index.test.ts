@@ -177,7 +177,7 @@ describe("Ozon search index", () => {
     });
 
     expect(result?.competitors.map((item) => item.sku)).toEqual(["203"]);
-    expect(result?.warnings).toContain("已过滤 1 个缺少有效属性和描述的搜索结果");
+    expect(result?.warnings).toContain("已过滤 1 个无效或不匹配的搜索结果");
   });
 
   it("searches once per official category and rejects products from another type", async () => {
@@ -204,8 +204,18 @@ describe("Ozon search index", () => {
   it("does not confuse different Russian product types with the same prefix", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       results: [
-        { ...indexedProduct, title: "Кроссовки женские", url: "https://www.ozon.ru/product/shoes-300/" },
-        { ...indexedProduct, title: "Сумка кроссбоди женская", url: "https://www.ozon.ru/product/bag-301/" },
+        {
+          ...indexedProduct,
+          title: "Кроссовки женские",
+          url: "https://www.ozon.ru/product/shoes-300/",
+          raw_content: "Характеристики\nМатериал верха\nТекстиль\nОписание\nЖенские кроссовки для повседневной носки.",
+        },
+        {
+          ...indexedProduct,
+          title: "Сумка кроссбоди женская",
+          url: "https://www.ozon.ru/product/bag-301/",
+          raw_content: "Характеристики\nМатериал\nЭкокожа\nОписание\nЖенская сумка.",
+        },
       ],
     }), { status: 200 }));
 
@@ -227,9 +237,24 @@ describe("Ozon search index", () => {
   it("accepts either product type from a compound official category", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       results: [
-        { ...indexedProduct, title: "Блузка женская", url: "https://www.ozon.ru/product/blouse-400/" },
-        { ...indexedProduct, title: "Рубашка женская", url: "https://www.ozon.ru/product/shirt-401/" },
-        { ...indexedProduct, title: "Брюки женские", url: "https://www.ozon.ru/product/trousers-402/" },
+        {
+          ...indexedProduct,
+          title: "Блузка женская",
+          url: "https://www.ozon.ru/product/blouse-400/",
+          raw_content: "Характеристики\nМатериал\nХлопок\nОписание\nЖенская блузка.",
+        },
+        {
+          ...indexedProduct,
+          title: "Рубашка женская",
+          url: "https://www.ozon.ru/product/shirt-401/",
+          raw_content: "Характеристики\nМатериал\nВискоза\nОписание\nЖенская рубашка.",
+        },
+        {
+          ...indexedProduct,
+          title: "Брюки женские",
+          url: "https://www.ozon.ru/product/trousers-402/",
+          raw_content: "Характеристики\nМатериал\nПолиэстер\nОписание\nЖенские брюки.",
+        },
       ],
     }), { status: 200 }));
 
@@ -246,6 +271,28 @@ describe("Ozon search index", () => {
     });
 
     expect(result?.competitors.map((item) => item.sku)).toEqual(["400", "401"]);
+  });
+
+  it("uses known type ids when Ozon category labels are unavailable", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      results: [indexedProduct],
+    }), { status: 200 }));
+
+    const [result] = await searchOzonIndexedCompetitors({
+      apiKey: "test-key",
+      targets: [{
+        ...target("known-type", "999"),
+        title: "Мужское поло с коротким рукавом",
+        typeId: 93194,
+        categoryNameRu: null,
+        categoryPathRu: [],
+      }],
+      ownSkus: new Set(["999"]),
+      fetchImpl,
+    });
+
+    expect(result?.category?.name).toBe("Поло");
+    expect(result?.competitors.map((item) => item.sku)).toEqual(["1607177448"]);
   });
 
   it("keeps other products when one search response is malformed", async () => {

@@ -8,6 +8,9 @@ import { z } from "zod";
 import { env } from "../env";
 import {
   buildCompetitorBenchmarks,
+  inferOzonCategoryName,
+  inferOzonGender,
+  isUsableCompetitorEvidence,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -38,6 +41,7 @@ const crawlerOutputSchema = z.object({
     eligibleCount: z.number().int().nonnegative(),
     filteredMismatchedCount: z.number().int().nonnegative(),
     filteredDemographicCount: z.number().int().nonnegative().optional(),
+    filteredInvalidEvidenceCount: z.number().int().nonnegative().optional(),
     missingDemographicCount: z.number().int().nonnegative().optional(),
     deduplicatedVariantCount: z.number().int().nonnegative().optional(),
     warnings: z.array(z.string()),
@@ -55,20 +59,13 @@ type CrawlerJobCategory = {
   gender?: string;
   ageGroup?: string;
   ozonQuery?: string;
+  ozonCategoryUrl?: string;
 };
 
 function categoryKey(target: OzonCompetitorTarget) {
   return target.descriptionCategoryId && target.typeId
     ? `${target.descriptionCategoryId}:${target.typeId}`
     : null;
-}
-
-function genderFromPath(pathParts: string[]) {
-  const value = pathParts.join(" ").toLocaleLowerCase("ru-RU");
-  if (value.includes("жен")) return "Женский";
-  if (value.includes("дет") || value.includes("девоч") || value.includes("мальч")) return "Детский";
-  if (value.includes("муж")) return "Мужской";
-  return null;
 }
 
 function categorySearchQuery(name: string, gender: string | null, path: string[]) {
@@ -79,6 +76,14 @@ function categorySearchQuery(name: string, gender: string | null, path: string[]
       ? "женские"
       : "детские";
   return `${name} ${genderWord}`;
+}
+
+function preciseOzonCategoryUrl(productType: string, gender: string | null) {
+  const key = `${gender ?? ""}:${productType.toLocaleLowerCase("ru-RU")}`;
+  return new Map([
+    ["Мужской:поло", "/category/futbolki-i-polo-muzhskie-7558/?sorting=rating&text=%D0%9F%D0%BE%D0%BB%D0%BE%20%D0%BC%D1%83%D0%B6%D1%81%D0%BA%D0%B8%D0%B5"],
+    ["Мужской:футболка", "/category/futbolki-muzhskie-7559/?sorting=rating"],
+  ]).get(key);
 }
 
 function ownProduct(target: OzonCompetitorTarget): OzonPublicProduct {
@@ -109,25 +114,28 @@ export function buildOzonCrawlerJob(params: {
   const seen = new Set<string>();
   const categories = params.targets.flatMap<CrawlerJobCategory>((target) => {
     const key = categoryKey(target);
-    if (!key || !target.categoryNameRu || seen.has(key)) return [];
+    const productType = inferOzonCategoryName(target);
+    if (!key || !productType || seen.has(key)) return [];
     seen.add(key);
     const categoryPath = target.categoryPathRu ?? [];
-    const gender = genderFromPath(categoryPath);
+    const gender = inferOzonGender(target);
     const category = {
       categoryKey: key,
       descriptionCategoryId: target.descriptionCategoryId!,
       typeId: target.typeId!,
-      categoryNameRu: target.categoryNameRu,
-      productType: target.categoryNameRu,
-      ozonQuery: categorySearchQuery(target.categoryNameRu, gender, categoryPath),
+      categoryNameRu: productType,
+      productType,
+      ozonQuery: categorySearchQuery(productType, gender, categoryPath),
     };
+    const ozonCategoryUrl = preciseOzonCategoryUrl(productType, gender);
     if (!gender) {
-      return [category];
+      return ozonCategoryUrl ? [{ ...category, ozonCategoryUrl }] : [category];
     }
     return [{
       ...category,
       gender,
-      ageGroup: gender === "Детский" ? "Дети" : "Взрослые",
+      ageGroup: target.ageGroup ?? (gender === "Детский" ? "Дети" : "Взрослые"),
+      ...(ozonCategoryUrl ? { ozonCategoryUrl } : {}),
     }];
   });
   return {
@@ -167,11 +175,16 @@ export function parseOzonCrawlerOutput(
     const key = categoryKey(target);
     const result = key ? byCategory.get(key) : null;
     const own = ownProduct(target);
-    const competitors = (result?.competitors ?? []).map(publicProduct);
+    const parsedCompetitors = (result?.competitors ?? []).map(publicProduct);
+    const competitors = parsedCompetitors.filter((product) => isUsableCompetitorEvidence(product, target));
+    const invalidEvidenceCount = parsedCompetitors.length - competitors.length;
     const warnings = [
       ...(result?.warnings ?? []),
       ...(result?.filteredMismatchedCount
         ? [`已过滤 ${result.filteredMismatchedCount} 个详情类型不匹配的商品`]
+        : []),
+      ...(result?.filteredInvalidEvidenceCount || invalidEvidenceCount
+        ? [`已过滤 ${(result?.filteredInvalidEvidenceCount ?? 0) + invalidEvidenceCount} 个无效竞品详情页`]
         : []),
       ...(result?.filteredDemographicCount
         ? [`已过滤 ${result.filteredDemographicCount} 个性别或年龄不匹配的商品`]
@@ -184,7 +197,7 @@ export function parseOzonCrawlerOutput(
         : []),
       ...(!result ? ["采集器未返回该类目结果"] : []),
     ];
-    const categoryName = target.categoryNameRu ?? target.title;
+    const categoryName = inferOzonCategoryName(target) ?? target.title;
     return {
       target,
       category: key ? {
