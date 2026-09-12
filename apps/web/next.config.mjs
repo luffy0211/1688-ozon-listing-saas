@@ -8,6 +8,7 @@ const nextConfig = {
     "@saas/storage",
   ],
   serverExternalPackages: ["@prisma/client", "bullmq", "ioredis", "playwright"],
+  allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
 };
 

@@ -422,7 +422,7 @@ function SessionSidebar({
   onNewChat: () => void;
 }) {
   return (
-    <aside className="hidden h-full w-64 shrink-0 flex-col rounded-2xl border border-white bg-white/75 p-3 shadow-[0_14px_40px_rgba(45,78,128,0.10)] backdrop-blur lg:flex">
+    <aside className="hidden h-full w-64 shrink-0 flex-col rounded-2xl border border-white bg-white/75 p-3 shadow-[0_14px_40px_rgba(45,78,128,0.10)] backdrop-blur md:flex">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-950">历史对话</div>
         <Button
@@ -523,6 +523,15 @@ export function ContentAgentChat({
       : []),
   ]);
   const canSubmit = agentConfig.configured && stores.length > 0 && !loadingHistory;
+  const inputStatus = !agentConfig.configured
+    ? "模型未配置，不能发送"
+    : !stores.length
+      ? "未连接店铺，不能发送"
+      : loadingHistory
+        ? "正在加载历史，稍后发送"
+        : running
+          ? "Agent 正在处理"
+          : "已连接，可以发送";
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ block: "end" });
@@ -671,7 +680,7 @@ export function ContentAgentChat({
               else setSelectedSessionId(event.target.value);
             }}
             disabled={running}
-            className="h-9 min-w-0 flex-1 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm text-[#52627b] shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:hidden"
+            className="h-9 min-w-0 flex-1 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm text-[#52627b] shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 md:hidden"
           >
             <option value="new">新对话</option>
             {sessionList.map((session) => (
@@ -686,7 +695,7 @@ export function ContentAgentChat({
             onClick={startNewChat}
             disabled={running}
             title="新对话"
-            className="lg:hidden"
+            className="md:hidden"
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             新对话
@@ -780,6 +789,7 @@ export function ContentAgentChat({
         </div>
 
         <form onSubmit={submitPrompt} className="border-t border-[#e3ebf5] bg-white/75 p-3 md:px-5">
+          <div className="mb-2 text-xs font-medium text-[#667085]">{inputStatus}</div>
           <div className="flex w-full items-end gap-2 rounded-2xl border border-[#d8e4f2] bg-white p-2 shadow-[0_10px_30px_rgba(46,80,132,0.10)] focus-within:border-[#9bbcff] focus-within:ring-4 focus-within:ring-[#3478f6]/10">
             <textarea
               value={prompt}
