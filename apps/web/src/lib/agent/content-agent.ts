@@ -501,6 +501,26 @@ function hasFoundProduct(
   return Boolean(value?.found);
 }
 
+export function fallbackContentDraftSuggestion(product: Pick<NormalizedProductContent, "offerId" | "name">) {
+  const current = product.name?.trim() || product.offerId;
+  const suggested = current
+    .replace(/,\s*облегающего кроя/iu, ", облегающий крой")
+    .replace(/,\s*свободного кроя/iu, ", свободный крой")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    field: "title" as const,
+    current,
+    suggestedRu: suggested === current ? current : suggested,
+    reasonZh: suggested === current
+      ? "模型已读取商品但未创建待确认动作，系统保守生成标题草稿供人工确认，不直接写入 Ozon。"
+      : "修正俄语标题中的搭配表达，使商品标题更自然；该修改只进入待确认动作，不直接写入 Ozon。",
+    sourceTag: "自家信息优化" as const,
+    confidence: suggested === current ? 0.55 : 0.78,
+  };
+}
+
 function ownStoreDataIntent(prompt: string) {
   return /(?:自家|自己|我的|我家|店铺|商品数|多少商品|库存|订单|价格|草稿|状态|在售|可见|低库存|总库存|销量|销售|货|offerId|offer_id|offer id)/i.test(
     prompt,
@@ -772,6 +792,7 @@ export async function runOzonContentAgent(params: {
     const listedPromotionIds = new Set<number>();
     let latestPromotionCandidateActionId: number | null = null;
     let preloadedContext = "";
+    let fallbackDraftOutput: string | null = null;
 
     async function readStoreSnapshot(storeId: string | null | undefined) {
       const at = new Date().toISOString();
@@ -1381,15 +1402,66 @@ export async function runOzonContentAgent(params: {
       maxTurns: 12,
     });
 
+    const productForFallbackDraft = latestProductContent as NormalizedProductContent | null;
     if (
       !createdActionIds.length &&
-      hasFoundProduct(latestProductContent) &&
+      hasFoundProduct(productForFallbackDraft) &&
       shouldRequireContentDraft(prompt, offerId)
     ) {
-      throw new Error("content_draft_not_created");
+      const suggestion = fallbackContentDraftSuggestion(productForFallbackDraft);
+      const created = await createAgentActions({
+        tenantId: params.tenantId,
+        sessionId: session.id,
+        runId: runRecord.id,
+        requestedBy: params.userId,
+        actions: [
+          {
+            type: AgentActionType.CONTENT_DRAFT,
+            title: `标题优化建议：${productForFallbackDraft.offerId}`,
+            rationale: "Agent 已读取商品但未创建内容草稿，系统生成一条保守待确认建议，避免直接失败。",
+            riskLevel: AgentRiskLevel.LOW,
+            storeId: productForFallbackDraft.storeId,
+            offerId: productForFallbackDraft.offerId,
+            productId: productForFallbackDraft.productId,
+            payload: {
+              agentVersion: "ozon_content_v1",
+              summaryZh: "系统兜底生成的保守标题优化建议，需人工确认后才会执行。",
+              suggestions: [suggestion],
+              product: productForFallbackDraft,
+            },
+          },
+        ],
+      });
+      createdActionIds.push(...created.map((item) => item.id));
+      toolCalls.push({
+        name: "propose_content_draft",
+        at: new Date().toISOString(),
+        input: {
+          offerId: productForFallbackDraft.offerId,
+          suggestionCount: 1,
+          fallback: true,
+        },
+        output: {
+          created: created.map((item) => ({
+            id: item.id,
+            type: item.type,
+            status: item.status,
+          })),
+        },
+      });
+      fallbackDraftOutput = [
+        `已为 ${productForFallbackDraft.offerId} 生成 1 条待确认的内容修改建议，未直接执行 Ozon。`,
+        "",
+        "| 项目 | 修改前 | 修改后 |",
+        "|---|---|---|",
+        `| 标题 | ${suggestion.current} | ${suggestion.suggestedRu} |`,
+        "",
+        `原因：${suggestion.reasonZh}`,
+        "你确认后再执行该待审批动作。",
+      ].join("\n");
     }
 
-    const output = String(result.finalOutput ?? "Agent 没有返回内容。");
+    const output = fallbackDraftOutput ?? String(result.finalOutput ?? "Agent 没有返回内容。");
     const blockedMissingTool = requiredToolName
       ? !hasSuccessfulToolCall(toolCalls, requiredToolName)
       : false;

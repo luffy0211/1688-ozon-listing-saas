@@ -4,6 +4,7 @@ import {
   competitorMemoryContextFromReports,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
+  fallbackContentDraftSuggestion,
   normalizeOzonProductContent,
   requiredOzonToolForPrompt,
   shouldRefreshCompetitorEvidence,
@@ -86,6 +87,18 @@ describe("normalizeOzonProductContent", () => {
 });
 
 describe("content agent tool enforcement helpers", () => {
+  it("builds a conservative fallback draft suggestion", () => {
+    const suggestion = fallbackContentDraftSuggestion({
+      offerId: "F18260807vo-0A-XL",
+      name: "Мужское летнее поло с абстрактно-геометрическим принтом, облегающего кроя",
+    });
+
+    expect(suggestion.field).toBe("title");
+    expect(suggestion.current).toContain("облегающего кроя");
+    expect(suggestion.suggestedRu).toContain("облегающий крой");
+    expect(suggestion.sourceTag).toBe("自家信息优化");
+  });
+
   it("refreshes Tavily evidence only when the user explicitly requests it", () => {
     expect(shouldRefreshCompetitorEvidence("使用之前采集的信息做全店诊断")).toBe(false);
     expect(shouldRefreshCompetitorEvidence("重新采集竞品，每个类目5个")).toBe(true);
