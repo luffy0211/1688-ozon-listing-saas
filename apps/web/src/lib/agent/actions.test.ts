@@ -30,7 +30,11 @@ vi.mock("@saas/db", () => ({
 
 vi.mock("./promotions", () => ({ activatePromotionEnrollment }));
 
-import { executeApprovedAgentAction, validateCompetitorBatchPayload } from "./actions";
+import {
+  contentDraftImportPayload,
+  executeApprovedAgentAction,
+  validateCompetitorBatchPayload,
+} from "./actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -39,6 +43,41 @@ beforeEach(() => {
 });
 
 describe("executeApprovedAgentAction", () => {
+  it("uses the annotation attribute as description for title-only content drafts", () => {
+    const { request, changedFields } = contentDraftImportPayload({
+      offerId: "SKU-1",
+      payloadJson: {
+        suggestions: [{
+          field: "title",
+          suggestedRu: "Новое название",
+        }],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Старое название",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [
+              { id: 4191, values: [{ value: "Описание из аннотации" }] },
+            ],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+
+    expect(changedFields).toEqual(["title"]);
+    expect(request.items[0]?.name).toBe("Новое название");
+    expect(request.items[0]?.description).toBe("Описание из аннотации");
+  });
+
   it("requires the approved competitor preview to match the exact Ozon attributes", () => {
     const payload = {
       source: "competitor_attribute_playbook",

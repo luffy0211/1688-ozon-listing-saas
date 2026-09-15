@@ -247,11 +247,27 @@ function contentSuggestionValue(payload: Record<string, unknown>, field: string)
   return null;
 }
 
+function attributeTextValue(attribute: unknown) {
+  const values = asRecord(attribute).values;
+  if (!Array.isArray(values)) return null;
+  for (const value of values) {
+    const text = stringField(asRecord(value).value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function attributeValueById(attributes: unknown, id: number) {
+  if (!Array.isArray(attributes)) return null;
+  const attribute = attributes.find((item) => numberField(asRecord(item).id) === id);
+  return attribute ? attributeTextValue(attribute) : null;
+}
+
 function supportedContentDraftFields(payload: Record<string, unknown>) {
   return ["title", "description"].filter((field) => contentSuggestionValue(payload, field));
 }
 
-function contentDraftImportPayload(action: {
+export function contentDraftImportPayload(action: {
   offerId: string | null;
   payloadJson: unknown;
 }): { request: ImportProductsRequest; changedFields: string[] } {
@@ -266,10 +282,16 @@ function contentDraftImportPayload(action: {
     contentSuggestionValue(payload, "title") ??
     stringField(product.name) ??
     stringField(rawInfo.name);
+  const attributes = Array.isArray(rawInfo.attributes)
+    ? rawInfo.attributes
+    : Array.isArray(product.attributes)
+      ? product.attributes
+      : null;
   const description =
     contentSuggestionValue(payload, "description") ??
     stringField(product.description) ??
-    stringField(rawInfo.description);
+    stringField(rawInfo.description) ??
+    attributeValueById(attributes, 4191);
   const offerId =
     stringField(product.offerId) ??
     stringField(rawInfo.offer_id) ??
@@ -288,11 +310,6 @@ function contentDraftImportPayload(action: {
   const images = stringArray(product.images).length
     ? stringArray(product.images)
     : stringArray(rawInfo.images);
-  const attributes = Array.isArray(rawInfo.attributes)
-    ? rawInfo.attributes
-    : Array.isArray(product.attributes)
-      ? product.attributes
-      : null;
   const weight = numberField(rawInfo.weight);
   const width = numberField(rawInfo.width);
   const height = numberField(rawInfo.height);
