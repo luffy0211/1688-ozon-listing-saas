@@ -284,6 +284,7 @@ describe("executeApprovedAgentAction", () => {
       payloadJson: {
         sop: "库存至少 5 件",
         rule: { all: [{ field: "stock", operator: "gte", value: 5 }] },
+        priceRule: { mode: "multiplier", value: 0.9 },
       },
       guardrailJson: {},
     });
@@ -306,6 +307,40 @@ describe("executeApprovedAgentAction", () => {
         data: expect.objectContaining({ status: "EXECUTED" }),
       }),
     );
+  });
+
+  it("rejects a promotion policy without a safe price rule", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "policy-bad",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      type: "PROMOTION_POLICY",
+      status: "APPROVED",
+      payloadJson: {
+        sop: "库存至少 5 件",
+        rule: { all: [{ field: "stock", operator: "gte", value: 5 }] },
+      },
+      guardrailJson: {},
+    });
+    prisma.agentAction.update.mockResolvedValue({
+      id: "policy-bad",
+      type: "PROMOTION_POLICY",
+      status: "FAILED",
+    });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "policy-bad",
+    });
+
+    expect(prisma.agentAction.update).toHaveBeenCalledWith({
+      where: { id: "policy-bad" },
+      data: {
+        status: "FAILED",
+        error: "invalid_promotion_price_rule",
+      },
+    });
   });
 
   it("records partial Ozon promotion activation results", async () => {

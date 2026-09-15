@@ -7,7 +7,9 @@ import {
 import { env } from "@/lib/env";
 import {
   evaluate,
+  promotionPriceRuleSchema,
   promotionPolicySchema,
+  type PromotionPriceRule,
   type PromotionPolicy,
 } from "./promotion-policy";
 
@@ -23,9 +25,37 @@ function number(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function optionalStoreId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && !["null", "undefined"].includes(trimmed.toLowerCase()) ? trimmed : null;
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function actionPriceFromRule(
+  rule: PromotionPriceRule,
+  values: { currentPrice: number; maxActionPrice: number },
+) {
+  switch (rule.mode) {
+    case "multiplier":
+      return roundMoney(values.currentPrice * rule.value);
+    case "percent_off":
+      return roundMoney(values.currentPrice * (1 - rule.value));
+    case "amount_off":
+      return roundMoney(values.currentPrice - rule.value);
+    case "fixed":
+      return roundMoney(rule.value);
+    case "ozon_max":
+      return roundMoney(values.maxActionPrice);
+  }
+}
+
 export function selectPromotionCandidates(params: {
   candidates: PromotionCandidateLike[];
   policy: PromotionPolicy;
+  priceRule: PromotionPriceRule;
   salesByProductId: Map<string, SalesMetric>;
 }) {
   const eligible: Array<{
@@ -42,16 +72,36 @@ export function selectPromotionCandidates(params: {
 
   for (const candidate of params.candidates) {
     const currentPrice = number(candidate.price);
-    const actionPrice = number(candidate.action_price) || number(candidate.max_action_price);
+    const maxActionPrice = number(candidate.max_action_price);
+    const actionPrice = actionPriceFromRule(params.priceRule, {
+      currentPrice,
+      maxActionPrice,
+    });
     const sales = params.salesByProductId.get(String(candidate.id));
     const metrics = {
       stock: number(candidate.stock),
       currentPrice,
       actionPrice,
-      maxActionPrice: number(candidate.max_action_price),
+      maxActionPrice,
       discountRate: currentPrice > 0 ? (currentPrice - actionPrice) / currentPrice : 0,
       ...(sales ?? {}),
     };
+    if (metrics.stock <= 0) {
+      rejected.push({ productId: candidate.id, reason: "stock_unavailable" });
+      continue;
+    }
+    if (currentPrice <= 0) {
+      rejected.push({ productId: candidate.id, reason: "missing_current_price" });
+      continue;
+    }
+    if (actionPrice <= 0) {
+      rejected.push({ productId: candidate.id, reason: "invalid_action_price" });
+      continue;
+    }
+    if (maxActionPrice > 0 && actionPrice > maxActionPrice) {
+      rejected.push({ productId: candidate.id, reason: "action_price_above_ozon_max" });
+      continue;
+    }
     const result = evaluate(params.policy, metrics);
     if (!result.passed) {
       rejected.push({ productId: candidate.id, reason: result.reason });
@@ -65,8 +115,9 @@ export function selectPromotionCandidates(params: {
 }
 
 async function resolveStore(tenantId: string, storeId?: string | null) {
+  const requestedStoreId = optionalStoreId(storeId);
   const store = await prisma.store.findFirst({
-    where: { tenantId, ...(storeId ? { id: storeId } : {}) },
+    where: { tenantId, ...(requestedStoreId ? { id: requestedStoreId } : {}) },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     select: { id: true, name: true, ozonClientId: true, ozonApiKey: true },
   });
@@ -156,8 +207,14 @@ export async function activePromotionPolicy(tenantId: string, storeId: string) {
   if (!action) return null;
   const payload = action.payloadJson as Record<string, unknown> | null;
   const rule = promotionPolicySchema.safeParse(payload?.rule);
-  if (!rule.success) return null;
-  return { actionId: action.id, sop: String(payload?.sop ?? ""), rule: rule.data };
+  const priceRule = promotionPriceRuleSchema.safeParse(payload?.priceRule);
+  if (!rule.success || !priceRule.success) return null;
+  return {
+    actionId: action.id,
+    sop: String(payload?.sop ?? ""),
+    rule: rule.data,
+    priceRule: priceRule.data,
+  };
 }
 
 function addDays(date: Date, days: number) {
@@ -200,6 +257,7 @@ export async function preparePromotionEnrollment(params: {
   const selected = selectPromotionCandidates({
     candidates,
     policy: policy.rule,
+    priceRule: policy.priceRule,
     salesByProductId,
   });
   return {

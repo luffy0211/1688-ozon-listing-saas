@@ -149,6 +149,25 @@ function promotionOperatorLabel(operator: unknown) {
   ] ?? String(operator ?? "");
 }
 
+function promotionPriceRuleLabel(value: unknown) {
+  const rule = asRecord(value);
+  const amount = Number(rule.value);
+  switch (rule.mode) {
+    case "multiplier":
+      return Number.isFinite(amount) ? `当前价 × ${amount}` : "当前价折扣";
+    case "percent_off":
+      return Number.isFinite(amount) ? `当前价减 ${Math.round(amount * 100)}%` : "按百分比降价";
+    case "amount_off":
+      return Number.isFinite(amount) ? `当前价减 ${amount}` : "按固定金额降价";
+    case "fixed":
+      return Number.isFinite(amount) ? `固定活动价 ${amount}` : "固定活动价";
+    case "ozon_max":
+      return "使用 Ozon 返回的最高活动价";
+    default:
+      return "";
+  }
+}
+
 function actionTypeLabel(type: string) {
   const labels: Record<string, string> = {
     CONTENT_DRAFT: "内容草稿",
@@ -269,6 +288,10 @@ function ActionBubble({
   const promotionProducts = Array.isArray(payload.products)
     ? payload.products.slice(0, 20)
     : [];
+  const promotionRejected = Array.isArray(payload.rejected)
+    ? payload.rejected.slice(0, 8)
+    : [];
+  const priceRuleLabel = promotionPriceRuleLabel(payload.priceRule);
 
   return (
     <section className="mt-3 rounded-xl border border-[#dfe8f4] bg-[#f8fbff] p-3">
@@ -287,6 +310,11 @@ function ActionBubble({
       {ruleConditions.length ? (
         <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
           <div className="mb-1 font-medium text-gray-950">确认后生效的规则</div>
+          {priceRuleLabel ? (
+            <div className="mb-1 rounded-md bg-white px-2 py-1 font-semibold text-[#075e5a]">
+              活动价：{priceRuleLabel}
+            </div>
+          ) : null}
           {ruleConditions.map((condition, index) => {
             const item = asRecord(condition);
             const value = Array.isArray(item.value) ? item.value.join("、") : String(item.value ?? "");
@@ -296,6 +324,13 @@ function ActionBubble({
               </div>
             );
           })}
+        </div>
+      ) : null}
+
+      {!ruleConditions.length && priceRuleLabel ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">活动价计算方法</div>
+          <div className="rounded-md bg-white px-2 py-1 font-semibold text-[#075e5a]">{priceRuleLabel}</div>
         </div>
       ) : null}
 
@@ -358,6 +393,21 @@ function ActionBubble({
           ) : (
             <div className="border-l-4 border-red-500 bg-red-50 p-2 text-red-800">修改明细不完整，已禁止执行。</div>
           )}
+        </div>
+      ) : null}
+
+      {promotionRejected.length ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">未纳入报名的商品</div>
+          {promotionRejected.map((product, index) => {
+            const item = asRecord(product);
+            return (
+              <div key={`${String(item.productId)}-${index}`} className="grid grid-cols-[1fr_2fr] gap-2 py-1">
+                <span>商品 {String(item.productId ?? "-")}</span>
+                <span>{String(item.reason ?? "-")}</span>
+              </div>
+            );
+          })}
         </div>
       ) : null}
 

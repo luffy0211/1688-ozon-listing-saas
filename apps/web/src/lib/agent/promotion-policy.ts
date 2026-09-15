@@ -29,6 +29,28 @@ export const promotionPolicySchema = z.strictObject({
   all: z.array(conditionSchema).min(1).max(12),
 });
 
+export const promotionPriceRuleSchema = z.discriminatedUnion("mode", [
+  z.strictObject({
+    mode: z.literal("multiplier"),
+    value: z.number().finite().positive().max(1),
+  }),
+  z.strictObject({
+    mode: z.literal("percent_off"),
+    value: z.number().finite().min(0).max(0.99),
+  }),
+  z.strictObject({
+    mode: z.literal("amount_off"),
+    value: z.number().finite().positive(),
+  }),
+  z.strictObject({
+    mode: z.literal("fixed"),
+    value: z.number().finite().positive(),
+  }),
+  z.strictObject({
+    mode: z.literal("ozon_max"),
+  }),
+]);
+
 const promotionMetricsSchema = z.strictObject({
   stock: z.number().finite().optional(),
   currentPrice: z.number().finite().optional(),
@@ -42,6 +64,7 @@ const promotionMetricsSchema = z.strictObject({
 });
 
 export type PromotionPolicy = z.infer<typeof promotionPolicySchema>;
+export type PromotionPriceRule = z.infer<typeof promotionPriceRuleSchema>;
 export type PromotionMetrics = z.infer<typeof promotionMetricsSchema>;
 
 export type PromotionPolicyResult =

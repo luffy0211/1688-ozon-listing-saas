@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluate, promotionPolicySchema } from "./promotion-policy";
+import { evaluate, promotionPolicySchema, promotionPriceRuleSchema } from "./promotion-policy";
 
 describe("promotion policy", () => {
   it("passes when every condition matches", () => {
@@ -62,5 +62,25 @@ describe("promotion policy", () => {
       passed: false,
       reason: "invalid_rule",
     });
+  });
+
+  it.each([
+    { mode: "multiplier", value: 0.9 },
+    { mode: "percent_off", value: 0.15 },
+    { mode: "amount_off", value: 50 },
+    { mode: "fixed", value: 799 },
+    { mode: "ozon_max" },
+  ])("accepts a safe activity price rule: $mode", (rule) => {
+    expect(promotionPriceRuleSchema.safeParse(rule).success).toBe(true);
+  });
+
+  it.each([
+    { mode: "multiplier", value: 1.2 },
+    { mode: "percent_off", value: 1 },
+    { mode: "amount_off", value: -10 },
+    { mode: "fixed", value: 0 },
+    { mode: "script", value: 1 },
+  ])("rejects an unsafe activity price rule: $mode", (rule) => {
+    expect(promotionPriceRuleSchema.safeParse(rule).success).toBe(false);
   });
 });
