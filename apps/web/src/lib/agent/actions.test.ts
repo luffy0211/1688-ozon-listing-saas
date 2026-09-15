@@ -6,15 +6,23 @@ const prisma = vi.hoisted(() => ({
     update: vi.fn(),
     updateMany: vi.fn(),
   },
+  store: {
+    findFirst: vi.fn(),
+  },
   auditLog: {
     create: vi.fn(),
   },
 }));
 
 const activatePromotionEnrollment = vi.hoisted(() => vi.fn());
+const ozonClientMock = vi.hoisted(() => ({
+  getProductInfoList: vi.fn(),
+  importProducts: vi.fn(),
+}));
 
 vi.mock("@saas/db", () => ({
   prisma,
+  decryptSecret: vi.fn((value: string) => value),
   AgentActionStatus: {
     APPROVED: "APPROVED",
     EXECUTED: "EXECUTED",
@@ -24,11 +32,19 @@ vi.mock("@saas/db", () => ({
     BLOCKED: "BLOCKED",
   },
   AgentRiskLevel: {
+    LOW: "LOW",
     MEDIUM: "MEDIUM",
   },
 }));
 
 vi.mock("./promotions", () => ({ activatePromotionEnrollment }));
+vi.mock("@saas/ozon", () => ({
+  OzonClient: vi.fn(function OzonClient() {
+    return ozonClientMock;
+  }),
+  computeRequestHash: vi.fn(() => "request-hash"),
+  checkSubmitGuards: vi.fn(() => undefined),
+}));
 
 import {
   contentDraftImportPayload,
@@ -39,6 +55,13 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   prisma.agentAction.updateMany.mockResolvedValue({ count: 1 });
+  prisma.store.findFirst.mockResolvedValue({
+    id: "store-1",
+    ozonClientId: "client-1",
+    ozonApiKey: "plain-key",
+  });
+  ozonClientMock.getProductInfoList.mockResolvedValue([{ id: 1 }]);
+  ozonClientMock.importProducts.mockResolvedValue({ task_id: 123 });
   process.env.ENABLE_REAL_OZON_SUBMIT = "false";
 });
 
@@ -76,6 +99,59 @@ describe("executeApprovedAgentAction", () => {
     expect(changedFields).toEqual(["title"]);
     expect(request.items[0]?.name).toBe("Новое название");
     expect(request.items[0]?.description).toBe("Описание из аннотации");
+  });
+
+  it("verifies content drafts with offerId only when productId is also present", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "content-1",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: "5853386614",
+      type: "CONTENT_DRAFT",
+      status: "APPROVED",
+      guardrailJson: {},
+      payloadJson: {
+        suggestions: [{
+          field: "title",
+          suggestedRu: "Новое название",
+        }],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Старое название",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [
+              { id: 4191, values: [{ value: "Описание из аннотации" }] },
+            ],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+    prisma.agentAction.update.mockResolvedValue({
+      id: "content-1",
+      type: "CONTENT_DRAFT",
+      status: "EXECUTED",
+    });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "content-1",
+    });
+
+    expect(ozonClientMock.getProductInfoList).toHaveBeenCalledWith({ offerIds: ["SKU-1"] });
+    expect(ozonClientMock.importProducts).toHaveBeenCalled();
   });
 
   it("requires the approved competitor preview to match the exact Ozon attributes", () => {

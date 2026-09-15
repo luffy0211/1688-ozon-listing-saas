@@ -530,10 +530,13 @@ async function verifyCurrentProduct(params: {
   offerId?: string | null;
   productId?: number | null;
 }) {
-  const productIds = params.productId ? [String(params.productId)] : undefined;
-  const offerIds = params.offerId ? [params.offerId] : undefined;
-  if (!productIds?.length && !offerIds?.length) return null;
-  const items = await params.client.getProductInfoList({ productIds, offerIds });
+  const request = params.offerId
+    ? { offerIds: [params.offerId] }
+    : params.productId
+      ? { productIds: [String(params.productId)] }
+      : null;
+  if (!request) return null;
+  const items = await params.client.getProductInfoList(request);
   const product = items[0] ?? null;
   if (!product) throw new Error("product_not_found_before_execution");
   return product;
