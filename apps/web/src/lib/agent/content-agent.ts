@@ -221,11 +221,17 @@ async function ensureSession(params: {
   });
 }
 
+export function optionalStoreId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && !["null", "undefined"].includes(trimmed.toLowerCase()) ? trimmed : null;
+}
+
 async function resolveStore(tenantId: string, storeId?: string | null): Promise<StoreRef> {
+  const requestedStoreId = optionalStoreId(storeId);
   const store = await prisma.store.findFirst({
     where: {
       tenantId,
-      ...(storeId ? { id: storeId } : {}),
+      ...(requestedStoreId ? { id: requestedStoreId } : {}),
     },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     select: {

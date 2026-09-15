@@ -6,6 +6,7 @@ import {
   contentAgentDataSourcesFromToolCalls,
   fallbackContentDraftSuggestion,
   normalizeOzonProductContent,
+  optionalStoreId,
   requiredOzonToolForPrompt,
   shouldRefreshCompetitorEvidence,
 } from "./content-agent";
@@ -87,6 +88,12 @@ describe("normalizeOzonProductContent", () => {
 });
 
 describe("content agent tool enforcement helpers", () => {
+  it("treats string null store ids as unspecified", () => {
+    expect(optionalStoreId("null")).toBeNull();
+    expect(optionalStoreId(" undefined ")).toBeNull();
+    expect(optionalStoreId("store-1")).toBe("store-1");
+  });
+
   it("builds a conservative fallback draft suggestion", () => {
     const suggestion = fallbackContentDraftSuggestion({
       offerId: "F18260807vo-0A-XL",
