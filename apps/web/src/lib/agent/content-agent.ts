@@ -287,6 +287,80 @@ function lowRatingSourceProducts(value: unknown) {
   });
 }
 
+export function competitorMemoryContextFromReports(
+  reports: Array<{ title: string; reportJson: unknown; createdAt: Date }>,
+) {
+  const playbooks = reports.flatMap((report) => {
+    const payload = rawRecord(report.reportJson);
+    if (payload.kind !== "category_attribute_playbook") return [];
+    const attributes = Array.isArray(payload.attributes) ? payload.attributes : [];
+    const topAttributes = attributes.slice(0, 8).flatMap((attribute) => {
+      const item = rawRecord(attribute);
+      const name = stringField(item.ozonNameRu) ?? stringField(item.competitorNameRu);
+      const commonValues = Array.isArray(item.commonValues)
+        ? item.commonValues
+          .slice(0, 3)
+          .map((value) => stringField(rawRecord(value).value))
+          .filter((value): value is string => Boolean(value))
+        : [];
+      return name ? [`${name}${commonValues.length ? `=${commonValues.join("/")}` : ""}`] : [];
+    });
+    return [{
+      title: report.title.replace(/^类目属性经验 v\d+：/, ""),
+      sampleSize: numberField(payload.sampleSize),
+      attributes: topAttributes,
+      createdAt: report.createdAt.toISOString(),
+    }];
+  });
+
+  const competitorReports = reports.flatMap((report) => {
+    const payload = rawRecord(report.reportJson);
+    if (!["ozon_search_index", "ozon_http_crawler"].includes(String(payload.source))) return [];
+    const competitors = Array.isArray(payload.competitors) ? payload.competitors : [];
+    const target = rawRecord(payload.target);
+    const category = rawRecord(payload.category);
+    return [{
+      offerId: stringField(target.offerId),
+      category: stringField(category.name) ?? stringField(target.categoryNameRu),
+      source: stringField(payload.source),
+      competitorCount: competitors.length,
+      createdAt: report.createdAt.toISOString(),
+    }];
+  });
+
+  if (!playbooks.length && !competitorReports.length) return "";
+  const lines = [
+    "已保存的竞品采集/分析记忆，默认复用；只有用户明确要求重新采集或刷新时才更新。",
+    playbooks.length
+      ? `类目属性经验：${playbooks.slice(0, 8).map((item) =>
+        `${item.title}${item.sampleSize ? `(${item.sampleSize}样本)` : ""}: ${item.attributes.slice(0, 5).join("、")}`,
+      ).join("；")}`
+      : "",
+    competitorReports.length
+      ? `最近竞品证据：${competitorReports.slice(0, 8).map((item) =>
+        `${item.category ?? item.offerId ?? "未知类目"} ${item.competitorCount}个 ${item.source}`,
+      ).join("；")}`
+      : "",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+async function loadCompetitorMemoryContext(tenantId: string) {
+  const reports = await prisma.competitorContentReport.findMany({
+    where: {
+      tenantId,
+      OR: [
+        { title: { startsWith: "类目属性经验 v" } },
+        { title: { startsWith: "竞品分析：" } },
+      ],
+    },
+    orderBy: { createdAt: "desc" },
+    take: 40,
+    select: { title: true, reportJson: true, createdAt: true },
+  });
+  return competitorMemoryContextFromReports(reports);
+}
+
 function statusFrom(info: OzonProductInfoItem | null | undefined) {
   if (!info?.status) return null;
   return info.status.state_name ?? info.status.state ?? info.status.status ?? null;
@@ -402,7 +476,11 @@ function buildInstructions(offerId: string | null) {
   ].join("\n");
 }
 
-function buildInput(prompt: string, history: Array<{ role: string; content: string }>) {
+function buildInput(
+  prompt: string,
+  history: Array<{ role: string; content: string }>,
+  preloadedContext = "",
+) {
   const recentHistory = history
     .slice(-8)
     .map((item) => `${item.role}: ${item.content}`)
@@ -410,6 +488,7 @@ function buildInput(prompt: string, history: Array<{ role: string; content: stri
 
   return [
     recentHistory ? `最近对话：\n${recentHistory}` : "",
+    preloadedContext ? `系统已预读的真实数据：\n${preloadedContext}` : "",
     `用户最新请求：\n${prompt}`,
   ]
     .filter(Boolean)
@@ -678,6 +757,7 @@ export async function runOzonContentAgent(params: {
   });
 
   const toolCalls: ToolCallLog[] = [];
+  const requiredToolName = requiredOzonToolForPrompt(prompt, offerId);
 
   try {
     requireConfiguredModel();
@@ -686,6 +766,51 @@ export async function runOzonContentAgent(params: {
     const createdActionIds: string[] = [];
     const listedPromotionIds = new Set<number>();
     let latestPromotionCandidateActionId: number | null = null;
+    let preloadedContext = "";
+
+    async function readStoreSnapshot(storeId: string | null | undefined) {
+      const at = new Date().toISOString();
+      try {
+        const snapshot = await getAgentStoreSnapshot({
+          tenantId: params.tenantId,
+          userId: params.userId,
+          storeId: storeId ?? params.storeId,
+          refreshOzonData: true,
+        });
+        const result = {
+          store: snapshot.store,
+          stores: snapshot.stores,
+          latestSnapshot: snapshot.latestSnapshot,
+          guardrails: snapshot.guardrails,
+          pricingRule: snapshot.pricingRule,
+          products: snapshot.products,
+          compiledDrafts: snapshot.compiledDrafts,
+          capturedAt: at,
+        };
+        toolCalls.push({
+          name: "get_ozon_store_snapshot",
+          at,
+          input: { storeId: storeId ?? params.storeId ?? null },
+          output: {
+            storeName: snapshot.store?.name ?? null,
+            productCount: snapshot.latestSnapshot?.productCount ?? null,
+            visibleProductCount: snapshot.latestSnapshot?.visibleProductCount ?? null,
+            totalStock: snapshot.latestSnapshot?.totalStock ?? null,
+            syncedAt: snapshot.latestSnapshot?.syncedAt ?? null,
+          },
+        });
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        toolCalls.push({
+          name: "get_ozon_store_snapshot",
+          at,
+          input: { storeId: storeId ?? params.storeId ?? null },
+          error: message,
+        });
+        throw error;
+      }
+    }
 
     const getStoreSnapshotTool = tool({
       name: "get_ozon_store_snapshot",
@@ -695,47 +820,7 @@ export async function runOzonContentAgent(params: {
         storeId: z.string().nullable(),
       }),
       execute: async ({ storeId }) => {
-        const at = new Date().toISOString();
-        try {
-          const snapshot = await getAgentStoreSnapshot({
-            tenantId: params.tenantId,
-            userId: params.userId,
-            storeId: storeId ?? params.storeId,
-            refreshOzonData: true,
-          });
-          const result = {
-            store: snapshot.store,
-            stores: snapshot.stores,
-            latestSnapshot: snapshot.latestSnapshot,
-            guardrails: snapshot.guardrails,
-            pricingRule: snapshot.pricingRule,
-            products: snapshot.products,
-            compiledDrafts: snapshot.compiledDrafts,
-            capturedAt: at,
-          };
-          toolCalls.push({
-            name: "get_ozon_store_snapshot",
-            at,
-            input: { storeId: storeId ?? params.storeId ?? null },
-            output: {
-              storeName: snapshot.store?.name ?? null,
-              productCount: snapshot.latestSnapshot?.productCount ?? null,
-              visibleProductCount: snapshot.latestSnapshot?.visibleProductCount ?? null,
-              totalStock: snapshot.latestSnapshot?.totalStock ?? null,
-              syncedAt: snapshot.latestSnapshot?.syncedAt ?? null,
-            },
-          });
-          return result;
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          toolCalls.push({
-            name: "get_ozon_store_snapshot",
-            at,
-            input: { storeId: storeId ?? params.storeId ?? null },
-            error: message,
-          });
-          throw error;
-        }
+        return readStoreSnapshot(storeId);
       },
     });
 
@@ -1249,6 +1334,21 @@ export async function runOzonContentAgent(params: {
       take: 20,
       select: { role: true, content: true },
     });
+    const competitorMemoryContext = await loadCompetitorMemoryContext(params.tenantId);
+
+    if (requiredToolName === "get_ozon_store_snapshot") {
+      const snapshot = await readStoreSnapshot(params.storeId);
+      preloadedContext = [
+        competitorMemoryContext,
+        `店铺：${snapshot.store?.name ?? "未选择"}`,
+        `商品数：${snapshot.latestSnapshot?.productCount ?? "未知"}`,
+        `可见商品数：${snapshot.latestSnapshot?.visibleProductCount ?? "未知"}`,
+        `总库存：${snapshot.latestSnapshot?.totalStock ?? "未知"}`,
+        `同步时间：${snapshot.latestSnapshot?.syncedAt ?? snapshot.capturedAt}`,
+      ].filter(Boolean).join("\n");
+    } else {
+      preloadedContext = competitorMemoryContext;
+    }
 
     const agent = new Agent({
       name: "Ozon Operations Agent",
@@ -1272,7 +1372,7 @@ export async function runOzonContentAgent(params: {
       modelProvider: createModelProvider(),
       tracingDisabled: !env.openaiAgentTraceSensitiveData,
     });
-    const result = await runner.run(agent, buildInput(prompt, history), {
+    const result = await runner.run(agent, buildInput(prompt, history, preloadedContext), {
       maxTurns: 12,
     });
 
@@ -1285,7 +1385,6 @@ export async function runOzonContentAgent(params: {
     }
 
     const output = String(result.finalOutput ?? "Agent 没有返回内容。");
-    const requiredToolName = requiredOzonToolForPrompt(prompt, offerId);
     const blockedMissingTool = requiredToolName
       ? !hasSuccessfulToolCall(toolCalls, requiredToolName)
       : false;

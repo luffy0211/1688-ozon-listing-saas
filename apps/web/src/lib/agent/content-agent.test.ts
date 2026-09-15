@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   competitorsPerCategoryFromPrompt,
+  competitorMemoryContextFromReports,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
   normalizeOzonProductContent,
@@ -166,6 +167,38 @@ describe("content agent tool enforcement helpers", () => {
         error: null,
       },
     ]);
+  });
+
+  it("summarizes saved competitor evidence as reusable memory", () => {
+    const context = competitorMemoryContextFromReports([
+      {
+        title: "类目属性经验 v4：200000933:93194",
+        createdAt: new Date("2026-09-10T16:40:00.000Z"),
+        reportJson: {
+          kind: "category_attribute_playbook",
+          sampleSize: 5,
+          attributes: [
+            { ozonNameRu: "Сезон", commonValues: [{ value: "Лето" }] },
+            { ozonNameRu: "Материал", commonValues: [{ value: "Хлопок" }] },
+          ],
+        },
+      },
+      {
+        title: "竞品分析：Мужское поло",
+        createdAt: new Date("2026-09-10T16:39:00.000Z"),
+        reportJson: {
+          source: "ozon_http_crawler",
+          target: { offerId: "SKU-1" },
+          category: { name: "Поло" },
+          competitors: [{ sku: "c1" }, { sku: "c2" }],
+        },
+      },
+    ]);
+
+    expect(context).toContain("默认复用");
+    expect(context).toContain("200000933:93194(5样本)");
+    expect(context).toContain("Сезон=Лето");
+    expect(context).toContain("Поло 2个 ozon_http_crawler");
   });
 
   it("shows the full-store competitor diagnosis product count", () => {
