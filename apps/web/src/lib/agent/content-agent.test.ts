@@ -132,6 +132,13 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("分析店铺竞品", null)).toBeNull();
   });
 
+  it("reuses saved competitor evidence without forcing a fresh crawl", () => {
+    expect(requiredOzonToolForPrompt(
+      "根据已保存的竞品分析和类目属性经验，帮我检查一个商品，并生成一条可执行的修改建议。先不要直接执行，等我确认。",
+      null,
+    )).toBeNull();
+  });
+
   it("requires promotion data for campaign requests", () => {
     expect(requiredOzonToolForPrompt("看看有什么活动可以报名", null)).toBe(
       "list_ozon_promotions",
