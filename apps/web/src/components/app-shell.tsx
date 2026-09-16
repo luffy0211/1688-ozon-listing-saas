@@ -8,10 +8,14 @@ import {
   Bot,
   ChevronDown,
   Coins,
+  ClipboardList,
+  FileText,
   GitBranch,
   LayoutDashboard,
+  ListChecks,
   PackageSearch,
   Settings,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import type { SessionPayload } from "@/lib/auth";
@@ -20,10 +24,16 @@ import { LogoutButton } from "./logout-button";
 import { Badge, cn } from "./ui";
 
 const navItems = [
+  { href: "/getting-started", label: "开始使用", icon: ListChecks },
   { href: "/dashboard", label: "上架工作台", icon: LayoutDashboard },
   { href: "/workflow", label: "自动化工作流", icon: GitBranch },
+  { href: "/tasks", label: "任务中心", icon: ClipboardList },
+  { href: "/quality", label: "商品体检", icon: ShieldCheck },
   { href: "/analytics", label: "BI 看板", icon: BarChart3 },
   { href: "/agent/content", label: "运营 Agent", icon: Bot },
+  { href: "/agent/reports", label: "Agent 报告", icon: FileText },
+  { href: "/agent/actions", label: "待审批", icon: ShieldCheck },
+  { href: "/credits", label: "积分流水", icon: Coins },
   { href: "/admin/credits", label: "积分管理", icon: Coins, adminOnly: true },
   { href: "/settings", label: "设置", icon: Settings },
 ];
