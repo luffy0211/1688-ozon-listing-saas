@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { prisma, decryptSecret } from "@saas/db";
-import { computeRequestHash, OzonClient } from "@saas/ozon";
+import { checkSubmitGuards, computeRequestHash, mockImportProducts, OzonClient } from "@saas/ozon";
 import { ok, fail, unauthorized, forbidden, notFound } from "@/lib/api";
+import { consumeTenantCredits, CreditAdjustmentError, refundTenantCredits } from "@/lib/credits";
 import { sessionFromRequest } from "@/lib/request-session";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
 
   const draft = await prisma.ozonDraft.findFirst({
     where: { tenantId, id: params.id },
-    include: { store: true },
+    include: { product: { include: { productAssets: true } }, store: true },
   });
   if (!draft) return notFound("草稿不存在");
   if (draft.status !== "COMPILED") {
@@ -44,12 +45,51 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     return fail("duplicate_submission", "同一店铺同一草稿已提交过，禁止重复上架", [], 409);
   }
 
+  const xiangjiCredentialCount = await prisma.xiangjiCredential.count({ where: { tenantId } });
+  const hasPrice = request.items.every((item) => {
+    const price = asRecord(item).price;
+    return Number(price) > 0;
+  });
+  const guard = checkSubmitGuards({
+    hasOzonCredentials: Boolean(draft.store.ozonClientId && draft.store.ozonApiKey),
+    hasXiangjiKey: xiangjiCredentialCount > 0,
+    hasMainImage: draft.product.productAssets.some((asset) => asset.kind === "main_image" || asset.kind === "sku_image"),
+    hasDetailImage: draft.product.productAssets.some((asset) => asset.kind === "detail_image"),
+    hasPrice,
+    payload: request,
+    duplicateSubmission: false,
+  });
+  if (!guard.ok) {
+    return fail("submit_guard_failed", guard.failures.join("; "), guard.failures, 422);
+  }
+
+  const creditReference = {
+    referenceType: "ozon_draft_publish",
+    referenceId: draft.id,
+    idempotencyKey: `listing-publish:${draft.storeId}:${requestHash}`,
+  };
   try {
-    const client = new OzonClient({
-      clientId: draft.store.ozonClientId,
-      apiKey: decryptSecret(draft.store.ozonApiKey),
+    await consumeTenantCredits({
+      tenantId,
+      feature: "listing_publish",
+      createdBy: session.userId,
+      ...creditReference,
     });
-    const response = await client.importProducts(request as never);
+  } catch (error) {
+    if (error instanceof CreditAdjustmentError) {
+      return fail(error.code, error.message, [], error.status);
+    }
+    throw error;
+  }
+
+  try {
+    const response =
+      process.env.ENABLE_REAL_OZON_SUBMIT === "true"
+        ? await new OzonClient({
+            clientId: draft.store.ozonClientId,
+            apiKey: decryptSecret(draft.store.ozonApiKey),
+          }).importProducts(request as never)
+        : mockImportProducts(request as never);
     const run = await prisma.publishRun.create({
       data: {
         tenantId,
@@ -74,6 +114,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     return ok({ publishRunId: run.id, ozonTaskId: run.ozonTaskId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    await refundTenantCredits({
+      tenantId,
+      feature: "listing_publish",
+      createdBy: session.userId,
+      ...creditReference,
+      idempotencyKey: `refund:${creditReference.idempotencyKey}`,
+    }).catch(() => null);
     await prisma.publishRun.create({
       data: {
         tenantId,

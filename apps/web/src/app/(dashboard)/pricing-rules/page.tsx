@@ -18,7 +18,7 @@ export default async function PricingRulesPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="定价规则" description="配置采购、物流、佣金和毛利，用于计算 Ozon 售价。">
-        <Link href="/settings" className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href="/settings" className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           返回配置中心
         </Link>
       </PageHeader>

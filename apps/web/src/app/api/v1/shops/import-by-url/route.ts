@@ -4,7 +4,7 @@ import { prisma } from "@saas/db";
 import { ok, fail, unauthorized, forbidden } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 import { get1688Cookies } from "@/lib/credential-1688";
-import { detailToSourceProductImport, shopProductsToSourceShopImport } from "@/lib/import-1688";
+import { detailToSourceProductImport, selectNewShopProducts, shopProductsToSourceShopImport } from "@/lib/import-1688";
 import { importProduct, importShop } from "@/lib/services";
 
 function clampLimit(value: unknown): number {
@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
     fetchShopProducts(cred.cookies, memberId),
   ]);
   const pageProducts =
-    mtopProducts.length < limit
-      ? (await fetchShopProductsFromPages(cred.cookies, shopUrl, limit)).map((item) => ({
+    mtopProducts.length < limit * 2
+      ? (await fetchShopProductsFromPages(cred.cookies, shopUrl, limit * 2)).map((item) => ({
           ...item,
           memberId,
         }))
@@ -77,30 +77,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const products = allProducts.slice(0, limit);
+  const existingProducts = await prisma.sourceProduct.findMany({
+    where: {
+      tenantId,
+      offerId: { in: allProducts.map((product) => product.offerId) },
+    },
+    select: { offerId: true },
+  });
+  const existingOfferIds = new Set(existingProducts.map((product) => product.offerId));
+  const products = selectNewShopProducts(allProducts, existingOfferIds, limit);
   const shopName = savedShopName || detectedShopName;
   const input = shopProductsToSourceShopImport(
     shopUrl,
     shopName,
     memberId,
-    products,
+    allProducts,
   );
   const result = await importShop(tenantId, input);
   const poolFailures: Array<{ offerId: string; error: string }> = [];
   const pooledOfferIds: string[] = [];
-  const existingProducts = await prisma.sourceProduct.findMany({
-    where: {
-      tenantId,
-      offerId: { in: products.map((product) => product.offerId) },
-    },
-    select: { offerId: true },
-  });
-  const existingOfferIds = new Set(existingProducts.map((product) => product.offerId));
-  const newProducts = products.filter((product) => !existingOfferIds.has(product.offerId));
   let productPoolCreated = 0;
   let detailCollected = 0;
 
-  for (const product of newProducts) {
+  for (const product of products) {
     try {
       const detail = await fetchProductDetail(cred.cookies, product.offerId, product.title);
       const productInput = detailToSourceProductImport({
@@ -114,7 +113,7 @@ export async function POST(req: NextRequest) {
         moq: detail.moq || product.moq,
         sales: detail.sales || product.sales,
       });
-      const poolResult = await importProduct(tenantId, productInput);
+      const poolResult = await importProduct(tenantId, productInput, { skipExisting: true });
       pooledOfferIds.push(product.offerId);
       if (poolResult.isNew) productPoolCreated++;
       detailCollected++;
@@ -149,7 +148,7 @@ export async function POST(req: NextRequest) {
     mtopCount: mtopProducts.length,
     pageFallbackCount: pageProducts.length,
     productPoolCreated,
-    productPoolSkippedExisting: existingOfferIds.size,
+    productPoolSkippedExisting: allProducts.filter((product) => existingOfferIds.has(product.offerId)).length,
     productPoolFailed: poolFailures.length,
     detailCollected,
     poolFailures,

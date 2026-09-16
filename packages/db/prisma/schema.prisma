@@ -86,6 +86,8 @@ enum AgentActionType {
   BULK_PRODUCT_UPDATE
   RESTOCK_RECOMMENDATION
   PROMO_RECOMMENDATION
+  PROMOTION_POLICY
+  PROMOTION_ENROLLMENT
 }
 
 enum AgentActionStatus {
@@ -102,6 +104,14 @@ enum AgentRiskLevel {
   LOW
   MEDIUM
   HIGH
+}
+
+enum CreditTransactionType {
+  ADMIN_GRANT
+  ADMIN_DEDUCT
+  USAGE_DEBIT
+  USAGE_REFUND
+  PAYMENT_CREDIT
 }
 
 model Tenant {
@@ -131,6 +141,8 @@ model Tenant {
   agentMessages          AgentMessage[]
   agentRuns              AgentRun[]
   agentActions           AgentAction[]
+  creditAccount          CreditAccount?
+  creditTransactions     CreditTransaction[]
 }
 
 model User {
@@ -771,4 +783,38 @@ model AuditLog {
 
   @@index([tenantId])
   @@index([userId])
+}
+
+model CreditAccount {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions CreditTransaction[]
+}
+
+model CreditTransaction {
+  id            String                @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                @relation(fields: [tenantId], references: [id])
+  accountId     String
+  account       CreditAccount         @relation(fields: [accountId], references: [id])
+  type          CreditTransactionType
+  delta         Int
+  balanceAfter  Int
+  reason        String?
+  referenceType String?
+  referenceId   String?
+  idempotencyKey String?               @unique
+  createdBy     String?
+  createdAt     DateTime              @default(now())
+
+  @@index([tenantId])
+  @@index([accountId])
+  @@index([type])
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
 }

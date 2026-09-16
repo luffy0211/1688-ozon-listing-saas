@@ -3,16 +3,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Bot,
   Check,
-  Database,
   Loader2,
   Plus,
   Send,
-  ShieldCheck,
   X,
 } from "lucide-react";
 import { Badge, Button, Select, cn } from "./ui";
+import {
+  AgentCommandDeck,
+  AgentInsightPanel,
+  type AgentInsightSource,
+} from "./agent-insight-panel";
 
 type StoreOption = {
   id: string;
@@ -50,30 +52,17 @@ export type ContentAgentActionView = {
   updatedAt: string;
 };
 
-type ContentAgentDataSourceView = {
-  toolName: string;
-  label: string;
-  status: "ok" | "error";
-  at: string;
-  syncedAt?: string | null;
-  storeName?: string | null;
-  productCount?: number | null;
-  visibleProductCount?: number | null;
-  totalStock?: number | null;
-  offerId?: string | null;
-  productId?: string | null;
-  found?: boolean | null;
-  stock?: number | null;
-  error?: string | null;
-};
-
 type ChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
   actions?: ContentAgentActionView[];
-  dataSources?: ContentAgentDataSourceView[];
+  dataSources?: AgentInsightSource[];
 };
+
+export function shouldShowCommandDeck(messages: Array<Pick<ChatMessage, "role">>) {
+  return !messages.some((message) => message.role === "user");
+}
 
 type PersistedChatMessage = ChatMessage & {
   createdAt: string;
@@ -88,6 +77,31 @@ function asRecord(value: unknown): Record<string, unknown> {
 function suggestionsFromPayload(payload: unknown) {
   const suggestions = asRecord(payload).suggestions;
   return Array.isArray(suggestions) ? suggestions.slice(0, 6) : [];
+}
+
+export function attributeChangesFromPayload(payload: unknown) {
+  const recommendations = asRecord(payload).recommendations;
+  if (!Array.isArray(recommendations)) return [];
+  return recommendations.flatMap((value) => {
+    const item = asRecord(value);
+    const offerId = typeof item.offerId === "string" ? item.offerId.trim() : "";
+    const attributeName = typeof item.ozonNameRu === "string" && item.ozonNameRu.trim()
+      ? item.ozonNameRu.trim()
+      : typeof item.competitorNameRu === "string" ? item.competitorNameRu.trim() : "";
+    const suggestedValue = typeof item.suggestedValue === "string" ? item.suggestedValue.trim() : "";
+    if (!offerId || !attributeName || !suggestedValue) return [];
+    const evidenceUrls = Array.isArray(item.evidenceUrls)
+      ? item.evidenceUrls.filter((url): url is string => typeof url === "string" && /^https:\/\//.test(url))
+      : [];
+    return [{
+      offerId,
+      attributeName,
+      suggestedValue,
+      required: item.required === true,
+      reasonZh: typeof item.reasonZh === "string" ? item.reasonZh : "",
+      evidenceUrl: evidenceUrls[0] ?? null,
+    }];
+  });
 }
 
 function toneForStatus(status: string) {
@@ -114,6 +128,89 @@ function fieldLabel(field: unknown) {
   return labels[key] ?? key;
 }
 
+function promotionFieldLabel(field: unknown) {
+  const labels: Record<string, string> = {
+    stock: "库存",
+    currentPrice: "当前价",
+    actionPrice: "活动价",
+    maxActionPrice: "最高活动价",
+    discountRate: "折扣率",
+    orders30d: "30天订单",
+    revenue30d: "30天销售额",
+    ozonNetPayout: "Ozon净回款",
+    contentRating: "内容评分",
+  };
+  return labels[String(field ?? "")] ?? String(field ?? "");
+}
+
+function promotionOperatorLabel(operator: unknown) {
+  return ({ gte: "≥", lte: "≤", eq: "=", in: "属于", not_in: "不属于" } as Record<string, string>)[
+    String(operator ?? "")
+  ] ?? String(operator ?? "");
+}
+
+function promotionPriceRuleLabel(value: unknown) {
+  const rule = asRecord(value);
+  const amount = Number(rule.value);
+  switch (rule.mode) {
+    case "multiplier":
+      return Number.isFinite(amount) ? `当前价 × ${amount}` : "当前价折扣";
+    case "percent_off":
+      return Number.isFinite(amount) ? `当前价减 ${Math.round(amount * 100)}%` : "按百分比降价";
+    case "amount_off":
+      return Number.isFinite(amount) ? `当前价减 ${amount}` : "按固定金额降价";
+    case "fixed":
+      return Number.isFinite(amount) ? `固定活动价 ${amount}` : "固定活动价";
+    case "ozon_max":
+      return "使用 Ozon 返回的最高活动价";
+    case "formula": {
+      const parts = [`公式：${String(rule.expression ?? "")}`];
+      const defaults = asRecord(rule.defaults);
+      const defaultText = Object.entries(defaults)
+        .filter(([, value]) => Number.isFinite(Number(value)))
+        .map(([key, value]) => `${key}=${String(value)}`)
+        .join("，");
+      if (defaultText) parts.push(`默认值：${defaultText}`);
+      if (rule.rounding) parts.push(`取整：${String(rule.rounding)}`);
+      if (Number.isFinite(Number(rule.minGrossMarginRate))) {
+        parts.push(`最低毛利率：${Math.round(Number(rule.minGrossMarginRate) * 100)}%`);
+      }
+      if (Number.isFinite(Number(rule.minProfitRub))) {
+        parts.push(`最低利润：${String(rule.minProfitRub)}`);
+      }
+      return parts.join(" · ");
+    }
+    default:
+      return "";
+  }
+}
+
+function promotionScopeLabel(value: unknown) {
+  const scope = asRecord(value);
+  const parts: string[] = [];
+  const arrayText = (items: unknown) =>
+    Array.isArray(items)
+      ? items.map((item) => String(item)).filter(Boolean).slice(0, 6).join("、")
+      : "";
+  const offerIds = arrayText(scope.offerIds);
+  const prefixes = arrayText(scope.offerIdPrefixes);
+  const categories = arrayText(scope.descriptionCategoryIds);
+  const typeIds = arrayText(scope.typeIds);
+  const categoryKeys = arrayText(scope.categoryKeys);
+  if (offerIds) parts.push(`offerId：${offerIds}`);
+  if (prefixes) parts.push(`offerId前缀：${prefixes}`);
+  if (categories) parts.push(`类目：${categories}`);
+  if (typeIds) parts.push(`类型：${typeIds}`);
+  if (categoryKeys) parts.push(`类目组合：${categoryKeys}`);
+  const priceRange = asRecord(scope.priceRange);
+  const min = Number(priceRange.min);
+  const max = Number(priceRange.max);
+  if (Number.isFinite(min) || Number.isFinite(max)) {
+    parts.push(`价格：${Number.isFinite(min) ? min : "不限"}-${Number.isFinite(max) ? max : "不限"}`);
+  }
+  return parts.join(" · ");
+}
+
 function actionTypeLabel(type: string) {
   const labels: Record<string, string> = {
     CONTENT_DRAFT: "内容草稿",
@@ -127,6 +224,8 @@ function actionTypeLabel(type: string) {
     UNARCHIVE_PRODUCT: "恢复商品",
     DELETE_PRODUCT: "删除商品",
     BULK_PRODUCT_UPDATE: "批量修改商品",
+    PROMOTION_POLICY: "活动报名规则",
+    PROMOTION_ENROLLMENT: "活动报名",
   };
   return labels[type] ?? type;
 }
@@ -149,6 +248,12 @@ function actionPayloadSummary(action: ContentAgentActionView) {
   if (attributes) parts.push(`属性: ${attributes} 个`);
   const items = Array.isArray(payload.items) ? payload.items.length : null;
   if (items) parts.push(`批量: ${items} 个商品`);
+  const products = Array.isArray(payload.products) ? payload.products.length : null;
+  if (products) parts.push(`报名商品: ${products} 个`);
+  const rule = asRecord(payload.rule);
+  const conditions = Array.isArray(rule.all) ? rule.all.length : null;
+  if (conditions) parts.push(`规则条件: ${conditions} 条`);
+  push("活动ID", payload.actionId);
   return parts.slice(0, 6).join(" · ");
 }
 
@@ -159,47 +264,12 @@ function formatTime(value?: string | null) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
-function sourceSummary(source: ContentAgentDataSourceView) {
-  const parts = [source.label];
-  if (source.storeName) parts.push(source.storeName);
-  if (typeof source.productCount === "number") parts.push(`商品 ${source.productCount}`);
-  if (typeof source.visibleProductCount === "number") parts.push(`可见 ${source.visibleProductCount}`);
-  if (typeof source.totalStock === "number") parts.push(`库存 ${source.totalStock}`);
-  if (source.offerId) parts.push(`offerId ${source.offerId}`);
-  if (source.productId) parts.push(`productId ${source.productId}`);
-  if (typeof source.stock === "number") parts.push(`库存 ${source.stock}`);
-  const syncedAt = formatTime(source.syncedAt ?? source.at);
-  if (syncedAt) parts.push(`同步 ${syncedAt}`);
-  if (source.error) parts.push(`错误 ${source.error}`);
-  return parts.join(" · ");
-}
-
-function DataSources({ sources }: { sources?: ContentAgentDataSourceView[] }) {
-  if (!sources?.length) return null;
-  return (
-    <div className="mt-3 space-y-1 border-t border-gray-100 pt-2">
-      {sources.map((source, index) => (
-        <div
-          key={`${source.toolName}-${source.at}-${index}`}
-          className={cn(
-            "flex items-start gap-2 text-xs leading-5",
-            source.status === "error" ? "text-red-600" : "text-gray-500",
-          )}
-        >
-          <Database className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span className="break-words">{sourceSummary(source)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function introMessageFor(agentConfig: AgentConfig): ChatMessage {
   return {
     id: "intro",
     role: "assistant",
     content: agentConfig.configured
-      ? "你可以正常对话。读取店铺、商品、库存、订单等信息时会直接调用真实工具；涉及新增、删除、修改、发布、归档、价格或内容变更时，只会先生成等待人工确认的草稿或动作。"
+      ? "你可以直接询问店铺诊断、竞品分析和 Ozon 活动。读取数据会调用真实工具；任何商品改动或活动报名都必须先生成等待人工确认的动作。"
       : agentConfig.message,
   };
 }
@@ -252,13 +322,27 @@ function ActionBubble({
   onCommand: (actionId: string, command: "confirm-execute" | "reject" | "execute") => void;
 }) {
   const suggestions = suggestionsFromPayload(action.payload);
+  const payload = asRecord(action.payload);
+  const attributeChanges = attributeChangesFromPayload(action.payload);
+  const isCompetitorBatch = action.type === "BULK_PRODUCT_UPDATE" && payload.source === "competitor_attribute_playbook";
+  const ruleConditions = Array.isArray(asRecord(payload.rule).all)
+    ? (asRecord(payload.rule).all as unknown[])
+    : [];
+  const promotionProducts = Array.isArray(payload.products)
+    ? payload.products.slice(0, 20)
+    : [];
+  const promotionRejected = Array.isArray(payload.rejected)
+    ? payload.rejected.slice(0, 8)
+    : [];
+  const priceRuleLabel = promotionPriceRuleLabel(payload.priceRule);
+  const scopeLabel = promotionScopeLabel(payload.scope);
 
   return (
-    <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+    <section className="mt-3 rounded-xl border border-[#dfe8f4] bg-[#f8fbff] p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={toneForStatus(action.status)}>{action.status}</Badge>
         <Badge tone={toneForRisk(action.riskLevel)}>{action.riskLevel}</Badge>
-        <span className="text-xs font-medium text-gray-500">{actionTypeLabel(action.type)}</span>
+        <span className="rounded-md bg-[#26334d] px-2 py-1 text-xs font-semibold text-white">{actionTypeLabel(action.type)}</span>
       </div>
       <div className="mt-2 text-sm font-semibold text-gray-950">{action.title}</div>
       <div className="mt-1 text-sm leading-6 text-gray-600">{action.rationale}</div>
@@ -267,12 +351,70 @@ function ActionBubble({
       ) : null}
       {action.error ? <div className="mt-2 text-xs text-red-600">{action.error}</div> : null}
 
+      {ruleConditions.length ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">确认后生效的规则</div>
+          {priceRuleLabel ? (
+            <div className="mb-1 rounded-md bg-white px-2 py-1 font-semibold text-[#075e5a]">
+              活动价：{priceRuleLabel}
+            </div>
+          ) : null}
+          {scopeLabel ? (
+            <div className="mb-1 rounded-md bg-white px-2 py-1 font-semibold text-[#26334d]">
+              适用范围：{scopeLabel}
+            </div>
+          ) : null}
+          {ruleConditions.map((condition, index) => {
+            const item = asRecord(condition);
+            const value = Array.isArray(item.value) ? item.value.join("、") : String(item.value ?? "");
+            return (
+              <div key={index} className="py-0.5">
+                {promotionFieldLabel(item.field)} {promotionOperatorLabel(item.operator)} {value}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {!ruleConditions.length && priceRuleLabel ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">活动价计算方法</div>
+          <div className="rounded-md bg-white px-2 py-1 font-semibold text-[#075e5a]">{priceRuleLabel}</div>
+          {scopeLabel ? (
+            <div className="mt-1 rounded-md bg-white px-2 py-1 font-semibold text-[#26334d]">
+              适用范围：{scopeLabel}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {promotionProducts.length ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">待报名商品与实时条件快照</div>
+          {promotionProducts.map((product, index) => {
+            const item = asRecord(product);
+            const productLabel = String(item.offerId ?? item.productId ?? "-");
+            return (
+              <div key={`${String(item.productId)}-${index}`} className="grid gap-2 py-1 sm:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
+                <span className="break-all" title={String(item.name ?? "")}>
+                  {productLabel}{item.categoryKey ? ` · ${String(item.categoryKey)}` : ""}
+                </span>
+                <span>当前价 {String(item.currentPrice ?? "-")}</span>
+                <span>活动价 {String(item.actionPrice ?? "-")}</span>
+                <span>库存 {String(item.stock ?? "-")}</span>
+                <span>{String(item.name ?? "").slice(0, 24)}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
       {suggestions.length ? (
         <div className="mt-3 space-y-2">
           {suggestions.map((suggestion, index) => {
             const item = asRecord(suggestion);
             return (
-              <div key={index} className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm">
+              <div key={index} className="border-l-4 border-[#18a7a0] bg-[#effcf9] p-3 text-sm">
                 <div className="mb-1 flex flex-wrap gap-2">
                   <Badge tone="blue">{fieldLabel(item.field)}</Badge>
                   <Badge tone="gray">{String(item.sourceTag ?? "建议")}</Badge>
@@ -287,11 +429,65 @@ function ActionBubble({
         </div>
       ) : null}
 
+      {isCompetitorBatch ? (
+        <div className="mt-3 border-t border-gray-200 pt-2 text-xs text-gray-700">
+          <div className="mb-2 font-bold text-gray-950">确认后将写入的属性（{attributeChanges.length}项）</div>
+          {attributeChanges.length ? (
+            <div className="max-h-72 divide-y divide-gray-200 overflow-y-auto border border-gray-200 bg-white">
+              {attributeChanges.map((change, index) => (
+                <div key={`${change.offerId}-${change.attributeName}-${index}`} className="grid gap-1 p-2 sm:grid-cols-[140px_1fr_1fr]">
+                  <span className="break-all font-semibold text-gray-950">{change.offerId}</span>
+                  <span>{change.attributeName}{change.required ? "（必填）" : ""}</span>
+                  <span className="font-semibold text-[#075e5a]">写入：{change.suggestedValue}</span>
+                  {change.reasonZh ? <span className="sm:col-span-2 sm:col-start-2">{change.reasonZh}</span> : null}
+                  {change.evidenceUrl ? (
+                    <a className="text-blue-700 underline sm:col-start-3" href={change.evidenceUrl} target="_blank" rel="noreferrer">
+                      查看竞品证据
+                    </a>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="border-l-4 border-red-500 bg-red-50 p-2 text-red-800">修改明细不完整，已禁止执行。</div>
+          )}
+        </div>
+      ) : null}
+
+      {promotionRejected.length ? (
+        <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
+          <div className="mb-1 font-medium text-gray-950">未纳入报名的商品</div>
+          {promotionRejected.map((product, index) => {
+            const item = asRecord(product);
+            return (
+              <div key={`${String(item.productId)}-${index}`} className="grid grid-cols-[1fr_2fr] gap-2 py-1">
+                <span>商品 {String(item.productId ?? "-")}</span>
+                <span>{String(item.reason ?? "-")}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           variant="success"
-          disabled={action.status !== "PENDING_APPROVAL"}
-          onClick={() => onCommand(action.id, "confirm-execute")}
+          disabled={action.status !== "PENDING_APPROVAL" || (isCompetitorBatch && !attributeChanges.length)}
+          onClick={() => {
+            if (
+              isCompetitorBatch &&
+              !window.confirm(`将真实修改 ${attributeChanges.length} 项 Ozon 商品属性，是否继续？`)
+            ) {
+              return;
+            }
+            if (
+              action.type === "PROMOTION_ENROLLMENT" &&
+              !window.confirm("活动报名会真实修改 Ozon 活动商品。确认继续执行？")
+            ) {
+              return;
+            }
+            onCommand(action.id, "confirm-execute");
+          }}
           title="确认并执行"
         >
           <Check className="h-4 w-4" aria-hidden="true" />
@@ -316,7 +512,7 @@ function ActionBubble({
           执行
         </Button>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -334,7 +530,7 @@ function SessionSidebar({
   onNewChat: () => void;
 }) {
   return (
-    <aside className="hidden h-full w-72 shrink-0 flex-col border-l border-gray-200 pl-4 lg:flex">
+    <aside className="hidden h-full w-64 shrink-0 flex-col rounded-2xl border border-white bg-white/75 p-3 shadow-[0_14px_40px_rgba(45,78,128,0.10)] backdrop-blur md:flex">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-950">历史对话</div>
         <Button
@@ -356,10 +552,10 @@ function SessionSidebar({
           onClick={onNewChat}
           disabled={running}
           className={cn(
-            "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
+            "w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
             selectedSessionId === "new"
-              ? "border-blue-300 bg-blue-50 text-blue-950"
-              : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+              ? "border-[#bfd4ff] bg-[#eaf1ff] text-[#245fcf] shadow-[0_6px_16px_rgba(52,120,246,0.10)]"
+              : "border-transparent bg-white/70 text-gray-700 hover:border-[#dce8f5] hover:bg-white",
           )}
         >
           <div className="truncate font-medium">新对话</div>
@@ -373,10 +569,10 @@ function SessionSidebar({
             onClick={() => onSelect(session.id)}
             disabled={running}
             className={cn(
-              "w-full rounded-md border px-3 py-2 text-left text-sm transition-colors",
+              "w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
               selectedSessionId === session.id
-                ? "border-blue-300 bg-blue-50 text-blue-950"
-                : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+                ? "border-[#bfd4ff] bg-[#eaf1ff] text-[#245fcf] shadow-[0_6px_16px_rgba(52,120,246,0.10)]"
+                : "border-transparent bg-white/70 text-gray-700 hover:border-[#dce8f5] hover:bg-white",
             )}
           >
             <div className="truncate font-medium">{session.title ?? session.id}</div>
@@ -428,13 +624,22 @@ export function ContentAgentChat({
           {
             id: "initial-actions",
             role: "assistant" as const,
-            content: "这里有最近还没处理完的内容草稿。",
+            content: "这里有最近还没处理完的 Agent 动作。",
             actions: pendingInitialActions,
           },
         ]
       : []),
   ]);
   const canSubmit = agentConfig.configured && stores.length > 0 && !loadingHistory;
+  const inputStatus = !agentConfig.configured
+    ? "模型未配置，不能发送"
+    : !stores.length
+      ? "未连接店铺，不能发送"
+      : loadingHistory
+        ? "正在加载历史，稍后发送"
+        : running
+          ? "Agent 正在处理"
+          : "已连接，可以发送";
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ block: "end" });
@@ -491,9 +696,8 @@ export function ContentAgentChat({
     setMessages([introMessage]);
   }
 
-  async function submitPrompt(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = prompt.trim();
+  async function sendPrompt(value: string) {
+    const content = value.trim();
     if (!content || running || loadingHistory) return;
     const requestSessionId = selectedSessionId;
 
@@ -551,6 +755,11 @@ export function ContentAgentChat({
     }
   }
 
+  function submitPrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void sendPrompt(prompt);
+  }
+
   async function updateAction(actionId: string, command: "confirm-execute" | "reject" | "execute") {
     try {
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`);
@@ -568,61 +777,64 @@ export function ContentAgentChat({
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-140px)] max-w-6xl gap-4">
-      <main className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-3 flex items-center justify-between gap-3 border-b border-gray-200 pb-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-gray-900 text-white">
-              <Bot className="h-5 w-5" aria-hidden="true" />
+    <div className="flex h-[calc(100vh-136px)] w-full gap-4">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white bg-white/45 shadow-[0_14px_40px_rgba(45,78,128,0.08)]">
+        <div className="flex shrink-0 items-center justify-end gap-2 border-b border-[#e3ebf5] bg-white/65 px-4 py-2 md:px-5">
+          <select
+            aria-label="历史对话"
+            value={selectedSessionId}
+            onChange={(event) => {
+              if (event.target.value === "new") startNewChat();
+              else setSelectedSessionId(event.target.value);
+            }}
+            disabled={running}
+            className="h-9 min-w-0 flex-1 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm text-[#52627b] shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 md:hidden"
+          >
+            <option value="new">新对话</option>
+            {sessionList.map((session) => (
+              <option key={session.id} value={session.id}>
+                {session.title ?? session.id}
+              </option>
+            ))}
+          </select>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={startNewChat}
+            disabled={running}
+            title="新对话"
+            className="md:hidden"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            新对话
+          </Button>
+          {stores.length > 1 ? (
+            <div className="w-48">
+              <Select value={selectedStoreId} onChange={setSelectedStoreId}>
+                {stores.map((store) => (
+                  <option key={store.id} value={store.id}>
+                    {store.name}
+                    {store.isDefault ? " / 默认" : ""}
+                  </option>
+                ))}
+              </Select>
             </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-gray-950">
-                Ozon 内容 Agent
-              </div>
-              <div className="truncate text-xs text-gray-500">
-                普通对话 + 真实店铺工具 + 人工确认
-              </div>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={startNewChat}
-              disabled={running}
-              title="新对话"
-              className="lg:hidden"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-              新对话
-            </Button>
-            {stores.length > 1 ? (
-              <div className="w-48">
-                <Select value={selectedStoreId} onChange={setSelectedStoreId}>
-                  {stores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {store.name}
-                      {store.isDefault ? " / 默认" : ""}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : null}
-            <Badge tone="green">
-              <ShieldCheck className="mr-1 h-3 w-3" aria-hidden="true" />
-              改动需确认
-            </Badge>
-            <Badge tone="blue">读取直接执行</Badge>
-          </div>
+          ) : null}
         </div>
 
+        {shouldShowCommandDeck(messages) ? (
+          <AgentCommandDeck
+            disabled={!canSubmit || running}
+            onRun={(value) => void sendPrompt(value)}
+          />
+        ) : null}
+
         {!agentConfig.configured ? (
-          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+          <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
               <div>
-                <div className="font-semibold">模型未配置，内容 Agent 暂时不能运行</div>
+                <div className="font-semibold">模型未配置，运营 Agent 暂时不能运行</div>
                 <div>{agentConfig.message}</div>
                 <div className="mt-1 text-xs">
                   缺少：{agentConfig.missing.join(", ")}
@@ -632,8 +844,8 @@ export function ContentAgentChat({
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-y-auto pr-1">
-          <div className="space-y-4 pb-4">
+        <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(240,247,255,0.75),rgba(248,251,255,0.35))] px-4 py-4 pr-3 md:px-5">
+          <div className="w-full space-y-4 pb-4">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -644,15 +856,15 @@ export function ContentAgentChat({
               >
                 <div
                   className={cn(
-                    "max-w-[88%] rounded-lg px-4 py-3 text-sm leading-6 shadow-sm",
+                    "max-w-[94%] rounded-2xl px-4 py-3 text-sm leading-6",
                     message.role === "user"
-                      ? "bg-blue-600 text-white"
-                      : "border border-gray-200 bg-white text-gray-800",
+                      ? "rounded-br-md bg-[#3478f6] text-white shadow-[0_10px_24px_rgba(52,120,246,0.18)]"
+                      : "rounded-bl-md border border-white bg-white text-[#35415a] shadow-[0_10px_28px_rgba(49,78,122,0.09)]",
                   )}
                 >
                   <div className="whitespace-pre-wrap break-words">{message.content}</div>
                   {message.role === "assistant" ? (
-                    <DataSources sources={message.dataSources} />
+                    <AgentInsightPanel sources={message.dataSources} />
                   ) : null}
                   {message.actions?.map((action) => (
                     <ActionBubble
@@ -666,7 +878,7 @@ export function ContentAgentChat({
             ))}
             {loadingHistory ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm">
+                <div className="inline-flex items-center gap-2 rounded-xl border border-[#f4dbc9] bg-[#fff7f1] px-4 py-3 text-sm font-semibold text-[#8d4d25] shadow-sm">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   正在加载历史
                 </div>
@@ -674,7 +886,7 @@ export function ContentAgentChat({
             ) : null}
             {running ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600 shadow-sm">
+                <div className="inline-flex items-center gap-2 rounded-xl border border-[#e7dcfa] bg-[#f8f4ff] px-4 py-3 text-sm font-semibold text-[#6c55a6] shadow-sm">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   正在处理
                 </div>
@@ -684,8 +896,9 @@ export function ContentAgentChat({
           </div>
         </div>
 
-        <form onSubmit={submitPrompt} className="border-t border-gray-200 pt-3">
-          <div className="flex items-end gap-2 rounded-lg border border-gray-300 bg-white p-2 shadow-sm focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+        <form onSubmit={submitPrompt} className="border-t border-[#e3ebf5] bg-white/75 p-3 md:px-5">
+          <div className="mb-2 text-xs font-medium text-[#667085]">{inputStatus}</div>
+          <div className="flex w-full items-end gap-2 rounded-2xl border border-[#d8e4f2] bg-white p-2 shadow-[0_10px_30px_rgba(46,80,132,0.10)] focus-within:border-[#9bbcff] focus-within:ring-4 focus-within:ring-[#3478f6]/10">
             <textarea
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -695,15 +908,15 @@ export function ContentAgentChat({
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder="例如：自己店铺现在有多少商品？"
+              placeholder="输入运营任务，例如：诊断低分商品并生成优化方案"
               disabled={!canSubmit}
-              className="min-h-11 max-h-40 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-gray-900 outline-none placeholder:text-gray-400"
+              className="min-h-11 max-h-40 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-gray-900 outline-none placeholder:text-[#9aa6ba]"
               rows={1}
             />
             <Button
               type="submit"
               disabled={running || !canSubmit || !prompt.trim()}
-              className="h-10 w-10 shrink-0 px-0"
+              className="h-10 w-10 shrink-0 rounded-xl border-[#3478f6] bg-[#3478f6] px-0 hover:bg-[#2868df]"
               title="发送"
             >
               {running ? (

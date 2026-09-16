@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProductDetail, ShopProductItem } from "@saas/1688";
 import {
   detailToSourceProductImport,
+  selectNewShopProducts,
   shopProductItemToSourceProductImport,
   shopProductsToSourceShopImport,
 } from "./import-1688";
@@ -18,6 +19,21 @@ const shopItems: ShopProductItem[] = [
     url: "https://detail.1688.com/offer/111.html",
   },
 ];
+
+describe("selectNewShopProducts", () => {
+  it("skips existing products without consuming the collection limit", () => {
+    const products = ["1", "2", "3", "4", "5"].map((offerId) => ({
+      ...shopItems[0]!,
+      offerId,
+    }));
+
+    expect(selectNewShopProducts(products, new Set(["1", "3"]), 3).map((p) => p.offerId)).toEqual([
+      "2",
+      "4",
+      "5",
+    ]);
+  });
+});
 
 describe("shopProductsToSourceShopImport", () => {
   it("映射为 SourceShopImport 合同", () => {

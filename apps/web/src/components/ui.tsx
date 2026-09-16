@@ -14,7 +14,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={cn("rounded-lg border border-gray-200 bg-white p-5 shadow-sm", className)}>
+    <div className={cn("rounded-2xl border border-white bg-white/85 p-5 shadow-[0_8px_24px_rgba(48,78,124,0.07)]", className)}>
       {children}
     </div>
   );
@@ -53,7 +53,7 @@ export function Button({
       disabled={disabled}
       title={title}
       className={cn(
-        "inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-md border px-3 text-sm font-medium transition-colors",
+        "inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3 text-sm font-medium transition-colors",
         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
         variants[variant],
         className,
@@ -85,7 +85,7 @@ export function IconButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded-md border border-gray-300 bg-white text-gray-600 transition-colors",
+        "inline-flex h-9 w-9 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-600 transition-colors",
         "hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
         className,
       )}
@@ -123,7 +123,7 @@ export function Input({
         placeholder={placeholder}
         required={required}
         onChange={(e) => onChange?.(e.target.value)}
-        className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        className="h-9 w-full rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
       />
     </label>
   );
@@ -144,7 +144,7 @@ export function Select({
     <label className="block">
       {label ? <span className="mb-1.5 block text-sm font-medium text-gray-700">{label}</span> : null}
       <select
-        className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        className="h-9 w-full rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm text-gray-900 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -164,9 +164,9 @@ export function PageHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <div className="mb-6 flex flex-col gap-3 border-b border-[#e3ebf5] pb-5 md:flex-row md:items-start md:justify-between">
       <div className="min-w-0">
-        <h1 className="text-2xl font-semibold tracking-normal text-gray-950">{title}</h1>
+        <h1 className="text-2xl font-bold tracking-normal text-[#17223d]">{title}</h1>
         {description ? (
           <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-500">{description}</p>
         ) : null}
@@ -249,14 +249,14 @@ export function MetricCard({
   };
 
   return (
-    <Card className="p-4">
+    <Card className="group relative overflow-hidden p-4 transition-all hover:-translate-y-0.5 hover:shadow-[0_12px_30px_rgba(48,78,124,0.10)]">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-gray-500">{title}</p>
-          <p className="mt-2 text-2xl font-semibold text-gray-950">{value}</p>
+          <p className="text-sm font-semibold text-[#687790]">{title}</p>
+          <p className="mt-2 text-3xl font-bold text-[#17223d]">{value}</p>
           {description ? <p className="mt-1 text-xs text-gray-500">{description}</p> : null}
         </div>
-        {icon ? <div className={cn("rounded-md p-2", tones[tone])}>{icon}</div> : null}
+        {icon ? <div className={cn("rounded-xl p-2.5", tones[tone])}>{icon}</div> : null}
       </div>
     </Card>
   );
@@ -272,7 +272,7 @@ export function EmptyState({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-dashed border-gray-300 bg-white px-4 py-10 text-center">
+    <div className="rounded-2xl border border-dashed border-[#cbd9e9] bg-white/80 px-4 py-10 text-center shadow-[0_8px_24px_rgba(48,78,124,0.06)]">
       <h3 className="text-sm font-semibold text-gray-950">{title}</h3>
       {description ? <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-gray-500">{description}</p> : null}
       {children ? <div className="mt-4 flex justify-center gap-2">{children}</div> : null}
@@ -288,9 +288,9 @@ export function Table({
   children: React.ReactNode;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+    <div className="overflow-x-auto rounded-2xl border border-white bg-white/90 shadow-[0_8px_24px_rgba(48,78,124,0.07)]">
       <table className="w-full text-left text-sm">
-        <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase tracking-normal text-gray-500">
+        <thead className="border-b border-[#e4ebf4] bg-[#f6f9fd] text-xs uppercase tracking-normal text-gray-500">
           <tr>
             {head.map((h) => (
               <th key={h} className="px-4 py-3 font-semibold">
@@ -308,8 +308,14 @@ export function Table({
 export function ProgressBar({ value }: { value: number }) {
   const safe = Math.max(0, Math.min(100, value));
   return (
-    <div className="h-2 overflow-hidden rounded-full bg-gray-100">
-      <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${safe}%` }} />
+    <div
+      className="h-2 overflow-hidden rounded-full bg-[#e8eef6]"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={safe}
+    >
+      <div className="h-full rounded-full bg-[#3478f6] transition-all" style={{ width: `${safe}%` }} />
     </div>
   );
 }

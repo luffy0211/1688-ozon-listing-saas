@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { decodeHtml, extractJsonArray, fetchDetailImages } from "./product";
+import { clean1688Title, decodeHtml, extractJsonArray, fetchDetailImages } from "./product";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -10,6 +10,13 @@ describe("decodeHtml", () => {
     expect(decodeHtml("黑色&gt;XL")).toBe("黑色>XL");
     expect(decodeHtml("A &amp; B &lt;x&gt;")).toBe("A & B <x>");
     expect(decodeHtml("普通文本")).toBe("普通文本");
+  });
+});
+
+describe("clean1688Title", () => {
+  it("丢弃 1688 页面模块标题", () => {
+    expect(clean1688Title("大图轮播", "1688 商品 123")).toBe("1688 商品 123");
+    expect(clean1688Title("夏季碎花连衣裙 - 阿里巴巴")).toBe("夏季碎花连衣裙");
   });
 });
 

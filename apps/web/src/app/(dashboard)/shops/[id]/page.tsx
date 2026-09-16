@@ -81,11 +81,11 @@ export default async function ShopDetailPage(
   return (
     <div className="space-y-6">
       <PageHeader title="选品列表" description={shop.shopName}>
-        <Link href="/shops" className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href="/shops" className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           返回采集选品
         </Link>
         {shop.shopUrl ? (
-          <a className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href={shop.shopUrl} target="_blank">
+          <a className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href={shop.shopUrl} target="_blank">
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
             打开 1688 店铺
           </a>

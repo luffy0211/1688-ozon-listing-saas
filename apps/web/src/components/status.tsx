@@ -13,8 +13,8 @@ const labels: Record<string, string> = {
   SUCCEEDED: "已完成",
   FAILED: "失败",
   SKIPPED: "已跳过",
-  DRAFT: "草稿",
-  COMPILED: "待发布",
+  DRAFT: "未完成",
+  COMPILED: "待提交",
   SUBMITTED: "已提交",
 };
 
@@ -60,7 +60,8 @@ export function stepLabel(step: string) {
     create_xiangji_pdp_preview: "生成详情图预览",
     create_xiangji_pdp_images: "生成详情图",
     qc_check: "上架前检查",
-    compile_ozon_payload: "生成 Ozon 草稿",
+    compile_ozon_payload: "生成 Ozon 数据",
+    submit_ozon: "提交 Ozon",
   };
   return labelsByStep[step] ?? step;
 }

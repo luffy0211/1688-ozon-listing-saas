@@ -32,7 +32,7 @@ export default async function JobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="任务记录"
-        description="查看草稿生成进度、失败原因和历史处理结果。"
+        description="查看自动上架进度、失败原因和历史处理结果。"
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -42,9 +42,9 @@ export default async function JobsPage() {
       </div>
 
       {jobs.length === 0 ? (
-        <EmptyState title="暂无任务记录" description="在商品池点击生成草稿后，处理记录会出现在这里。" />
+        <EmptyState title="暂无任务记录" description="在商品池点击立即上架后，处理记录会出现在这里。" />
       ) : (
-        <Table head={["任务", "商品", "店铺", "状态", "当前处理", "草稿", "创建时间"]}>
+        <Table head={["任务", "商品", "店铺", "状态", "当前处理", "发布", "创建时间"]}>
           {jobs.map((job) => {
             const activeStep = job.steps.find((step) => step.status === "RUNNING")
               ?? [...job.steps].reverse().find((step) => step.status === "SUCCEEDED" || step.status === "FAILED")

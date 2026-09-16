@@ -46,7 +46,7 @@ export default async function AnalyticsPage(
   const searchParams = await props.searchParams;
   const user = await requireUser();
   if (!user.tenantId) {
-    return <PageHeader title="数据看板" description="管理员账号请进入平台管理。" />;
+    return <PageHeader title="BI 看板" description="管理员账号请进入平台管理。" />;
   }
 
   const view = await getOzonAnalyticsView({
@@ -61,8 +61,8 @@ export default async function AnalyticsPage(
   return (
     <div className="space-y-6">
       <PageHeader
-        title="数据看板"
-        description="把 Ozon 店铺数据和本系统上架流程放在一个页面，优先看商品、库存、订单和待处理风险。"
+        title="BI 看板"
+        description="看 Ozon 销售、库存风险和本系统上架转化。"
       >
         <OzonAnalyticsControls storeId={view.store?.id ?? null} stores={view.stores} />
       </PageHeader>
@@ -71,7 +71,7 @@ export default async function AnalyticsPage(
         <EmptyState title="还没有 Ozon 店铺" description="先连接 Ozon 店铺，数据看板才能读取商品、库存和订单数据。">
           <Link
             href="/stores"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
+            className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#3478f6] px-3 text-sm font-medium text-white shadow-[0_8px_20px_rgba(52,120,246,0.18)] hover:bg-[#2868df]"
           >
             <Store className="h-4 w-4" aria-hidden="true" />
             连接 Ozon 店铺
@@ -127,7 +127,7 @@ export default async function AnalyticsPage(
                   <div key={item.date} className="grid grid-cols-[88px_minmax(0,1fr)_56px] items-center gap-3 text-sm">
                     <div className="text-gray-500">{item.date.slice(5)}</div>
                     <div className="h-3 overflow-hidden rounded-full bg-gray-100">
-                      <div className="h-full bg-blue-600" style={{ width: `${(total / orderMax) * 100}%` }} />
+                    <div className="h-full bg-[#3478f6]" style={{ width: `${(total / orderMax) * 100}%` }} />
                     </div>
                     <div className="text-right font-medium text-gray-900">{total}</div>
                   </div>
@@ -166,6 +166,28 @@ export default async function AnalyticsPage(
       </div>
 
       <Card>
+        <SectionHeader title="近 7 天热销商品" description="按 Ozon 订单商品数量排序，优先看能补货和能复投的款。" />
+        {snapshot?.topProducts.length ? (
+          <Table head={["商品", "销量", "销售额"]}>
+            {snapshot.topProducts.map((product) => (
+              <tr key={product.offerId} className="hover:bg-gray-50">
+                <td className="px-4 py-3">
+                  <div className="min-w-[280px]">
+                    <div className="line-clamp-2 font-medium text-gray-950">{product.name ?? product.offerId}</div>
+                    <div className="text-xs text-gray-500">{product.offerId}</div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 font-semibold text-gray-950">{formatNumber(product.quantity)}</td>
+                <td className="px-4 py-3">{formatRub(product.revenueRub)}</td>
+              </tr>
+            ))}
+          </Table>
+        ) : (
+          <EmptyState title="暂无热销商品" description="同步到近 7 天订单后会显示商品销量排行。" />
+        )}
+      </Card>
+
+      <Card>
         <SectionHeader title="库存风险商品" description="库存小于等于 5 的 Ozon 商品，优先补货或下架处理。" />
         {riskyProducts.length === 0 ? (
           <EmptyState title="暂无库存风险" description="没有低库存商品，或还没有同步商品库存。" />
@@ -176,9 +198,9 @@ export default async function AnalyticsPage(
                 <td className="px-4 py-3">
                   <div className="flex min-w-[280px] items-center gap-3">
                     {product.imageUrl ? (
-                      <img src={product.imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" />
+                      <img src={product.imageUrl} alt="" className="h-14 w-14 rounded-xl border border-[#e1eaf4] bg-white object-contain" />
                     ) : (
-                      <div className="h-12 w-12 rounded-md bg-gray-100" />
+                      <div className="h-12 w-12 rounded-xl bg-[#f2f6fb]" />
                     )}
                     <div className="min-w-0">
                       <div className="line-clamp-2 font-medium text-gray-950">{product.name ?? product.offerId}</div>

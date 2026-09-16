@@ -2,8 +2,8 @@ import Link from "next/link";
 import { ExternalLink, Images, PackageCheck } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { displayProductImageUrl } from "@/lib/product-image";
 import { Badge, Card, EmptyState, MetricCard, PageHeader, ProgressBar, SectionHeader, Table } from "@/components/ui";
-import { PublishDraftButton } from "@/components/api-actions";
 import { RunButton } from "@/components/run-button";
 import { StatusBadge, stepLabel } from "@/components/status";
 
@@ -43,23 +43,23 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
   return (
     <div className="space-y-6">
       <PageHeader title={product.title ?? product.offerId} description={`Offer ID: ${product.offerId}`}>
-        <Link href="/products" className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href="/products" className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           返回商品池
         </Link>
         {product.sourceUrl ? (
-          <a className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href={product.sourceUrl} target="_blank">
+          <a className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href={product.sourceUrl} target="_blank">
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
             打开 1688
           </a>
         ) : null}
-        {latestDraft?.status === "COMPILED" ? <PublishDraftButton draftId={latestDraft.id} /> : <RunButton productId={product.id} />}
+        {latestDraft?.status === "SUBMITTED" ? null : <RunButton productId={product.id} />}
       </PageHeader>
 
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard title="来源店铺" value={product.shop?.shopName ?? "-"} description={product.capturedAt?.toLocaleString("zh-CN") ?? "未记录采集时间"} />
-        <MetricCard title="图片" value={product.productAssets.length} description="可用于草稿的图片资产" icon={<Images className="h-4 w-4" />} tone="violet" />
-        <MetricCard title="任务状态" value={latestJob ? latestJob.status : "-"} description={latestJob ? `${progress}% 完成` : "尚未生成草稿"} tone={latestJob?.status === "FAILED" ? "red" : "blue"} />
-        <MetricCard title="草稿状态" value={latestDraft ? latestDraft.status : "-"} description={latestDraft?.priceRub ? `${latestDraft.priceRub.toString()} RUB` : "暂无售价"} icon={<PackageCheck className="h-4 w-4" />} tone={latestDraft?.status === "COMPILED" ? "green" : "gray"} />
+        <MetricCard title="图片" value={product.productAssets.length} description="可用于上架的图片资产" icon={<Images className="h-4 w-4" />} tone="violet" />
+        <MetricCard title="任务状态" value={latestJob ? latestJob.status : "-"} description={latestJob ? `${progress}% 完成` : "尚未上架"} tone={latestJob?.status === "FAILED" ? "red" : "blue"} />
+        <MetricCard title="发布状态" value={latestDraft ? latestDraft.status : "-"} description={latestDraft?.priceRub ? `${latestDraft.priceRub.toString()} RUB` : "暂无售价"} icon={<PackageCheck className="h-4 w-4" />} tone={latestDraft?.status === "COMPILED" ? "green" : "gray"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -74,7 +74,7 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
                   const src = asset.publicUrl ?? asset.sourceUrl;
                   return src ? (
                     <a key={asset.id} href={src} target="_blank" className="group">
-                      <img src={src} alt="" className="aspect-square w-full rounded-md border object-cover transition-opacity group-hover:opacity-80" />
+                      <img src={displayProductImageUrl(src)} alt="" className="aspect-square w-full rounded-md border bg-white object-contain transition-opacity group-hover:opacity-80" />
                       <div className="mt-1 truncate text-xs text-gray-500">{asset.kind}</div>
                     </a>
                   ) : null;
@@ -84,11 +84,11 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
           </Card>
 
           <Card>
-            <SectionHeader title="Ozon 草稿" description="待发布草稿可以直接确认上架；其他状态先查看任务记录。" />
+            <SectionHeader title="Ozon 提交记录" description="系统生成 Ozon 数据后会自动提交；异常时先查看任务记录。" />
             {product.ozonDrafts.length === 0 ? (
-              <EmptyState title="还没有草稿" description="点击生成草稿后，系统会翻译、定价并生成 Ozon 提交数据。" />
+              <EmptyState title="还没有提交记录" description="点击立即上架后，系统会翻译、定价、生成 Ozon 数据并提交。" />
             ) : (
-              <Table head={["店铺", "状态", "俄文标题", "价格", "发布记录", "操作"]}>
+              <Table head={["店铺", "状态", "俄文标题", "价格", "发布记录"]}>
                 {product.ozonDrafts.map((draft) => (
                   <tr key={draft.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">{draft.store.name}</td>
@@ -96,9 +96,6 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
                     <td className="max-w-md px-4 py-3">{draft.titleRu ?? "-"}</td>
                     <td className="px-4 py-3">{draft.priceRub ? `${draft.priceRub.toString()} RUB` : "-"}</td>
                     <td className="px-4 py-3">{draft.publishRuns.length}</td>
-                    <td className="px-4 py-3">
-                      {draft.status === "COMPILED" ? <PublishDraftButton draftId={draft.id} /> : "-"}
-                    </td>
                   </tr>
                 ))}
               </Table>
@@ -106,7 +103,7 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
           </Card>
 
           <Card>
-            <SectionHeader title="历史任务" description="查看这个商品生成草稿的历史记录。" />
+            <SectionHeader title="历史任务" description="查看这个商品自动上架的历史记录。" />
             {product.listingJobs.length === 0 ? (
               <EmptyState title="暂无任务记录" />
             ) : (
@@ -176,7 +173,7 @@ export default async function ProductDetailPage(props: { params: Promise<{ id: s
             </dl>
           </Card>
 
-          <details className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <details className="rounded-2xl border border-white bg-white/85 p-5 shadow-[0_8px_24px_rgba(48,78,124,0.07)]">
             <summary className="cursor-pointer text-sm font-semibold text-gray-950">调试数据</summary>
             <pre className="mt-4 max-h-96 overflow-auto rounded-md bg-gray-950 p-4 text-xs leading-5 text-gray-100">
               {jsonPreview(product.productFacts[0]?.normalizedJson)}

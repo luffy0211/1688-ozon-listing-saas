@@ -52,11 +52,32 @@ export function decodeHtml(s: string): string {
     .replace(/&#39;/g, "'");
 }
 
+const badTitles = new Set(["大图轮播", "视频播放"]);
+
+export function clean1688Title(title: string, fallback = ""): string {
+  const cleaned = decodeHtml(title).replace(/\s+/g, " ").trim();
+  if (!cleaned || badTitles.has(cleaned)) return fallback;
+  return cleaned
+    .replace(/\s*[-_|｜]\s*(阿里巴巴|1688).*$/i, "")
+    .trim()
+    .slice(0, 160);
+}
+
+function extractOfferTitle(html: string): string {
+  return clean1688Title(
+    firstMatch(html, /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) ||
+      firstMatch(html, /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:title["']/i) ||
+      firstMatch(html, /"subject"\s*:\s*"([^"]{2,160})"/i) ||
+      firstMatch(html, /"offerTitle"\s*:\s*"([^"]{2,160})"/i) ||
+      firstMatch(html, /<title[^>]*>([^<]{2,220})<\/title>/i),
+  );
+}
+
 /** 直调 PC 详情页 HTML，提取完整属性 + 商家信息。 */
 async function fetchOfferPage(
   cookies: CookieRecord,
   offerId: string,
-): Promise<{ properties: Array<{ name: string; value: string }>; shopId: string; shopUrl: string; sellerLoginId: string; detailUrl: string; leafCategoryId?: number }> {
+): Promise<{ title: string; properties: Array<{ name: string; value: string }>; shopId: string; shopUrl: string; sellerLoginId: string; detailUrl: string; leafCategoryId?: number }> {
   const url = `https://detail.1688.com/offer/${offerId}.html`;
   const res = await fetch(url, {
     headers: {
@@ -88,6 +109,7 @@ async function fetchOfferPage(
   }
 
   return {
+    title: extractOfferTitle(html),
     properties,
     shopId: firstMatch(html, /"sellerMemberId":"([^"]+)"/),
     shopUrl: firstMatch(html, /"winportUrl":"([^"]+)"/),
@@ -246,6 +268,7 @@ export async function fetchProductDetail(
       return { skus: [], skuImages: {}, mainImages: [], price: "", moq: "", sales: "", stock: "", shopName: "", error: e as Error };
     }),
     fetchOfferPage(cookies, offerId).catch(() => ({
+      title: "",
       properties: [],
       shopId: "",
       shopUrl: "",
@@ -267,7 +290,7 @@ export async function fetchProductDetail(
 
   return {
     offerId,
-    title: titleFallback,
+    title: page.title || clean1688Title(titleFallback, `1688 商品 ${offerId}`),
     sourceUrl: `https://detail.1688.com/offer/${offerId}.html`,
     properties: page.properties,
     skus,

@@ -100,7 +100,37 @@ function summarizeOrders(
     cancelledOrderCount,
     grossRevenueRub: postings.reduce((sum, p) => sum + sumPostingRevenue(p), 0),
     dailyOrders: buildDailyOrders(since, to, fbsPostings, fboPostings),
+    topProducts: buildTopProducts(postings),
   };
+}
+
+function buildTopProducts(postings: OzonPostingItem[]): OzonOrderSummary["topProducts"] {
+  const byOffer = new Map<string, { offerId: string; name: string | null; quantity: number; revenueRub: number }>();
+  for (const posting of postings) {
+    const financeProducts = posting.financial_data?.products ?? [];
+    for (const [index, product] of (posting.products ?? []).entries()) {
+      const finance = financeProducts[index];
+      const offerId = product.offer_id ?? finance?.offer_id;
+      if (!offerId) continue;
+      const quantity = product.quantity ?? finance?.quantity ?? 1;
+      const revenueRub = toMoney(finance?.payout) || toMoney(finance?.price || product.price) * quantity;
+      const current = byOffer.get(offerId) ?? {
+        offerId,
+        name: product.name ?? finance?.name ?? null,
+        quantity: 0,
+        revenueRub: 0,
+      };
+      byOffer.set(offerId, {
+        ...current,
+        name: current.name ?? product.name ?? finance?.name ?? null,
+        quantity: current.quantity + quantity,
+        revenueRub: current.revenueRub + revenueRub,
+      });
+    }
+  }
+  return [...byOffer.values()]
+    .sort((a, b) => b.quantity - a.quantity || b.revenueRub - a.revenueRub)
+    .slice(0, 10);
 }
 
 function productKey(item: {
@@ -147,6 +177,11 @@ function normalizeProducts(
         reservedStock,
         priceRub: detail?.price ? toMoney(detail.price) : null,
         imageUrl: firstImage(detail?.primary_image) ?? firstImage(detail?.images) ?? null,
+        publicSku: detail?.sources?.find((source) => source.sku)?.sku
+          ? String(detail.sources.find((source) => source.sku)!.sku)
+          : null,
+        descriptionCategoryId: detail?.description_category_id ?? null,
+        typeId: detail?.type_id ?? null,
       };
     })
     .sort((a, b) => a.stock - b.stock);
@@ -252,6 +287,7 @@ export async function getOzonAnalyticsSummary(params: {
     cancelledOrderCount: orderSummary.cancelledOrderCount,
     grossRevenueRub: orderSummary.grossRevenueRub,
     dailyOrders: orderSummary.dailyOrders,
+    topProducts: orderSummary.topProducts,
     products,
     warnings,
   };

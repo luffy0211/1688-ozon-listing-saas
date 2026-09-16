@@ -6,6 +6,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
+import { env } from "./env";
 
 export type Role = "owner" | "operator" | "admin";
 
@@ -17,9 +18,7 @@ export type SessionPayload = {
 };
 
 const SESSION_COOKIE = "session";
-const secret = new TextEncoder().encode(
-  process.env.SESSION_SECRET ?? "dev-insecure-session-secret-change-me",
-);
+const secret = new TextEncoder().encode(env.sessionSecret);
 
 export async function signSession(payload: SessionPayload): Promise<string> {
   return new SignJWT({ ...payload })

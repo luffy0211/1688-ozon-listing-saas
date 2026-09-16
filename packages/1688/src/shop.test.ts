@@ -125,4 +125,21 @@ describe("fetchShopProductsFromPages", () => {
       url: "https://detail.1688.com/offer/1035456382550.html",
     });
   });
+
+  it("忽略链接附近的轮播模块标题", async () => {
+    mockFetchOnce(`
+      <html>
+        <div title="大图轮播">
+          <a href="https://detail.1688.com/offer/1035456382550.html">商品</a>
+        </div>
+      </html>
+    `);
+
+    const items = await fetchShopProductsFromPages(cookies, "https://shop039459ce98570.1688.com", 10);
+
+    expect(items[0]).toMatchObject({
+      offerId: "1035456382550",
+      title: "1688 商品 1035456382550",
+    });
+  });
 });

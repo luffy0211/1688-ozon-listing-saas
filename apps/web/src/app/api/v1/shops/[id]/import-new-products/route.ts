@@ -51,6 +51,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       const result = await importProduct(
         tenantId,
         detailToSourceProductImport(detail),
+        { skipExisting: true },
       );
       await prisma.shopProductSnapshot.update({
         where: { id: snapshot.id },

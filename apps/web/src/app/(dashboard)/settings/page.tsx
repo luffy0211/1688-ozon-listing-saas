@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { KeyRound, Percent, ShieldCheck, Store, Ticket, WandSparkles } from "lucide-react";
+import { Coins, KeyRound, Percent, ShieldCheck, Store, Ticket, WandSparkles } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
 import { Badge, Card, PageHeader, ProgressBar, SectionHeader } from "@/components/ui";
@@ -91,6 +91,12 @@ export default async function SettingsPage() {
               description: "查看租户、用户、店铺、商品和任务数量。",
               icon: ShieldCheck,
             },
+            {
+              href: "/admin/credits",
+              title: "积分管理",
+              description: "给租户加积分、扣积分，并查看积分流水。",
+              icon: Coins,
+            },
           ],
         },
       ]
@@ -102,7 +108,7 @@ export default async function SettingsPage() {
         title="设置"
         description="集中维护账号、规则和团队配置。日常操作请回到工作台、采集选品、商品池和待发布页面。"
       >
-        <Link className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href="/dashboard">
+        <Link className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href="/dashboard">
           返回工作台
         </Link>
       </PageHeader>
@@ -119,7 +125,7 @@ export default async function SettingsPage() {
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             {checks.map((item) => (
-              <div key={item.label} className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2">
+              <div key={item.label} className="flex items-center justify-between rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] px-3 py-2">
                 <span className="text-sm font-medium text-gray-700">{item.label}</span>
                 <Badge tone={item.ready ? "green" : "amber"}>{item.ready ? "已完成" : "待设置"}</Badge>
               </div>
@@ -136,9 +142,9 @@ export default async function SettingsPage() {
               const Icon = item.icon;
               return (
                 <Link key={item.href} href={item.href} className="group">
-                  <Card className="h-full transition-shadow group-hover:shadow-md">
+                  <Card className="h-full transition-all group-hover:-translate-y-0.5 group-hover:shadow-[0_12px_30px_rgba(48,78,124,0.10)]">
                     <div className="flex items-start gap-3">
-                      <div className="rounded-md bg-blue-50 p-2 text-blue-700">
+                      <div className="rounded-xl bg-[#eaf1ff] p-2.5 text-[#3478f6]">
                         <Icon className="h-4 w-4" aria-hidden="true" />
                       </div>
                       <div>

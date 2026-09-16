@@ -89,6 +89,16 @@ beforeEach(() => {
 });
 
 describe("importProduct", () => {
+  it("skips existing products when requested", async () => {
+    const result = await importProduct("tenant-1", input, { skipExisting: true });
+
+    expect(result).toEqual({ productId: "product-1", isNew: false, skipped: true });
+    expect(prisma.sourceShop.update).not.toHaveBeenCalled();
+    expect(prisma.sourceProduct.update).not.toHaveBeenCalled();
+    expect(prisma.productFact.update).not.toHaveBeenCalled();
+    expect(prisma.productAsset.deleteMany).not.toHaveBeenCalled();
+  });
+
   it("refreshes existing product data and replaces only 1688 source assets", async () => {
     const result = await importProduct("tenant-1", input);
 
@@ -166,5 +176,69 @@ describe("importProduct", () => {
 
     expect(prisma.productAsset.deleteMany).toHaveBeenCalled();
     expect(prisma.productAsset.createMany).not.toHaveBeenCalled();
+  });
+
+  it("filters gifs and videos before storing usable product media", async () => {
+    await importProduct("tenant-1", {
+      ...input,
+      mainImages: [
+        "https://cbu01.alicdn.com/main.jpg",
+        "https://cbu01.alicdn.com/animated.gif",
+        "https://cbu01.alicdn.com/video/cover.jpg",
+      ],
+      detailImages: [
+        "https://cbu01.alicdn.com/detail.png?x=1",
+        "https://cbu01.alicdn.com/detail.mp4",
+      ],
+      skus: [
+        { ...input.skus[0]!, imageUrl: "https://cbu01.alicdn.com/sku.webp" },
+        { ...input.skus[1]!, imageUrl: "https://cbu01.alicdn.com/sku.gif?x=1" },
+      ],
+    });
+
+    expect(prisma.productFact.update).toHaveBeenCalledWith({
+      where: { id: "fact-1" },
+      data: {
+        normalizedJson: expect.objectContaining({
+          mainImages: ["https://cbu01.alicdn.com/main.jpg"],
+          detailImages: ["https://cbu01.alicdn.com/detail.png?x=1"],
+          skus: expect.arrayContaining([
+            expect.objectContaining({
+              skuId: "sku-1",
+              imageUrl: "https://cbu01.alicdn.com/sku.webp",
+            }),
+            expect.objectContaining({
+              skuId: "sku-2",
+              imageUrl: undefined,
+            }),
+          ]),
+        }),
+      },
+    });
+    expect(prisma.productAsset.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          tenantId: "tenant-1",
+          productId: "product-1",
+          kind: "main_image",
+          sourceUrl: "https://cbu01.alicdn.com/main.jpg",
+          sortOrder: 0,
+        },
+        {
+          tenantId: "tenant-1",
+          productId: "product-1",
+          kind: "detail_image",
+          sourceUrl: "https://cbu01.alicdn.com/detail.png?x=1",
+          sortOrder: 0,
+        },
+        {
+          tenantId: "tenant-1",
+          productId: "product-1",
+          kind: "sku_image",
+          sourceUrl: "https://cbu01.alicdn.com/sku.webp",
+          sortOrder: 0,
+        },
+      ],
+    });
   });
 });

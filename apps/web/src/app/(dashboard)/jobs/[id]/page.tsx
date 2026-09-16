@@ -33,11 +33,11 @@ export default async function JobDetailPage(props: { params: Promise<{ id: strin
   return (
     <div className="space-y-6">
       <PageHeader title="任务详情" description={job.product.title ?? job.product.offerId}>
-        <Link href="/jobs" className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href="/jobs" className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           任务记录
         </Link>
-        <Link href={`/products/${job.productId}`} className="inline-flex h-9 items-center gap-2 rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+        <Link href={`/products/${job.productId}`} className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]">
           <PackageSearch className="h-4 w-4" aria-hidden="true" />
           商品详情
         </Link>

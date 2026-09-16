@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PackageCheck } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
+import { preferredProductImageUrl } from "@/lib/product-image";
 import { EmptyState, MetricCard, PageHeader, Table } from "@/components/ui";
 import { PublishDraftButton } from "@/components/api-actions";
 import { StatusBadge } from "@/components/status";
@@ -24,7 +25,7 @@ export default async function DraftsPage() {
         product: {
           include: {
             shop: true,
-            productAssets: { orderBy: [{ kind: "asc" }, { sortOrder: "asc" }], take: 1 },
+            productAssets: { orderBy: [{ sortOrder: "asc" }] },
           },
         },
         store: true,
@@ -47,7 +48,7 @@ export default async function DraftsPage() {
         title="待发布"
         description="集中检查已经生成的 Ozon 草稿；只有待发布状态的草稿会显示确认上架按钮。"
       >
-        <Link className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50" href="/products">
+        <Link className="inline-flex h-9 items-center rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]" href="/products">
           返回商品池
         </Link>
       </PageHeader>
@@ -63,13 +64,13 @@ export default async function DraftsPage() {
       ) : (
         <Table head={["商品", "来源店铺", "Ozon 店铺", "状态", "价格", "最后发布", "操作"]}>
           {sortedDrafts.map((draft) => {
-            const imageUrl = draft.product.productAssets[0]?.publicUrl ?? draft.product.productAssets[0]?.sourceUrl ?? null;
+            const imageUrl = preferredProductImageUrl(draft.product.productAssets);
             const latestRun = draft.publishRuns[0];
             return (
               <tr key={draft.id} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
                   <div className="flex min-w-[320px] items-center gap-3">
-                    {imageUrl ? <img src={imageUrl} alt="" className="h-12 w-12 rounded-md object-cover" /> : <div className="h-12 w-12 rounded-md bg-gray-100" />}
+                    {imageUrl ? <img src={imageUrl} alt="" className="h-14 w-14 rounded-md border bg-white object-contain" /> : <div className="h-14 w-14 rounded-md bg-gray-100" />}
                     <div className="min-w-0">
                       <Link href={`/products/${draft.productId}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
                         {draft.titleRu ?? draft.product.title ?? draft.product.offerId}

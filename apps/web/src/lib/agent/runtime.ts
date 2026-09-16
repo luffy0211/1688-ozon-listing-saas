@@ -25,16 +25,56 @@ const actionTypeSchema = z.enum([
 ]);
 
 const riskLevelSchema = z.enum(["LOW", "MEDIUM", "HIGH"]);
+const attributeValueSchema = z.object({
+  value: z.string().nullable(),
+  dictionaryValueId: z.number().nullable(),
+  dictionary_value_id: z.number().nullable(),
+});
+const attributeSchema = z.object({
+  id: z.number().nullable(),
+  values: z.array(attributeValueSchema).nullable(),
+});
+const payloadItemSchema = z.object({
+  type: actionTypeSchema.nullable(),
+  offerId: z.string().nullable(),
+  productId: z.string().nullable(),
+  proposedPriceRub: z.number().nullable(),
+  stock: z.number().nullable(),
+  warehouseId: z.number().nullable(),
+  images: z.array(z.string()).nullable(),
+  attributes: z.array(attributeSchema).nullable(),
+});
+const payloadSchema = z.object({
+  draftId: z.string().nullable(),
+  offerId: z.string().nullable(),
+  productId: z.string().nullable(),
+  currentPriceRub: z.number().nullable(),
+  proposedPriceRub: z.number().nullable(),
+  oldPriceRub: z.string().nullable(),
+  vat: z.string().nullable(),
+  costRub: z.number().nullable(),
+  purchaseCostCny: z.number().nullable(),
+  cnyToRub: z.number().nullable(),
+  commissionRate: z.number().nullable(),
+  stock: z.number().nullable(),
+  warehouseId: z.number().nullable(),
+  quantSize: z.number().nullable(),
+  images: z.array(z.string()).nullable(),
+  images360: z.array(z.string()).nullable(),
+  colorImage: z.string().nullable(),
+  attributes: z.array(attributeSchema).nullable(),
+  items: z.array(payloadItemSchema).nullable(),
+});
 
 const actionSchema = z.object({
   type: actionTypeSchema,
   title: z.string().min(1).max(240),
   rationale: z.string().min(1).max(2000),
-  riskLevel: riskLevelSchema.optional(),
-  storeId: z.string().nullable().optional(),
-  offerId: z.string().nullable().optional(),
-  productId: z.string().nullable().optional(),
-  payload: z.record(z.string(), z.unknown()).optional(),
+  riskLevel: riskLevelSchema.nullable(),
+  storeId: z.string().nullable(),
+  offerId: z.string().nullable(),
+  productId: z.string().nullable(),
+  payload: payloadSchema.nullable(),
 });
 
 function titleFromPrompt(prompt: string) {
@@ -380,8 +420,8 @@ export async function runOzonOpsAgent(params: {
       description:
         "Read a sanitized Ozon operations snapshot for the current tenant. It never returns API keys, cookies, or raw secrets.",
       parameters: z.object({
-        storeId: z.string().nullable().optional(),
-        refreshOzonData: z.boolean().optional(),
+        storeId: z.string().nullable(),
+        refreshOzonData: z.boolean().nullable(),
       }),
       execute: async ({ storeId, refreshOzonData }) =>
         getAgentStoreSnapshot({
@@ -408,8 +448,8 @@ export async function runOzonOpsAgent(params: {
           actions: actions.map((action) => ({
             ...action,
             type: action.type as AgentActionType,
-            riskLevel: action.riskLevel as AgentRiskLevel | undefined,
-            payload: action.payload,
+            riskLevel: (action.riskLevel ?? undefined) as AgentRiskLevel | undefined,
+            payload: action.payload ?? undefined,
           })),
         });
         return {

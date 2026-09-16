@@ -9,6 +9,16 @@ function num(v: string | number | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+export function selectNewShopProducts<T extends { offerId: string }>(
+  products: T[],
+  existingOfferIds: Set<string>,
+  limit: number,
+): T[] {
+  return products
+    .filter((product) => !existingOfferIds.has(product.offerId))
+    .slice(0, limit);
+}
+
 /** 店铺商品列表 → SourceShopImport 合同（复用 importShop 落库 + 新品判定）。 */
 export function shopProductsToSourceShopImport(
   shopUrl: string,

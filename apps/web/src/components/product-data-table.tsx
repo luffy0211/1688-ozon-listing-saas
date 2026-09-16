@@ -11,8 +11,7 @@ import {
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, Play, Search } from "lucide-react";
-import { PublishDraftButton } from "./api-actions";
+import { ArrowUpDown, Eye, Play, Search } from "lucide-react";
 import { RunButton } from "./run-button";
 import { StatusBadge } from "./status";
 import { Button, EmptyState, Select, cn } from "./ui";
@@ -35,7 +34,11 @@ export type ProductTableRow = {
 };
 
 async function postRun(productId: string) {
-  const res = await fetch(`/api/v1/products/${productId}/run`, { method: "POST" });
+  const res = await fetch(`/api/v1/products/${productId}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ autoPublish: true }),
+  });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error?.message ?? "启动失败");
   return json.data?.jobId as string | undefined;
@@ -95,9 +98,9 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           return (
             <div className="flex min-w-[320px] items-center gap-3">
               {item.imageUrl ? (
-                <img src={item.imageUrl} alt="" className="h-14 w-14 rounded-md border object-cover" />
+                <img src={item.imageUrl} alt="" className="h-16 w-16 rounded-xl border border-[#e1eaf4] bg-white object-contain" />
               ) : (
-                <div className="h-14 w-14 rounded-md border bg-gray-100" />
+                <div className="h-16 w-16 rounded-xl border border-[#e1eaf4] bg-[#f2f6fb]" />
               )}
               <div className="min-w-0">
                 <Link href={`/products/${item.id}`} className="line-clamp-2 font-medium text-gray-950 hover:text-blue-700">
@@ -146,7 +149,7 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
       },
       {
         id: "draft",
-        header: "草稿",
+        header: "发布",
         cell: ({ row }) => <StatusBadge status={row.original.latestDraftStatus} />,
       },
       {
@@ -171,10 +174,14 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           const item = row.original;
           return (
             <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/products/${item.id}`}
+                className="inline-flex h-9 items-center gap-2 rounded-xl border border-[#d8e4f2] bg-white px-3 text-sm font-medium text-gray-700 hover:bg-[#f7faff]"
+              >
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                详情
+              </Link>
               <RunButton productId={item.id} />
-              {item.latestDraftId && item.latestDraftStatus === "COMPILED" ? (
-                <PublishDraftButton draftId={item.latestDraftId} />
-              ) : null}
             </div>
           );
         },
@@ -214,14 +221,14 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 rounded-lg border border-gray-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_220px_180px_auto]">
+      <div className="grid gap-3 rounded-2xl border border-white bg-white/85 p-3 shadow-[0_8px_24px_rgba(48,78,124,0.07)] md:grid-cols-[minmax(0,1fr)_220px_180px_auto]">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索标题、Offer ID、店铺"
-            className="h-9 w-full rounded-md border border-gray-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            className="h-9 w-full rounded-xl border border-[#d8e4f2] bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           />
         </label>
         <Select value={shop} onChange={setShop}>
@@ -235,21 +242,21 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
           <option value="RUNNING">处理中</option>
           <option value="FAILED">失败</option>
           <option value="SUCCEEDED">已完成</option>
-          <option value="COMPILED">待发布</option>
+          <option value="COMPILED">待提交</option>
           <option value="SUBMITTED">已提交</option>
         </Select>
         <Button onClick={runSelected} disabled={selectedIds.length === 0 || bulkLoading} className="w-full md:w-auto">
           <Play className="h-4 w-4" aria-hidden="true" />
-          {bulkLoading ? "批量生成中..." : `批量生成${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
+          {bulkLoading ? "批量上架中..." : `批量上架${selectedIds.length ? ` (${selectedIds.length})` : ""}`}
         </Button>
       </div>
 
       {filteredRows.length === 0 ? (
         <EmptyState title="没有匹配的商品" description="调整搜索词、店铺或状态筛选后再查看。" />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-2xl border border-white bg-white/90 shadow-[0_8px_24px_rgba(48,78,124,0.07)]">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-gray-200 bg-gray-50 text-xs uppercase text-gray-500">
+            <thead className="border-b border-[#e4ebf4] bg-[#f6f9fd] text-xs uppercase text-gray-500">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id}>
                   {headerGroup.headers.map((header) => (
@@ -262,7 +269,7 @@ export function ProductDataTable({ rows }: { rows: ProductTableRow[] }) {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {table.getRowModel().rows.map((row) => (
-                <tr key={row.id} className={cn("hover:bg-gray-50", row.getIsSelected() && "bg-blue-50/50")}>
+                <tr key={row.id} className={cn("transition-colors hover:bg-[#f7faff]", row.getIsSelected() && "bg-[#edf3ff]")}>
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-4 py-3 align-middle">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
