@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { prisma, decryptSecret } from "@saas/db";
+import { CreditTransactionType, Prisma, prisma, decryptSecret } from "@saas/db";
 import {
   computeSalePriceRub,
   normalizeProduct,
@@ -36,6 +36,110 @@ type ProductAssetLike = {
   publicUrl?: string | null;
   sourceUrl?: string | null;
 };
+
+const LISTING_PUBLISH_CREDIT_COST = 30;
+
+async function findCreditTransaction(idempotencyKey: string) {
+  return prisma.creditTransaction.findUnique({ where: { idempotencyKey } });
+}
+
+async function writeListingPublishCreditTransaction(params: {
+  tenantId: string;
+  delta: number;
+  type: CreditTransactionType;
+  reason: string;
+  referenceType: string;
+  referenceId: string;
+  idempotencyKey: string;
+}) {
+  const existing = await findCreditTransaction(params.idempotencyKey);
+  if (existing) return existing;
+
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${params.idempotencyKey}))`;
+      const replay = await tx.creditTransaction.findUnique({
+        where: { idempotencyKey: params.idempotencyKey },
+      });
+      if (replay) return replay;
+
+      const account = await tx.creditAccount.upsert({
+        where: { tenantId: params.tenantId },
+        create: { tenantId: params.tenantId, balance: 0 },
+        update: {},
+      });
+      const updatedAccount = params.delta > 0
+        ? await tx.creditAccount.update({
+            where: { id: account.id },
+            data: { balance: { increment: LISTING_PUBLISH_CREDIT_COST } },
+          })
+        : await (async () => {
+            const result = await tx.creditAccount.updateMany({
+              where: { id: account.id, balance: { gte: LISTING_PUBLISH_CREDIT_COST } },
+              data: { balance: { decrement: LISTING_PUBLISH_CREDIT_COST } },
+            });
+            if (result.count !== 1) throw new Error("insufficient_credits");
+            const updated = await tx.creditAccount.findUnique({ where: { id: account.id } });
+            if (!updated) throw new Error("credit_account_not_found");
+            return updated;
+          })();
+
+      return tx.creditTransaction.create({
+        data: {
+          tenantId: params.tenantId,
+          accountId: account.id,
+          type: params.type,
+          delta: params.delta,
+          balanceAfter: updatedAccount.balance,
+          reason: params.reason,
+          referenceType: params.referenceType,
+          referenceId: params.referenceId,
+          idempotencyKey: params.idempotencyKey,
+        },
+      });
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const replay = await findCreditTransaction(params.idempotencyKey);
+      if (replay) return replay;
+    }
+    throw error;
+  }
+}
+
+async function consumeListingPublishCredits(params: {
+  tenantId: string;
+  draftId: string;
+  storeId: string;
+  requestHash: string;
+}) {
+  return writeListingPublishCreditTransaction({
+    tenantId: params.tenantId,
+    delta: -LISTING_PUBLISH_CREDIT_COST,
+    type: CreditTransactionType.USAGE_DEBIT,
+    reason: "商品上架",
+    referenceType: "ozon_draft_publish",
+    referenceId: params.draftId,
+    idempotencyKey: `listing-publish:${params.storeId}:${params.requestHash}`,
+  });
+}
+
+async function refundListingPublishCredits(params: {
+  tenantId: string;
+  draftId: string;
+  storeId: string;
+  requestHash: string;
+}) {
+  return writeListingPublishCreditTransaction({
+    tenantId: params.tenantId,
+    delta: LISTING_PUBLISH_CREDIT_COST,
+    type: CreditTransactionType.USAGE_REFUND,
+    reason: "商品上架失败退回",
+    referenceType: "ozon_draft_publish",
+    referenceId: params.draftId,
+    idempotencyKey: `refund:listing-publish:${params.storeId}:${params.requestHash}`,
+  });
+}
 
 function asSourceProduct(value: unknown): SourceProductImport | null {
   const data = asRecord(value);
@@ -257,6 +361,13 @@ async function submitDraft(params: {
     throw new Error("同一店铺同一草稿已提交过，禁止重复上架");
   }
 
+  await consumeListingPublishCredits({
+    tenantId: params.tenantId,
+    draftId: params.draftId,
+    storeId: params.storeId,
+    requestHash,
+  });
+
   try {
     const response =
       process.env.ENABLE_REAL_OZON_SUBMIT === "true"
@@ -288,6 +399,12 @@ async function submitDraft(params: {
     return { publishRunId: run.id, ozonTaskId: run.ozonTaskId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    await refundListingPublishCredits({
+      tenantId: params.tenantId,
+      draftId: params.draftId,
+      storeId: params.storeId,
+      requestHash,
+    }).catch(() => null);
     await prisma.publishRun.create({
       data: {
         tenantId: params.tenantId,

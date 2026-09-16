@@ -14,6 +14,7 @@ import {
   type OzonProductPayload,
 } from "@saas/ozon";
 import { env } from "@/lib/env";
+import { consumeTenantCredits, refundTenantCredits } from "@/lib/credits";
 import {
   actionNeedsApproval,
   actionApprovalPolicy,
@@ -1165,6 +1166,12 @@ export async function executeApprovedAgentAction(params: {
       where: { id: action.id, tenantId: params.tenantId },
     });
   }
+  const creditReference = {
+    referenceType: "agent_action_execute",
+    referenceId: action.id,
+    idempotencyKey: `agent-action-execute:${action.id}`,
+  };
+  let charged = false;
   try {
     await prisma.auditLog.create({
       data: {
@@ -1177,6 +1184,15 @@ export async function executeApprovedAgentAction(params: {
       },
     });
     assertRealOzonSubmitEnabled(action.type);
+    if (requiresRealOzonSubmit(action.type)) {
+      await consumeTenantCredits({
+        tenantId: params.tenantId,
+        feature: "ozon_action_execute",
+        createdBy: params.userId,
+        ...creditReference,
+      });
+      charged = true;
+    }
     if (action.type === "PROMOTION_POLICY") {
       return await executePromotionPolicyAction({ ...params, action });
     }
@@ -1220,6 +1236,16 @@ export async function executeApprovedAgentAction(params: {
       error: "unsupported_action_execution",
     });
   } catch (error) {
+    if (charged) {
+      await refundTenantCredits({
+        tenantId: params.tenantId,
+        feature: "ozon_action_execute",
+        createdBy: params.userId,
+        referenceType: creditReference.referenceType,
+        referenceId: creditReference.referenceId,
+        idempotencyKey: `refund:${creditReference.idempotencyKey}`,
+      }).catch(() => null);
+    }
     return markActionFailed({
       tenantId: params.tenantId,
       userId: params.userId,

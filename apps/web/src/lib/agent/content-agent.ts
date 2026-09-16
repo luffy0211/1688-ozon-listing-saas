@@ -9,6 +9,7 @@ import {
 import { OzonClient, type OzonProductInfoItem, type OzonProductStockItem } from "@saas/ozon";
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
 import { createAgentActions } from "./actions";
 import { extractOfferId } from "./chat-input";
 import { redactSensitiveText } from "./policy";
@@ -81,6 +82,42 @@ export type ContentAgentDataSource = {
   categories?: string[];
   error?: string | null;
 };
+
+async function chargeContentAgentFeature(params: {
+  tenantId: string;
+  userId: string;
+  feature: CreditUsageFeature;
+  referenceType: string;
+  referenceId: string;
+  idempotencyKey: string;
+}) {
+  return consumeTenantCredits({
+    tenantId: params.tenantId,
+    feature: params.feature,
+    createdBy: params.userId,
+    referenceType: params.referenceType,
+    referenceId: params.referenceId,
+    idempotencyKey: params.idempotencyKey,
+  });
+}
+
+async function refundContentAgentFeature(params: {
+  tenantId: string;
+  userId: string;
+  feature: CreditUsageFeature;
+  referenceType: string;
+  referenceId: string;
+  idempotencyKey: string;
+}) {
+  return refundTenantCredits({
+    tenantId: params.tenantId,
+    feature: params.feature,
+    createdBy: params.userId,
+    referenceType: params.referenceType,
+    referenceId: params.referenceId,
+    idempotencyKey: params.idempotencyKey,
+  });
+}
 
 type NormalizedProductContent = {
   found: boolean;
@@ -881,6 +918,15 @@ export async function runOzonContentAgent(params: {
     },
   });
 
+  await chargeContentAgentFeature({
+    tenantId: params.tenantId,
+    userId: params.userId,
+    feature: "agent_message",
+    referenceType: "agent_message",
+    referenceId: userMessage.id,
+    idempotencyKey: `agent-message:${userMessage.id}`,
+  });
+
   const runRecord = await prisma.agentRun.create({
     data: {
       tenantId: params.tenantId,
@@ -971,7 +1017,18 @@ export async function runOzonContentAgent(params: {
       parameters: z.object({ storeId: z.string().nullable() }),
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
+        const creditKey = `agent-tool:${runRecord.id}:diagnose_ozon_store`;
+        let charged = false;
         try {
+          await chargeContentAgentFeature({
+            tenantId: params.tenantId,
+            userId: params.userId,
+            feature: "store_diagnosis",
+            referenceType: "agent_run_tool",
+            referenceId: `${runRecord.id}:diagnose_ozon_store`,
+            idempotencyKey: creditKey,
+          });
+          charged = true;
           const result = await diagnoseOzonStore({
             tenantId: params.tenantId,
             storeId: params.storeId ?? storeId,
@@ -997,6 +1054,16 @@ export async function runOzonContentAgent(params: {
           });
           return result;
         } catch (error) {
+          if (charged) {
+            await refundContentAgentFeature({
+              tenantId: params.tenantId,
+              userId: params.userId,
+              feature: "store_diagnosis",
+              referenceType: "agent_run_tool",
+              referenceId: `${runRecord.id}:diagnose_ozon_store`,
+              idempotencyKey: `refund:${creditKey}`,
+            }).catch(() => null);
+          }
           const message = error instanceof Error ? error.message : String(error);
           toolCalls.push({
             name: "diagnose_ozon_store",
@@ -1016,6 +1083,8 @@ export async function runOzonContentAgent(params: {
       parameters: z.object({ storeId: z.string().nullable() }),
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
+        const creditKey = `agent-tool:${runRecord.id}:analyze_ozon_competitors`;
+        let charged = false;
         try {
           if (!competitorsPerCategory) {
             throw new ContentAgentInputError(
@@ -1023,6 +1092,15 @@ export async function runOzonContentAgent(params: {
               "请说明每个类目需要分析多少个竞品，支持 1 至 10 个。",
             );
           }
+          await chargeContentAgentFeature({
+            tenantId: params.tenantId,
+            userId: params.userId,
+            feature: "competitor_analysis",
+            referenceType: "agent_run_tool",
+            referenceId: `${runRecord.id}:analyze_ozon_competitors`,
+            idempotencyKey: creditKey,
+          });
+          charged = true;
           const result = await analyzeOzonCompetitors({
             tenantId: params.tenantId,
             userId: params.userId,
@@ -1087,6 +1165,16 @@ export async function runOzonContentAgent(params: {
               : null,
           };
         } catch (error) {
+          if (charged) {
+            await refundContentAgentFeature({
+              tenantId: params.tenantId,
+              userId: params.userId,
+              feature: "competitor_analysis",
+              referenceType: "agent_run_tool",
+              referenceId: `${runRecord.id}:analyze_ozon_competitors`,
+              idempotencyKey: `refund:${creditKey}`,
+            }).catch(() => null);
+          }
           const message = error instanceof Error ? error.message : String(error);
           toolCalls.push({
             name: "analyze_ozon_competitors",

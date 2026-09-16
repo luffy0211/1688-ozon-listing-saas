@@ -16,6 +16,10 @@ export const CREDIT_USAGE_FEATURES = {
     label: "商品上架",
     cost: 30,
   },
+  ozon_action_execute: {
+    label: "Ozon 执行动作",
+    cost: 10,
+  },
   agent_message: {
     label: "Agent 对话",
     cost: 1,

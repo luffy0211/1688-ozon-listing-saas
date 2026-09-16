@@ -9,6 +9,7 @@ import {
   serializeContentAgentResult,
 } from "@/lib/agent/content-agent";
 import { fail, forbidden, notFound, ok, unauthorized } from "@/lib/api";
+import { CreditAdjustmentError } from "@/lib/credits";
 import { sessionFromRequest } from "@/lib/request-session";
 
 export const runtime = "nodejs";
@@ -171,6 +172,9 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       return fail(error.code, error.message, [], error.status);
     }
     if (error instanceof ContentAgentInputError) {
+      return fail(error.code, error.message, [], error.status);
+    }
+    if (error instanceof CreditAdjustmentError) {
       return fail(error.code, error.message, [], error.status);
     }
     return fail(

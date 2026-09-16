@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { prisma, decryptSecret } from "@saas/db";
 import { checkSubmitGuards, computeRequestHash, mockImportProducts, OzonClient } from "@saas/ozon";
 import { ok, fail, unauthorized, forbidden, notFound } from "@/lib/api";
+import { consumeTenantCredits, CreditAdjustmentError, refundTenantCredits } from "@/lib/credits";
 import { sessionFromRequest } from "@/lib/request-session";
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -62,6 +63,25 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     return fail("submit_guard_failed", guard.failures.join("; "), guard.failures, 422);
   }
 
+  const creditReference = {
+    referenceType: "ozon_draft_publish",
+    referenceId: draft.id,
+    idempotencyKey: `listing-publish:${draft.storeId}:${requestHash}`,
+  };
+  try {
+    await consumeTenantCredits({
+      tenantId,
+      feature: "listing_publish",
+      createdBy: session.userId,
+      ...creditReference,
+    });
+  } catch (error) {
+    if (error instanceof CreditAdjustmentError) {
+      return fail(error.code, error.message, [], error.status);
+    }
+    throw error;
+  }
+
   try {
     const response =
       process.env.ENABLE_REAL_OZON_SUBMIT === "true"
@@ -94,6 +114,13 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     return ok({ publishRunId: run.id, ozonTaskId: run.ozonTaskId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    await refundTenantCredits({
+      tenantId,
+      feature: "listing_publish",
+      createdBy: session.userId,
+      ...creditReference,
+      idempotencyKey: `refund:${creditReference.idempotencyKey}`,
+    }).catch(() => null);
     await prisma.publishRun.create({
       data: {
         tenantId,

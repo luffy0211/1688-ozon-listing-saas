@@ -15,6 +15,8 @@ const prisma = vi.hoisted(() => ({
 }));
 
 const activatePromotionEnrollment = vi.hoisted(() => vi.fn());
+const consumeTenantCredits = vi.hoisted(() => vi.fn());
+const refundTenantCredits = vi.hoisted(() => vi.fn());
 const ozonClientMock = vi.hoisted(() => ({
   getProductInfoList: vi.fn(),
   importProducts: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock("@saas/db", () => ({
 }));
 
 vi.mock("./promotions", () => ({ activatePromotionEnrollment }));
+vi.mock("@/lib/credits", () => ({ consumeTenantCredits, refundTenantCredits }));
 vi.mock("@saas/ozon", () => ({
   OzonClient: vi.fn(function OzonClient() {
     return ozonClientMock;
@@ -62,6 +65,16 @@ beforeEach(() => {
   });
   ozonClientMock.getProductInfoList.mockResolvedValue([{ id: 1 }]);
   ozonClientMock.importProducts.mockResolvedValue({ task_id: 123 });
+  consumeTenantCredits.mockResolvedValue({
+    account: { balance: 90 },
+    transaction: { id: "credit-1" },
+    idempotentReplay: false,
+  });
+  refundTenantCredits.mockResolvedValue({
+    account: { balance: 100 },
+    transaction: { id: "refund-1" },
+    idempotentReplay: false,
+  });
   process.env.ENABLE_REAL_OZON_SUBMIT = "false";
 });
 
@@ -152,6 +165,83 @@ describe("executeApprovedAgentAction", () => {
 
     expect(ozonClientMock.getProductInfoList).toHaveBeenCalledWith({ offerIds: ["SKU-1"] });
     expect(ozonClientMock.importProducts).toHaveBeenCalled();
+    expect(consumeTenantCredits).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      feature: "ozon_action_execute",
+      createdBy: "user-1",
+      referenceType: "agent_action_execute",
+      referenceId: "content-1",
+      idempotencyKey: "agent-action-execute:content-1",
+    });
+    expect(refundTenantCredits).not.toHaveBeenCalled();
+  });
+
+  it("refunds action execution credits when the Ozon write fails", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "content-failed",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: "5853386614",
+      type: "CONTENT_DRAFT",
+      status: "APPROVED",
+      guardrailJson: {},
+      payloadJson: {
+        suggestions: [{
+          field: "title",
+          suggestedRu: "Новое название",
+        }],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Старое название",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [{ id: 4191, values: [{ value: "Описание" }] }],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+    ozonClientMock.importProducts.mockRejectedValue(new Error("ozon_down"));
+    prisma.agentAction.update.mockResolvedValue({
+      id: "content-failed",
+      type: "CONTENT_DRAFT",
+      status: "FAILED",
+      error: "ozon_down",
+    });
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "content-failed",
+    });
+
+    expect(result?.status).toBe("FAILED");
+    expect(consumeTenantCredits).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      feature: "ozon_action_execute",
+      createdBy: "user-1",
+      referenceType: "agent_action_execute",
+      referenceId: "content-failed",
+      idempotencyKey: "agent-action-execute:content-failed",
+    });
+    expect(refundTenantCredits).toHaveBeenCalledWith({
+      tenantId: "tenant-1",
+      feature: "ozon_action_execute",
+      createdBy: "user-1",
+      referenceType: "agent_action_execute",
+      referenceId: "content-failed",
+      idempotencyKey: "refund:agent-action-execute:content-failed",
+    });
   });
 
   it("requires the approved competitor preview to match the exact Ozon attributes", () => {
@@ -272,6 +362,7 @@ describe("executeApprovedAgentAction", () => {
         data: expect.objectContaining({ action: "agent.action.failed" }),
       }),
     );
+    expect(consumeTenantCredits).not.toHaveBeenCalled();
   });
 
   it("activates a confirmed promotion policy locally", async () => {
