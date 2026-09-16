@@ -442,14 +442,30 @@ function createModelProvider() {
   });
 }
 
-export function contentAgentModelSettings(baseUrl: string) {
+function isDeepSeekBaseUrl(baseUrl: string) {
   try {
-    return new URL(baseUrl).hostname === "api.deepseek.com"
-      ? { providerData: { thinking: { type: "disabled" } } }
-      : {};
+    return new URL(baseUrl).hostname === "api.deepseek.com";
   } catch {
+    return false;
+  }
+}
+
+export function contentAgentModelName(baseUrl: string, configuredModel: string) {
+  const model = configuredModel.trim();
+  if (!isDeepSeekBaseUrl(baseUrl)) return model;
+  const normalized = model.toLowerCase();
+  const needsReasoningReplay =
+    normalized.includes("reasoner") ||
+    normalized.includes("r1") ||
+    /^deepseek-v\d/.test(normalized);
+  return needsReasoningReplay ? "deepseek-chat" : model;
+}
+
+export function contentAgentModelSettings(baseUrl: string) {
+  if (!isDeepSeekBaseUrl(baseUrl)) {
     return {};
   }
+  return { providerData: { thinking: { type: "disabled" } } };
 }
 
 function buildInstructions(offerId: string | null) {
@@ -1427,7 +1443,7 @@ export async function runOzonContentAgent(params: {
 
     const agent = new Agent({
       name: "Ozon Operations Agent",
-      model: env.openaiAgentModel,
+      model: contentAgentModelName(env.openaiBaseUrl, env.openaiAgentModel),
       modelSettings: contentAgentModelSettings(env.openaiBaseUrl),
       instructions: buildInstructions(offerId),
       tools: [

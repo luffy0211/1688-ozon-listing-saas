@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   competitorsPerCategoryFromPrompt,
   competitorMemoryContextFromReports,
+  contentAgentModelName,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
   fallbackContentDraftSuggestion,
@@ -12,6 +13,19 @@ import {
 } from "./content-agent";
 
 describe("contentAgentModelSettings", () => {
+  it("uses DeepSeek chat for thinking models that cannot replay reasoning_content", () => {
+    expect(contentAgentModelName("https://api.deepseek.com", "deepseek-v4-flash")).toBe(
+      "deepseek-chat",
+    );
+    expect(contentAgentModelName("https://api.deepseek.com", "deepseek-reasoner")).toBe(
+      "deepseek-chat",
+    );
+    expect(contentAgentModelName("https://api.deepseek.com", "deepseek-chat")).toBe(
+      "deepseek-chat",
+    );
+    expect(contentAgentModelName("https://api.openai.com/v1", "gpt-5.1")).toBe("gpt-5.1");
+  });
+
   it("disables DeepSeek thinking for multi-turn tool compatibility", () => {
     expect(contentAgentModelSettings("https://api.deepseek.com")).toEqual({
       providerData: { thinking: { type: "disabled" } },
