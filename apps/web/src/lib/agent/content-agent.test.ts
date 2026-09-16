@@ -5,6 +5,7 @@ import {
   contentAgentModelName,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
+  fallbackPromotionPolicyFromPrompt,
   fallbackContentDraftSuggestion,
   normalizeOzonProductContent,
   optionalStoreId,
@@ -31,6 +32,29 @@ describe("contentAgentModelSettings", () => {
       providerData: { thinking: { type: "disabled" } },
     });
     expect(contentAgentModelSettings("https://api.openai.com/v1")).toEqual({});
+  });
+});
+
+describe("fallbackPromotionPolicyFromPrompt", () => {
+  it("compiles explicit promotion rules when the model skips the tool call", () => {
+    expect(
+      fallbackPromotionPolicyFromPrompt(
+        "活动报名规则：只适用于 offerId 前缀 POLO- 的商品，库存大于等于 1，当前价必须大于 0，活动价按当前价 9 折。",
+      ),
+    ).toMatchObject({
+      rule: {
+        all: [
+          { field: "stock", operator: "gte", value: 1 },
+          { field: "currentPrice", operator: "gte", value: 0.01 },
+        ],
+      },
+      scope: { offerIdPrefixes: ["POLO-"] },
+      priceRule: { mode: "multiplier", value: 0.9 },
+    });
+  });
+
+  it("does not compile when no safe price rule is present", () => {
+    expect(fallbackPromotionPolicyFromPrompt("只要库存足够就报名活动")).toBeNull();
   });
 });
 

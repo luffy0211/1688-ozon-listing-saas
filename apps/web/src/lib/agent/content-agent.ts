@@ -20,7 +20,14 @@ import {
   diagnoseOzonStore,
   summarizeProductRecommendations,
 } from "./operations";
-import { promotionPolicySchema, promotionPriceRuleSchema, promotionScopeSchema } from "./promotion-policy";
+import {
+  promotionPolicySchema,
+  promotionPriceRuleSchema,
+  promotionScopeSchema,
+  type PromotionPolicy,
+  type PromotionPriceRule,
+  type PromotionScope,
+} from "./promotion-policy";
 import {
   getOzonPromotionCandidates,
   listOzonPromotions,
@@ -624,6 +631,76 @@ function blockedMissingToolOutput(toolName: string) {
     `缺少工具调用：${toolName}`,
     "系统不会用模型猜测店铺或商品数据。请重试，或检查 Ozon API 配置。",
   ].join("\n");
+}
+
+function numericText(value: string | undefined) {
+  if (!value) return null;
+  const chinese: Record<string, number> = {
+    一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+  };
+  const normalized = value.trim();
+  return chinese[normalized] ?? Number(normalized);
+}
+
+export function fallbackPromotionPolicyFromPrompt(prompt: string): {
+  title: string;
+  sop: string;
+  rule: PromotionPolicy;
+  scope?: PromotionScope;
+  priceRule: PromotionPriceRule;
+} | null {
+  const conditions: PromotionPolicy["all"] = [];
+  const stockMatch =
+    prompt.match(/库存.{0,8}(?:大于等于|不少于|至少|>=|≥)\s*([0-9]+|[一二三四五六七八九十])/i) ??
+    prompt.match(/([0-9]+|[一二三四五六七八九十])\s*(?:件|个)?.{0,4}库存/i);
+  const stock = numericText(stockMatch?.[1]);
+  if (Number.isFinite(stock)) {
+    conditions.push({ field: "stock", operator: "gte", value: stock! });
+  } else if (/库存/i.test(prompt)) {
+    conditions.push({ field: "stock", operator: "gte", value: 1 });
+  }
+
+  const currentPriceMatch = prompt.match(/当前价.{0,8}(?:大于等于|不少于|至少|>=|≥)\s*([0-9]+(?:\.[0-9]+)?)/i);
+  if (currentPriceMatch?.[1]) {
+    conditions.push({ field: "currentPrice", operator: "gte", value: Number(currentPriceMatch[1]) });
+  } else if (/当前价.{0,8}(?:大于|>|必须大于)\s*0/i.test(prompt)) {
+    conditions.push({ field: "currentPrice", operator: "gte", value: 0.01 });
+  }
+
+  const discountMatch =
+    prompt.match(/([0-9]+(?:\.[0-9]+)?|[一二三四五六七八九十])\s*折/) ??
+    prompt.match(/当前价\s*[x×*]\s*(0?\.\d+)/i);
+  const discount = numericText(discountMatch?.[1]);
+  const priceRule = Number.isFinite(discount)
+    ? {
+        mode: "multiplier" as const,
+        value: discount! > 1 ? discount! / 10 : discount!,
+      }
+    : null;
+  if (!priceRule) return null;
+
+  const prefixMatch =
+    prompt.match(/offer\s*id\s*(?:前缀|开头|以)\s*([A-Za-z0-9_-]+)/i) ??
+    prompt.match(/offerId\s*(?:前缀|开头|以)\s*([A-Za-z0-9_-]+)/i) ??
+    prompt.match(/前缀\s*([A-Za-z0-9_-]+)/i);
+  const scope = prefixMatch?.[1]
+    ? { offerIdPrefixes: [prefixMatch[1]] }
+    : undefined;
+  const rule = {
+    all: conditions.length ? conditions : [{ field: "stock" as const, operator: "gte" as const, value: 1 }],
+  };
+
+  const parsedRule = promotionPolicySchema.safeParse(rule);
+  const parsedScope = promotionScopeSchema.safeParse(scope);
+  const parsedPriceRule = promotionPriceRuleSchema.safeParse(priceRule);
+  if (!parsedRule.success || !parsedScope.success || !parsedPriceRule.success) return null;
+  return {
+    title: "活动报名规则",
+    sop: prompt,
+    rule: parsedRule.data,
+    scope: parsedScope.data,
+    priceRule: parsedPriceRule.data,
+  };
 }
 
 function numberFromRecord(record: Record<string, unknown>, key: string) {
@@ -1467,6 +1544,63 @@ export async function runOzonContentAgent(params: {
       maxTurns: 12,
     });
 
+    let fallbackPromotionPolicyOutput: string | null = null;
+    if (
+      requiredToolName === "compile_promotion_policy" &&
+      !hasSuccessfulToolCall(toolCalls, "compile_promotion_policy")
+    ) {
+      const fallbackPolicy = fallbackPromotionPolicyFromPrompt(prompt);
+      if (fallbackPolicy) {
+        const store = await resolveStore(params.tenantId, params.storeId);
+        const created = await createAgentActions({
+          tenantId: params.tenantId,
+          sessionId: session.id,
+          runId: runRecord.id,
+          requestedBy: params.userId,
+          actions: [
+            {
+              type: AgentActionType.PROMOTION_POLICY,
+              title: fallbackPolicy.title,
+              rationale: "模型未调用活动规则工具，系统按用户文本中的明确条件兜底生成可审计规则；确认前不生效。",
+              riskLevel: AgentRiskLevel.HIGH,
+              storeId: store.id,
+              payload: {
+                agentVersion: "ozon_operations_v1",
+                sop: fallbackPolicy.sop,
+                rule: fallbackPolicy.rule,
+                scope: fallbackPolicy.scope,
+                priceRule: fallbackPolicy.priceRule,
+                fallbackCompiled: true,
+              },
+            },
+          ],
+        });
+        createdActionIds.push(...created.map((item) => item.id));
+        toolCalls.push({
+          name: "compile_promotion_policy",
+          at: new Date().toISOString(),
+          input: {
+            conditionCount: fallbackPolicy.rule.all.length,
+            scope: fallbackPolicy.scope,
+            priceRule: fallbackPolicy.priceRule,
+            fallback: true,
+          },
+          output: { actionId: created[0]?.id ?? null, status: created[0]?.status ?? null },
+        });
+        fallbackPromotionPolicyOutput = [
+          "已生成活动报名规则待确认，未报名商品，未执行 Ozon。",
+          `规则条件：${fallbackPolicy.rule.all.length} 条`,
+          fallbackPolicy.scope?.offerIdPrefixes?.length
+            ? `适用范围：offerId 前缀 ${fallbackPolicy.scope.offerIdPrefixes.join("、")}`
+            : "",
+          fallbackPolicy.priceRule.mode === "multiplier"
+            ? `活动价：当前价 × ${fallbackPolicy.priceRule.value}`
+            : "活动价：已按规则保存",
+          "你确认这条规则后，后续报名活动才会按它筛选商品并生成待确认报名动作。",
+        ].filter(Boolean).join("\n");
+      }
+    }
+
     const productForFallbackDraft = latestProductContent as NormalizedProductContent | null;
     if (
       !createdActionIds.length &&
@@ -1526,7 +1660,10 @@ export async function runOzonContentAgent(params: {
       ].join("\n");
     }
 
-    const output = fallbackDraftOutput ?? String(result.finalOutput ?? "Agent 没有返回内容。");
+    const output =
+      fallbackPromotionPolicyOutput ??
+      fallbackDraftOutput ??
+      String(result.finalOutput ?? "Agent 没有返回内容。");
     const blockedMissingTool = requiredToolName
       ? !requiredToolSatisfied(toolCalls, requiredToolName)
       : false;
