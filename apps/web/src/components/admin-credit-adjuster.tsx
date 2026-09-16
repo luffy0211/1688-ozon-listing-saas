@@ -106,6 +106,7 @@ export function AdminCreditAdjuster({ tenants }: { tenants: CreditTenant[] }) {
           value={reason}
           onChange={setReason}
           placeholder="例如：线下收款、测试赠送、异常扣回"
+          required
         />
 
         <div className="rounded-xl border border-[#e1eaf4] bg-[#f9fbfe] px-3 py-2 text-sm text-gray-600">

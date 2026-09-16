@@ -808,11 +808,13 @@ model CreditTransaction {
   reason        String?
   referenceType String?
   referenceId   String?
+  idempotencyKey String?               @unique
   createdBy     String?
   createdAt     DateTime              @default(now())
 
   @@index([tenantId])
   @@index([accountId])
   @@index([type])
+  @@index([referenceType, referenceId])
   @@index([createdAt])
 }

@@ -15,6 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { SessionPayload } from "@/lib/auth";
+import { CreditBalanceBadge } from "./credit-balance-badge";
 import { LogoutButton } from "./logout-button";
 import { Badge, cn } from "./ui";
 
@@ -135,6 +136,7 @@ export function AppShell({
                 )}
               </div>
               <div className="flex min-w-0 items-center gap-2">
+                <CreditBalanceBadge />
                 {isAgentPage ? (
                   <>
                     <span className="hidden rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-2.5 py-1 text-xs font-semibold text-[#168864] sm:inline-flex">改动需确认</span>
