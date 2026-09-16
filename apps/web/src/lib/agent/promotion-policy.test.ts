@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { evaluate, promotionPolicySchema, promotionPriceRuleSchema } from "./promotion-policy";
+import {
+  calculatePromotionActionPrice,
+  evaluate,
+  promotionPolicySchema,
+  promotionPriceRuleSchema,
+} from "./promotion-policy";
 
 describe("promotion policy", () => {
   it("passes when every condition matches", () => {
@@ -70,6 +75,7 @@ describe("promotion policy", () => {
     { mode: "amount_off", value: 50 },
     { mode: "fixed", value: 799 },
     { mode: "ozon_max" },
+    { mode: "formula", expression: "cost + logisticsFee + commissionFee + minProfit", rounding: "ceil" },
   ])("accepts a safe activity price rule: $mode", (rule) => {
     expect(promotionPriceRuleSchema.safeParse(rule).success).toBe(true);
   });
@@ -82,5 +88,45 @@ describe("promotion policy", () => {
     { mode: "script", value: 1 },
   ])("rejects an unsafe activity price rule: $mode", (rule) => {
     expect(promotionPriceRuleSchema.safeParse(rule).success).toBe(false);
+  });
+
+  it("calculates a custom formula with profit guardrails", () => {
+    expect(
+      calculatePromotionActionPrice(
+        {
+          mode: "formula",
+          expression: "cost + logisticsFee + commissionFee + minProfit",
+          rounding: "ceil",
+          minProfitRub: 40,
+          minGrossMarginRate: 0.1,
+        },
+        {
+          currentPrice: 1_000,
+          maxActionPrice: 900,
+          cost: 500,
+          logisticsFee: 80,
+          commissionFee: 60,
+          minProfit: 100,
+        },
+      ),
+    ).toEqual({ passed: true, actionPrice: 740 });
+  });
+
+  it("rejects formula variables outside the whitelist", () => {
+    expect(
+      calculatePromotionActionPrice(
+        { mode: "formula", expression: "process + 1" },
+        { currentPrice: 1_000 },
+      ),
+    ).toEqual({ passed: false, reason: "unknown_formula_variable:process" });
+  });
+
+  it("rejects formulas when a required business variable is missing", () => {
+    expect(
+      calculatePromotionActionPrice(
+        { mode: "formula", expression: "cost + logisticsFee" },
+        { currentPrice: 1_000, cost: 500 },
+      ),
+    ).toEqual({ passed: false, reason: "missing_formula_variable:logisticsFee" });
   });
 });

@@ -163,6 +163,17 @@ function promotionPriceRuleLabel(value: unknown) {
       return Number.isFinite(amount) ? `固定活动价 ${amount}` : "固定活动价";
     case "ozon_max":
       return "使用 Ozon 返回的最高活动价";
+    case "formula": {
+      const parts = [`公式：${String(rule.expression ?? "")}`];
+      if (rule.rounding) parts.push(`取整：${String(rule.rounding)}`);
+      if (Number.isFinite(Number(rule.minGrossMarginRate))) {
+        parts.push(`最低毛利率：${Math.round(Number(rule.minGrossMarginRate) * 100)}%`);
+      }
+      if (Number.isFinite(Number(rule.minProfitRub))) {
+        parts.push(`最低利润：${String(rule.minProfitRub)}`);
+      }
+      return parts.join(" · ");
+    }
     default:
       return "";
   }

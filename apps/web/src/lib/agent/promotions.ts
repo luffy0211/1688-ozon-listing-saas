@@ -6,9 +6,11 @@ import {
 } from "@saas/ozon";
 import { env } from "@/lib/env";
 import {
+  calculatePromotionActionPrice,
   evaluate,
   promotionPriceRuleSchema,
   promotionPolicySchema,
+  type PromotionPriceValues,
   type PromotionPriceRule,
   type PromotionPolicy,
 } from "./promotion-policy";
@@ -30,26 +32,13 @@ function optionalStoreId(value: string | null | undefined) {
   return trimmed && !["null", "undefined"].includes(trimmed.toLowerCase()) ? trimmed : null;
 }
 
-function roundMoney(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function actionPriceFromRule(
-  rule: PromotionPriceRule,
-  values: { currentPrice: number; maxActionPrice: number },
-) {
-  switch (rule.mode) {
-    case "multiplier":
-      return roundMoney(values.currentPrice * rule.value);
-    case "percent_off":
-      return roundMoney(values.currentPrice * (1 - rule.value));
-    case "amount_off":
-      return roundMoney(values.currentPrice - rule.value);
-    case "fixed":
-      return roundMoney(rule.value);
-    case "ozon_max":
-      return roundMoney(values.maxActionPrice);
+function optionalNumberField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(parsed)) return parsed;
   }
+  return undefined;
 }
 
 export function selectPromotionCandidates(params: {
@@ -71,13 +60,29 @@ export function selectPromotionCandidates(params: {
   const rejected: Array<{ productId: number; reason: string }> = [];
 
   for (const candidate of params.candidates) {
+    const rawCandidate = candidate as unknown as Record<string, unknown>;
     const currentPrice = number(candidate.price);
     const maxActionPrice = number(candidate.max_action_price);
-    const actionPrice = actionPriceFromRule(params.priceRule, {
+    const sales = params.salesByProductId.get(String(candidate.id));
+    const priceValues: PromotionPriceValues = {
       currentPrice,
       maxActionPrice,
-    });
-    const sales = params.salesByProductId.get(String(candidate.id));
+      stock: number(candidate.stock),
+      orders30d: sales?.orders30d,
+      revenue30d: sales?.revenue30d,
+      cost: optionalNumberField(rawCandidate, ["cost", "costRub", "cost_rub"]),
+      logisticsFee: optionalNumberField(rawCandidate, ["logisticsFee", "logistics_fee", "logisticsFeeRub"]),
+      commissionFee: optionalNumberField(rawCandidate, ["commissionFee", "commission_fee", "commissionFeeRub"]),
+      ozonNetPayout: optionalNumberField(rawCandidate, ["ozonNetPayout", "ozon_net_payout"]),
+      contentRating: optionalNumberField(rawCandidate, ["contentRating", "content_rating"]),
+      minProfit: optionalNumberField(rawCandidate, ["minProfit", "min_profit"]),
+    };
+    const calculatedPrice = calculatePromotionActionPrice(params.priceRule, priceValues);
+    if (!calculatedPrice.passed) {
+      rejected.push({ productId: candidate.id, reason: calculatedPrice.reason });
+      continue;
+    }
+    const actionPrice = calculatedPrice.actionPrice;
     const metrics = {
       stock: number(candidate.stock),
       currentPrice,

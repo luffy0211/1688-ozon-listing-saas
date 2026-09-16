@@ -81,4 +81,49 @@ describe("promotion candidate selection", () => {
       expect.objectContaining({ productId: 10, actionPrice: 780, maxActionPrice: 780 }),
     ]);
   });
+
+  it("calculates formula prices from candidate business fields", () => {
+    const candidate = {
+      id: 10,
+      price: 1_000,
+      action_price: 0,
+      max_action_price: 850,
+      stock: 12,
+      cost: 500,
+      logistics_fee: 70,
+      commission_fee: 60,
+    };
+    const result = selectPromotionCandidates({
+      candidates: [candidate],
+      policy: { all: [{ field: "actionPrice", operator: "lte", value: 800 }] },
+      priceRule: {
+        mode: "formula",
+        expression: "cost + logisticsFee + commissionFee + 100",
+        rounding: "ceil",
+        minProfitRub: 90,
+      },
+      salesByProductId: new Map(),
+    });
+
+    expect(result.eligible).toEqual([
+      expect.objectContaining({ productId: 10, actionPrice: 730 }),
+    ]);
+  });
+
+  it("rejects formula candidates when required business fields are unavailable", () => {
+    const result = selectPromotionCandidates({
+      candidates: [{ id: 10, price: 1_000, action_price: 0, max_action_price: 850, stock: 12 }],
+      policy: { all: [{ field: "stock", operator: "gte", value: 1 }] },
+      priceRule: {
+        mode: "formula",
+        expression: "cost + logisticsFee + 100",
+      },
+      salesByProductId: new Map(),
+    });
+
+    expect(result.eligible).toHaveLength(0);
+    expect(result.rejected).toEqual([
+      { productId: 10, reason: "missing_formula_variable:cost" },
+    ]);
+  });
 });
