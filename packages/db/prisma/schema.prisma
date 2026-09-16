@@ -106,6 +106,14 @@ enum AgentRiskLevel {
   HIGH
 }
 
+enum CreditTransactionType {
+  ADMIN_GRANT
+  ADMIN_DEDUCT
+  USAGE_DEBIT
+  USAGE_REFUND
+  PAYMENT_CREDIT
+}
+
 model Tenant {
   id        String   @id @default(cuid())
   name      String
@@ -133,6 +141,8 @@ model Tenant {
   agentMessages          AgentMessage[]
   agentRuns              AgentRun[]
   agentActions           AgentAction[]
+  creditAccount          CreditAccount?
+  creditTransactions     CreditTransaction[]
 }
 
 model User {
@@ -773,4 +783,36 @@ model AuditLog {
 
   @@index([tenantId])
   @@index([userId])
+}
+
+model CreditAccount {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions CreditTransaction[]
+}
+
+model CreditTransaction {
+  id            String                @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                @relation(fields: [tenantId], references: [id])
+  accountId     String
+  account       CreditAccount         @relation(fields: [accountId], references: [id])
+  type          CreditTransactionType
+  delta         Int
+  balanceAfter  Int
+  reason        String?
+  referenceType String?
+  referenceId   String?
+  createdBy     String?
+  createdAt     DateTime              @default(now())
+
+  @@index([tenantId])
+  @@index([accountId])
+  @@index([type])
+  @@index([createdAt])
 }

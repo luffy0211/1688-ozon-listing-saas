@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { KeyRound, Percent, ShieldCheck, Store, Ticket, WandSparkles } from "lucide-react";
+import { Coins, KeyRound, Percent, ShieldCheck, Store, Ticket, WandSparkles } from "lucide-react";
 import { prisma } from "@saas/db";
 import { requireUser } from "@/lib/auth";
 import { Badge, Card, PageHeader, ProgressBar, SectionHeader } from "@/components/ui";
@@ -90,6 +90,12 @@ export default async function SettingsPage() {
               title: "平台管理",
               description: "查看租户、用户、店铺、商品和任务数量。",
               icon: ShieldCheck,
+            },
+            {
+              href: "/admin/credits",
+              title: "积分管理",
+              description: "给租户加积分、扣积分，并查看积分流水。",
+              icon: Coins,
             },
           ],
         },

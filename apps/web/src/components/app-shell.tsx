@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bot,
   ChevronDown,
+  Coins,
   GitBranch,
   LayoutDashboard,
   PackageSearch,
@@ -22,6 +23,7 @@ const navItems = [
   { href: "/workflow", label: "自动化工作流", icon: GitBranch },
   { href: "/analytics", label: "BI 看板", icon: BarChart3 },
   { href: "/agent/content", label: "运营 Agent", icon: Bot },
+  { href: "/admin/credits", label: "积分管理", icon: Coins, adminOnly: true },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
@@ -60,7 +62,7 @@ export function AppShell({
 
         <nav className="flex-1 space-y-1 px-3 py-5">
           <div className="mb-2 px-3 text-[11px] font-semibold text-[#9aa6ba]">工作空间</div>
-          {navItems.map((item) => {
+          {navItems.filter((item) => !item.adminOnly || user.role === "admin").map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
@@ -158,7 +160,7 @@ export function AppShell({
               </div>
             </div>
             <nav className="scrollbar-none flex gap-1 overflow-x-auto border-t border-[#edf2f8] px-3 py-2 lg:hidden">
-              {navItems.map((item) => {
+              {navItems.filter((item) => !item.adminOnly || user.role === "admin").map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
