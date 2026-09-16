@@ -147,4 +147,23 @@ describe("promotion policy", () => {
       ),
     ).toEqual({ passed: true, actionPrice: 773 });
   });
+
+  it("uses commission rate when validating formula margin guardrails", () => {
+    expect(
+      calculatePromotionActionPrice(
+        {
+          mode: "formula",
+          expression: "(cost + logisticsFee + minProfit) / (1 - commissionRate)",
+          defaults: {
+            logisticsFee: 80,
+            minProfit: 100,
+            commissionRate: 0.12,
+          },
+          rounding: "ceil",
+          minGrossMarginRate: 0.1,
+        },
+        { cost: 500 },
+      ),
+    ).toEqual({ passed: true, actionPrice: 773 });
+  });
 });

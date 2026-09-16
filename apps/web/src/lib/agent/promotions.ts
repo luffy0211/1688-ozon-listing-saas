@@ -60,6 +60,72 @@ function optionalNumberField(record: Record<string, unknown>, keys: string[]) {
   return undefined;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function purchaseCostCnyFromFact(value: unknown) {
+  const fact = record(value);
+  const purchase = record(fact.purchaseCny);
+  return optionalNumberField({ value: purchase.value, purchaseCny: fact.purchaseCny }, ["value", "purchaseCny"]);
+}
+
+type PromotionBusinessDefaults = {
+  cost?: number;
+  logisticsFee?: number;
+  commissionRate?: number;
+};
+
+async function promotionBusinessDefaults(params: {
+  tenantId: string;
+  storeId: string;
+  productIdToOfferId: Map<string, string>;
+}) {
+  const offerIds = [...new Set([...params.productIdToOfferId.values()].filter(Boolean))];
+  const [pricingRule, sourceProducts] = await Promise.all([
+    prisma.pricingRule.findFirst({
+      where: {
+        tenantId: params.tenantId,
+        OR: [
+          { storeId: params.storeId },
+          { storeId: null, isDefault: true },
+        ],
+      },
+      orderBy: [{ storeId: "desc" }, { isDefault: "desc" }, { updatedAt: "desc" }],
+    }),
+    offerIds.length
+      ? prisma.sourceProduct.findMany({
+          where: { tenantId: params.tenantId, offerId: { in: offerIds } },
+          include: { productFacts: { orderBy: { updatedAt: "desc" }, take: 1 } },
+        })
+      : Promise.resolve([]),
+  ]);
+  const sourceByOfferId = new Map(sourceProducts.map((item) => [item.offerId, item]));
+  const cnyToRub = pricingRule ? Number(pricingRule.cnyToRub) : 12;
+  const domesticShippingRub = pricingRule ? Number(pricingRule.domesticShippingCny) * cnyToRub : 0;
+  const packagingRub = pricingRule ? Number(pricingRule.packagingCny) * cnyToRub : 0;
+  const internationalShippingRub = pricingRule ? Number(pricingRule.internationalShippingRub) : 0;
+  const logisticsFee = domesticShippingRub + packagingRub + internationalShippingRub;
+  const commissionRate = pricingRule ? Number(pricingRule.commissionRate) : undefined;
+  const result = new Map<string, PromotionBusinessDefaults>();
+
+  for (const [productId, offerId] of params.productIdToOfferId) {
+    const sourceProduct = sourceByOfferId.get(offerId);
+    const purchaseCostCny = purchaseCostCnyFromFact(sourceProduct?.productFacts[0]?.normalizedJson);
+    const defaults: PromotionBusinessDefaults = {
+      logisticsFee,
+      commissionRate,
+    };
+    if (purchaseCostCny !== undefined) {
+      defaults.cost = purchaseCostCny * cnyToRub;
+    }
+    result.set(productId, defaults);
+  }
+  return result;
+}
+
 export function selectPromotionCandidates(params: {
   candidates: PromotionCandidateLike[];
   policy: PromotionPolicy;
@@ -275,12 +341,22 @@ export async function preparePromotionEnrollment(params: {
     ]),
   );
   const salesByProductId = new Map<string, SalesMetric>();
+  const productIdToOfferId = new Map<string, string>();
   for (const product of analytics.products) {
+    productIdToOfferId.set(product.productId, product.offerId);
     const sales = topByOffer.get(product.offerId);
     if (sales) salesByProductId.set(product.productId, sales);
   }
+  const businessDefaults = await promotionBusinessDefaults({
+    tenantId: params.tenantId,
+    storeId: store.id,
+    productIdToOfferId,
+  });
   const selected = selectPromotionCandidates({
-    candidates,
+    candidates: candidates.map((candidate) => ({
+      ...candidate,
+      ...businessDefaults.get(String(candidate.id)),
+    })),
     policy: policy.rule,
     priceRule: policy.priceRule,
     salesByProductId,

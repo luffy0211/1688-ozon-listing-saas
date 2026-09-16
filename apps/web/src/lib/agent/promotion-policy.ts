@@ -269,15 +269,22 @@ function formulaProfit(
   values: PromotionPriceValues,
   actionPrice: number,
 ): PromotionPriceResult {
-  for (const field of ["cost", "logisticsFee", "commissionFee"] as const) {
+  for (const field of ["cost", "logisticsFee"] as const) {
     const value = values[field];
     if (typeof value !== "number" || !Number.isFinite(value)) {
       return { passed: false, reason: `missing_formula_variable:${field}` };
     }
   }
+  const commissionFee = values.commissionFee ??
+    (typeof values.commissionRate === "number" && Number.isFinite(values.commissionRate)
+      ? actionPrice * values.commissionRate
+      : undefined);
+  if (typeof commissionFee !== "number" || !Number.isFinite(commissionFee)) {
+    return { passed: false, reason: "missing_formula_variable:commissionFee" };
+  }
   return {
     passed: true,
-    actionPrice: actionPrice - values.cost! - values.logisticsFee! - values.commissionFee!,
+    actionPrice: actionPrice - values.cost! - values.logisticsFee! - commissionFee,
   };
 }
 
