@@ -40,8 +40,24 @@ const priceFormulaVariableSchema = z.enum([
   "cost",
   "logisticsFee",
   "commissionFee",
+  "commissionRate",
   "minProfit",
 ]);
+
+const formulaDefaultsSchema = z
+  .record(z.string(), z.number().finite())
+  .superRefine((defaults, context) => {
+    for (const key of Object.keys(defaults)) {
+      if (!priceFormulaVariableSchema.safeParse(key).success) {
+        context.addIssue({
+          code: "custom",
+          message: `unknown_formula_variable:${key}`,
+          path: [key],
+        });
+      }
+    }
+  })
+  .optional();
 
 export const promotionPriceRuleSchema = z.discriminatedUnion("mode", [
   z.strictObject({
@@ -66,6 +82,7 @@ export const promotionPriceRuleSchema = z.discriminatedUnion("mode", [
   z.strictObject({
     mode: z.literal("formula"),
     expression: z.string().min(1).max(240),
+    defaults: formulaDefaultsSchema,
     rounding: z.enum(["none", "round", "ceil", "floor"]).optional(),
     minGrossMarginRate: z.number().finite().min(0).max(0.99).optional(),
     minProfitRub: z.number().finite().min(0).optional(),
@@ -268,8 +285,16 @@ export function calculatePromotionActionPrice(
   rule: PromotionPriceRule,
   values: PromotionPriceValues,
 ): PromotionPriceResult {
-  const currentPrice = values.currentPrice ?? 0;
-  const maxActionPrice = values.maxActionPrice ?? 0;
+  const effectiveValues: PromotionPriceValues = rule.mode === "formula"
+    ? { ...((rule.defaults ?? {}) as PromotionPriceValues) }
+    : {};
+  for (const [key, value] of Object.entries(values)) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      effectiveValues[key as keyof PromotionPriceValues] = value;
+    }
+  }
+  const currentPrice = effectiveValues.currentPrice ?? 0;
+  const maxActionPrice = effectiveValues.maxActionPrice ?? 0;
   let actionPrice: PromotionPriceResult;
 
   switch (rule.mode) {
@@ -291,14 +316,14 @@ export function calculatePromotionActionPrice(
     case "formula": {
       const tokens = tokenizeFormula(rule.expression);
       if (!tokens.passed) return tokens;
-      actionPrice = parseFormulaExpression(tokens.tokens, values);
+      actionPrice = parseFormulaExpression(tokens.tokens, effectiveValues);
       if (!actionPrice.passed) return actionPrice;
       actionPrice = {
         passed: true,
         actionPrice: roundFormulaPrice(actionPrice.actionPrice, rule.rounding),
       };
       if (rule.minProfitRub !== undefined || rule.minGrossMarginRate !== undefined) {
-        const profit = formulaProfit(values, actionPrice.actionPrice);
+        const profit = formulaProfit(effectiveValues, actionPrice.actionPrice);
         if (!profit.passed) return profit;
         if (rule.minProfitRub !== undefined && profit.actionPrice < rule.minProfitRub) {
           return { passed: false, reason: "formula_min_profit_failed" };

@@ -15,10 +15,29 @@ import {
   type PromotionPolicy,
 } from "./promotion-policy";
 
+type PromotionBusinessField =
+  | "cost"
+  | "costRub"
+  | "cost_rub"
+  | "logisticsFee"
+  | "logistics_fee"
+  | "logisticsFeeRub"
+  | "commissionFee"
+  | "commission_fee"
+  | "commissionFeeRub"
+  | "commissionRate"
+  | "commission_rate"
+  | "ozonNetPayout"
+  | "ozon_net_payout"
+  | "contentRating"
+  | "content_rating"
+  | "minProfit"
+  | "min_profit";
+
 type PromotionCandidateLike = Pick<
   OzonActionProduct,
   "id" | "price" | "action_price" | "max_action_price" | "stock"
->;
+> & Partial<Record<PromotionBusinessField, unknown>>;
 
 type SalesMetric = { orders30d: number; revenue30d: number };
 
@@ -73,6 +92,7 @@ export function selectPromotionCandidates(params: {
       cost: optionalNumberField(rawCandidate, ["cost", "costRub", "cost_rub"]),
       logisticsFee: optionalNumberField(rawCandidate, ["logisticsFee", "logistics_fee", "logisticsFeeRub"]),
       commissionFee: optionalNumberField(rawCandidate, ["commissionFee", "commission_fee", "commissionFeeRub"]),
+      commissionRate: optionalNumberField(rawCandidate, ["commissionRate", "commission_rate"]),
       ozonNetPayout: optionalNumberField(rawCandidate, ["ozonNetPayout", "ozon_net_payout"]),
       contentRating: optionalNumberField(rawCandidate, ["contentRating", "content_rating"]),
       minProfit: optionalNumberField(rawCandidate, ["minProfit", "min_profit"]),

@@ -129,4 +129,22 @@ describe("promotion policy", () => {
       ),
     ).toEqual({ passed: false, reason: "missing_formula_variable:logisticsFee" });
   });
+
+  it("uses saved default variables for stable user formulas", () => {
+    expect(
+      calculatePromotionActionPrice(
+        {
+          mode: "formula",
+          expression: "(cost + logisticsFee + minProfit) / (1 - commissionRate)",
+          defaults: {
+            logisticsFee: 80,
+            minProfit: 100,
+            commissionRate: 0.12,
+          },
+          rounding: "ceil",
+        },
+        { cost: 500 },
+      ),
+    ).toEqual({ passed: true, actionPrice: 773 });
+  });
 });

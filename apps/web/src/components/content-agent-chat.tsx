@@ -165,6 +165,12 @@ function promotionPriceRuleLabel(value: unknown) {
       return "使用 Ozon 返回的最高活动价";
     case "formula": {
       const parts = [`公式：${String(rule.expression ?? "")}`];
+      const defaults = asRecord(rule.defaults);
+      const defaultText = Object.entries(defaults)
+        .filter(([, value]) => Number.isFinite(Number(value)))
+        .map(([key, value]) => `${key}=${String(value)}`)
+        .join("，");
+      if (defaultText) parts.push(`默认值：${defaultText}`);
       if (rule.rounding) parts.push(`取整：${String(rule.rounding)}`);
       if (Number.isFinite(Number(rule.minGrossMarginRate))) {
         parts.push(`最低毛利率：${Math.round(Number(rule.minGrossMarginRate) * 100)}%`);

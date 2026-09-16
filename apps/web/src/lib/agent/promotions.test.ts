@@ -126,4 +126,26 @@ describe("promotion candidate selection", () => {
       { productId: 10, reason: "missing_formula_variable:cost" },
     ]);
   });
+
+  it("uses saved formula defaults when candidate fields are stable constants", () => {
+    const result = selectPromotionCandidates({
+      candidates: [{ id: 10, price: 1_000, action_price: 0, max_action_price: 850, stock: 12, cost: 500 }],
+      policy: { all: [{ field: "actionPrice", operator: "lte", value: 800 }] },
+      priceRule: {
+        mode: "formula",
+        expression: "(cost + logisticsFee + minProfit) / (1 - commissionRate)",
+        defaults: {
+          logisticsFee: 80,
+          minProfit: 100,
+          commissionRate: 0.12,
+        },
+        rounding: "ceil",
+      },
+      salesByProductId: new Map(),
+    });
+
+    expect(result.eligible).toEqual([
+      expect.objectContaining({ productId: 10, actionPrice: 773 }),
+    ]);
+  });
 });
