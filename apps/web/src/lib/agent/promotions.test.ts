@@ -148,4 +148,55 @@ describe("promotion candidate selection", () => {
       expect.objectContaining({ productId: 10, actionPrice: 773 }),
     ]);
   });
+
+  it("filters candidates by confirmed product scope and keeps approval context", () => {
+    const result = selectPromotionCandidates({
+      candidates: [
+        {
+          id: 10,
+          price: 500,
+          action_price: 0,
+          max_action_price: 450,
+          stock: 12,
+          offerId: "POLO-001",
+          name: "Polo shirt",
+          descriptionCategoryId: 200000933,
+          typeId: 93194,
+        },
+        {
+          id: 11,
+          price: 500,
+          action_price: 0,
+          max_action_price: 450,
+          stock: 12,
+          offerId: "DRESS-001",
+          descriptionCategoryId: 200000933,
+          typeId: 93195,
+        },
+      ],
+      scope: {
+        offerIdPrefixes: ["POLO-"],
+        categoryKeys: ["200000933:93194"],
+        priceRange: { min: 100, max: 600 },
+      },
+      policy: { all: [{ field: "stock", operator: "gte", value: 1 }] },
+      priceRule: { mode: "percent_off", value: 0.1 },
+      policyActionId: "policy-1",
+      salesByProductId: new Map(),
+    });
+
+    expect(result.eligible).toEqual([
+      expect.objectContaining({
+        productId: 10,
+        offerId: "POLO-001",
+        name: "Polo shirt",
+        categoryKey: "200000933:93194",
+        policyActionId: "policy-1",
+        actionPrice: 450,
+      }),
+    ]);
+    expect(result.rejected).toEqual([
+      { productId: 11, reason: "scope_offer_prefix_mismatch" },
+    ]);
+  });
 });

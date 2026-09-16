@@ -21,7 +21,7 @@ import {
   isRecommendationOnly,
   type ProfitGuardrailResult,
 } from "./policy";
-import { promotionPolicySchema, promotionPriceRuleSchema } from "./promotion-policy";
+import { promotionPolicySchema, promotionPriceRuleSchema, promotionScopeSchema } from "./promotion-policy";
 import { activatePromotionEnrollment } from "./promotions";
 
 export type ProposedAgentAction = {
@@ -1081,6 +1081,9 @@ async function executePromotionPolicyAction(params: {
   }
   if (!promotionPriceRuleSchema.safeParse(payload.priceRule).success) {
     throw new Error("invalid_promotion_price_rule");
+  }
+  if (!promotionScopeSchema.safeParse(payload.scope).success) {
+    throw new Error("invalid_promotion_scope");
   }
   return markActionExecuted({
     tenantId: params.tenantId,

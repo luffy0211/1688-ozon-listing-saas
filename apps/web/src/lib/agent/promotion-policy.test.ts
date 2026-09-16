@@ -4,6 +4,7 @@ import {
   evaluate,
   promotionPolicySchema,
   promotionPriceRuleSchema,
+  promotionScopeSchema,
 } from "./promotion-policy";
 
 describe("promotion policy", () => {
@@ -88,6 +89,22 @@ describe("promotion policy", () => {
     { mode: "script", value: 1 },
   ])("rejects an unsafe activity price rule: $mode", (rule) => {
     expect(promotionPriceRuleSchema.safeParse(rule).success).toBe(false);
+  });
+
+  it("accepts bounded promotion scopes and rejects unknown scope fields", () => {
+    expect(
+      promotionScopeSchema.safeParse({
+        offerIdPrefixes: ["F182"],
+        categoryKeys: ["200000933:93194"],
+        priceRange: { min: 100, max: 900 },
+      }).success,
+    ).toBe(true);
+    expect(
+      promotionScopeSchema.safeParse({
+        offerIdPrefixes: ["F182"],
+        script: "alert(1)",
+      }).success,
+    ).toBe(false);
   });
 
   it("calculates a custom formula with profit guardrails", () => {

@@ -10,9 +10,11 @@ import {
   evaluate,
   promotionPriceRuleSchema,
   promotionPolicySchema,
+  promotionScopeSchema,
   type PromotionPriceValues,
   type PromotionPriceRule,
   type PromotionPolicy,
+  type PromotionScope,
 } from "./promotion-policy";
 
 type PromotionBusinessField =
@@ -32,7 +34,12 @@ type PromotionBusinessField =
   | "contentRating"
   | "content_rating"
   | "minProfit"
-  | "min_profit";
+  | "min_profit"
+  | "offerId"
+  | "name"
+  | "publicSku"
+  | "descriptionCategoryId"
+  | "typeId";
 
 type PromotionCandidateLike = Pick<
   OzonActionProduct,
@@ -78,12 +85,27 @@ type PromotionBusinessDefaults = {
   commissionRate?: number;
 };
 
-async function promotionBusinessDefaults(params: {
+type PromotionProductContext = PromotionBusinessDefaults & {
+  offerId?: string;
+  name?: string | null;
+  publicSku?: string | null;
+  descriptionCategoryId?: number | null;
+  typeId?: number | null;
+};
+
+async function promotionProductContexts(params: {
   tenantId: string;
   storeId: string;
-  productIdToOfferId: Map<string, string>;
+  analyticsProducts: Array<{
+    productId: string;
+    offerId: string;
+    name: string | null;
+    publicSku: string | null;
+    descriptionCategoryId: number | null;
+    typeId: number | null;
+  }>;
 }) {
-  const offerIds = [...new Set([...params.productIdToOfferId.values()].filter(Boolean))];
+  const offerIds = [...new Set(params.analyticsProducts.map((item) => item.offerId).filter(Boolean))];
   const [pricingRule, sourceProducts] = await Promise.all([
     prisma.pricingRule.findFirst({
       where: {
@@ -109,31 +131,79 @@ async function promotionBusinessDefaults(params: {
   const internationalShippingRub = pricingRule ? Number(pricingRule.internationalShippingRub) : 0;
   const logisticsFee = domesticShippingRub + packagingRub + internationalShippingRub;
   const commissionRate = pricingRule ? Number(pricingRule.commissionRate) : undefined;
-  const result = new Map<string, PromotionBusinessDefaults>();
+  const result = new Map<string, PromotionProductContext>();
 
-  for (const [productId, offerId] of params.productIdToOfferId) {
-    const sourceProduct = sourceByOfferId.get(offerId);
+  for (const product of params.analyticsProducts) {
+    const sourceProduct = sourceByOfferId.get(product.offerId);
     const purchaseCostCny = purchaseCostCnyFromFact(sourceProduct?.productFacts[0]?.normalizedJson);
-    const defaults: PromotionBusinessDefaults = {
+    const defaults: PromotionProductContext = {
+      offerId: product.offerId,
+      name: product.name,
+      publicSku: product.publicSku,
+      descriptionCategoryId: product.descriptionCategoryId,
+      typeId: product.typeId,
       logisticsFee,
       commissionRate,
     };
     if (purchaseCostCny !== undefined) {
       defaults.cost = purchaseCostCny * cnyToRub;
     }
-    result.set(productId, defaults);
+    result.set(product.productId, defaults);
   }
   return result;
+}
+
+function numberSetIncludes(values: number[] | undefined, value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && values?.includes(parsed);
+}
+
+function scopeMatches(scope: PromotionScope, candidate: PromotionCandidateLike, currentPrice: number) {
+  if (!scope) return { passed: true as const, reason: null };
+  const item = candidate as Record<string, unknown>;
+  const offerId = typeof item.offerId === "string" ? item.offerId : "";
+  const descriptionCategoryId = optionalNumberField(item, ["descriptionCategoryId"]);
+  const typeId = optionalNumberField(item, ["typeId"]);
+  const categoryKey = descriptionCategoryId && typeId ? `${descriptionCategoryId}:${typeId}` : null;
+
+  if (scope.offerIds?.length && !scope.offerIds.includes(offerId)) {
+    return { passed: false as const, reason: "scope_offer_id_mismatch" };
+  }
+  if (scope.offerIdPrefixes?.length && !scope.offerIdPrefixes.some((prefix) => offerId.startsWith(prefix))) {
+    return { passed: false as const, reason: "scope_offer_prefix_mismatch" };
+  }
+  if (scope.descriptionCategoryIds?.length && !numberSetIncludes(scope.descriptionCategoryIds, descriptionCategoryId)) {
+    return { passed: false as const, reason: "scope_category_mismatch" };
+  }
+  if (scope.typeIds?.length && !numberSetIncludes(scope.typeIds, typeId)) {
+    return { passed: false as const, reason: "scope_type_mismatch" };
+  }
+  if (scope.categoryKeys?.length && (!categoryKey || !scope.categoryKeys.includes(categoryKey))) {
+    return { passed: false as const, reason: "scope_category_key_mismatch" };
+  }
+  if (scope.priceRange?.min !== undefined && currentPrice < scope.priceRange.min) {
+    return { passed: false as const, reason: "scope_price_below_min" };
+  }
+  if (scope.priceRange?.max !== undefined && currentPrice > scope.priceRange.max) {
+    return { passed: false as const, reason: "scope_price_above_max" };
+  }
+  return { passed: true as const, reason: null };
 }
 
 export function selectPromotionCandidates(params: {
   candidates: PromotionCandidateLike[];
   policy: PromotionPolicy;
+  scope?: PromotionScope;
   priceRule: PromotionPriceRule;
+  policyActionId?: string;
   salesByProductId: Map<string, SalesMetric>;
 }) {
   const eligible: Array<{
     productId: number;
+    offerId?: string;
+    name?: string | null;
+    categoryKey?: string | null;
+    policyActionId?: string;
     currentPrice: number;
     actionPrice: number;
     maxActionPrice: number;
@@ -147,6 +217,11 @@ export function selectPromotionCandidates(params: {
   for (const candidate of params.candidates) {
     const rawCandidate = candidate as unknown as Record<string, unknown>;
     const currentPrice = number(candidate.price);
+    const scopeResult = scopeMatches(params.scope, candidate, currentPrice);
+    if (!scopeResult.passed) {
+      rejected.push({ productId: candidate.id, reason: scopeResult.reason });
+      continue;
+    }
     const maxActionPrice = number(candidate.max_action_price);
     const sales = params.salesByProductId.get(String(candidate.id));
     const priceValues: PromotionPriceValues = {
@@ -199,7 +274,18 @@ export function selectPromotionCandidates(params: {
       continue;
     }
     if (eligible.length < 20) {
-      eligible.push({ productId: candidate.id, ...metrics, orders30d: sales?.orders30d ?? 0, revenue30d: sales?.revenue30d ?? 0 });
+      const descriptionCategoryId = optionalNumberField(rawCandidate, ["descriptionCategoryId"]);
+      const typeId = optionalNumberField(rawCandidate, ["typeId"]);
+      eligible.push({
+        productId: candidate.id,
+        offerId: typeof rawCandidate.offerId === "string" ? rawCandidate.offerId : undefined,
+        name: typeof rawCandidate.name === "string" ? rawCandidate.name : null,
+        categoryKey: descriptionCategoryId && typeId ? `${descriptionCategoryId}:${typeId}` : null,
+        policyActionId: params.policyActionId,
+        ...metrics,
+        orders30d: sales?.orders30d ?? 0,
+        revenue30d: sales?.revenue30d ?? 0,
+      });
     }
   }
   return { eligible, rejected };
@@ -299,11 +385,13 @@ export async function activePromotionPolicy(tenantId: string, storeId: string) {
   const payload = action.payloadJson as Record<string, unknown> | null;
   const rule = promotionPolicySchema.safeParse(payload?.rule);
   const priceRule = promotionPriceRuleSchema.safeParse(payload?.priceRule);
-  if (!rule.success || !priceRule.success) return null;
+  const scope = promotionScopeSchema.safeParse(payload?.scope);
+  if (!rule.success || !priceRule.success || !scope.success) return null;
   return {
     actionId: action.id,
     sop: String(payload?.sop ?? ""),
     rule: rule.data,
+    scope: scope.data,
     priceRule: priceRule.data,
   };
 }
@@ -341,24 +429,24 @@ export async function preparePromotionEnrollment(params: {
     ]),
   );
   const salesByProductId = new Map<string, SalesMetric>();
-  const productIdToOfferId = new Map<string, string>();
   for (const product of analytics.products) {
-    productIdToOfferId.set(product.productId, product.offerId);
     const sales = topByOffer.get(product.offerId);
     if (sales) salesByProductId.set(product.productId, sales);
   }
-  const businessDefaults = await promotionBusinessDefaults({
+  const productContexts = await promotionProductContexts({
     tenantId: params.tenantId,
     storeId: store.id,
-    productIdToOfferId,
+    analyticsProducts: analytics.products,
   });
   const selected = selectPromotionCandidates({
     candidates: candidates.map((candidate) => ({
       ...candidate,
-      ...businessDefaults.get(String(candidate.id)),
+      ...productContexts.get(String(candidate.id)),
     })),
     policy: policy.rule,
+    scope: policy.scope,
     priceRule: policy.priceRule,
+    policyActionId: policy.actionId,
     salesByProductId,
   });
   return {

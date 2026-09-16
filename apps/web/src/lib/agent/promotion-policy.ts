@@ -29,6 +29,18 @@ export const promotionPolicySchema = z.strictObject({
   all: z.array(conditionSchema).min(1).max(12),
 });
 
+export const promotionScopeSchema = z.strictObject({
+  offerIds: z.array(z.string().min(1).max(120)).max(200).optional(),
+  offerIdPrefixes: z.array(z.string().min(1).max(40)).max(20).optional(),
+  descriptionCategoryIds: z.array(z.number().int().positive()).max(50).optional(),
+  typeIds: z.array(z.number().int().positive()).max(50).optional(),
+  categoryKeys: z.array(z.string().regex(/^\d+:\d+$/)).max(50).optional(),
+  priceRange: z.strictObject({
+    min: z.number().finite().min(0).optional(),
+    max: z.number().finite().min(0).optional(),
+  }).optional(),
+}).optional();
+
 const priceFormulaVariableSchema = z.enum([
   "currentPrice",
   "maxActionPrice",
@@ -102,6 +114,7 @@ const promotionMetricsSchema = z.strictObject({
 });
 
 export type PromotionPolicy = z.infer<typeof promotionPolicySchema>;
+export type PromotionScope = z.infer<typeof promotionScopeSchema>;
 export type PromotionPriceRule = z.infer<typeof promotionPriceRuleSchema>;
 export type PromotionMetrics = z.infer<typeof promotionMetricsSchema>;
 export type PromotionPriceValues = Partial<Record<z.infer<typeof priceFormulaVariableSchema>, number>>;

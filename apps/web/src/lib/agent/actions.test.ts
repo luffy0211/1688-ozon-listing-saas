@@ -343,6 +343,42 @@ describe("executeApprovedAgentAction", () => {
     });
   });
 
+  it("rejects a promotion policy with an unsafe scope", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "policy-bad-scope",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      type: "PROMOTION_POLICY",
+      status: "APPROVED",
+      payloadJson: {
+        sop: "只报 Polo 商品",
+        rule: { all: [{ field: "stock", operator: "gte", value: 5 }] },
+        priceRule: { mode: "multiplier", value: 0.9 },
+        scope: { offerIdPrefixes: ["POLO"], script: "alert(1)" },
+      },
+      guardrailJson: {},
+    });
+    prisma.agentAction.update.mockResolvedValue({
+      id: "policy-bad-scope",
+      type: "PROMOTION_POLICY",
+      status: "FAILED",
+    });
+
+    await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "policy-bad-scope",
+    });
+
+    expect(prisma.agentAction.update).toHaveBeenCalledWith({
+      where: { id: "policy-bad-scope" },
+      data: {
+        status: "FAILED",
+        error: "invalid_promotion_scope",
+      },
+    });
+  });
+
   it("records partial Ozon promotion activation results", async () => {
     process.env.ENABLE_REAL_OZON_SUBMIT = "true";
     prisma.agentAction.findFirst.mockResolvedValue({

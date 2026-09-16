@@ -185,6 +185,32 @@ function promotionPriceRuleLabel(value: unknown) {
   }
 }
 
+function promotionScopeLabel(value: unknown) {
+  const scope = asRecord(value);
+  const parts: string[] = [];
+  const arrayText = (items: unknown) =>
+    Array.isArray(items)
+      ? items.map((item) => String(item)).filter(Boolean).slice(0, 6).join("、")
+      : "";
+  const offerIds = arrayText(scope.offerIds);
+  const prefixes = arrayText(scope.offerIdPrefixes);
+  const categories = arrayText(scope.descriptionCategoryIds);
+  const typeIds = arrayText(scope.typeIds);
+  const categoryKeys = arrayText(scope.categoryKeys);
+  if (offerIds) parts.push(`offerId：${offerIds}`);
+  if (prefixes) parts.push(`offerId前缀：${prefixes}`);
+  if (categories) parts.push(`类目：${categories}`);
+  if (typeIds) parts.push(`类型：${typeIds}`);
+  if (categoryKeys) parts.push(`类目组合：${categoryKeys}`);
+  const priceRange = asRecord(scope.priceRange);
+  const min = Number(priceRange.min);
+  const max = Number(priceRange.max);
+  if (Number.isFinite(min) || Number.isFinite(max)) {
+    parts.push(`价格：${Number.isFinite(min) ? min : "不限"}-${Number.isFinite(max) ? max : "不限"}`);
+  }
+  return parts.join(" · ");
+}
+
 function actionTypeLabel(type: string) {
   const labels: Record<string, string> = {
     CONTENT_DRAFT: "内容草稿",
@@ -309,6 +335,7 @@ function ActionBubble({
     ? payload.rejected.slice(0, 8)
     : [];
   const priceRuleLabel = promotionPriceRuleLabel(payload.priceRule);
+  const scopeLabel = promotionScopeLabel(payload.scope);
 
   return (
     <section className="mt-3 rounded-xl border border-[#dfe8f4] bg-[#f8fbff] p-3">
@@ -332,6 +359,11 @@ function ActionBubble({
               活动价：{priceRuleLabel}
             </div>
           ) : null}
+          {scopeLabel ? (
+            <div className="mb-1 rounded-md bg-white px-2 py-1 font-semibold text-[#26334d]">
+              适用范围：{scopeLabel}
+            </div>
+          ) : null}
           {ruleConditions.map((condition, index) => {
             const item = asRecord(condition);
             const value = Array.isArray(item.value) ? item.value.join("、") : String(item.value ?? "");
@@ -348,6 +380,11 @@ function ActionBubble({
         <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
           <div className="mb-1 font-medium text-gray-950">活动价计算方法</div>
           <div className="rounded-md bg-white px-2 py-1 font-semibold text-[#075e5a]">{priceRuleLabel}</div>
+          {scopeLabel ? (
+            <div className="mt-1 rounded-md bg-white px-2 py-1 font-semibold text-[#26334d]">
+              适用范围：{scopeLabel}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -356,12 +393,16 @@ function ActionBubble({
           <div className="mb-1 font-medium text-gray-950">待报名商品与实时条件快照</div>
           {promotionProducts.map((product, index) => {
             const item = asRecord(product);
+            const productLabel = String(item.offerId ?? item.productId ?? "-");
             return (
-              <div key={`${String(item.productId)}-${index}`} className="grid grid-cols-4 gap-2 py-1">
-                <span>商品 {String(item.productId ?? "-")}</span>
+              <div key={`${String(item.productId)}-${index}`} className="grid gap-2 py-1 sm:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
+                <span className="break-all" title={String(item.name ?? "")}>
+                  {productLabel}{item.categoryKey ? ` · ${String(item.categoryKey)}` : ""}
+                </span>
                 <span>当前价 {String(item.currentPrice ?? "-")}</span>
                 <span>活动价 {String(item.actionPrice ?? "-")}</span>
                 <span>库存 {String(item.stock ?? "-")}</span>
+                <span>{String(item.name ?? "").slice(0, 24)}</span>
               </div>
             );
           })}
