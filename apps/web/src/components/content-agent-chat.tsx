@@ -15,6 +15,7 @@ import {
   AgentInsightPanel,
   type AgentInsightSource,
 } from "./agent-insight-panel";
+import { AgentExecutionTimeline, type AgentTimelineStep } from "./agent-execution-timeline";
 
 type StoreOption = {
   id: string;
@@ -58,6 +59,7 @@ type ChatMessage = {
   content: string;
   actions?: ContentAgentActionView[];
   dataSources?: AgentInsightSource[];
+  executionTrace?: AgentTimelineStep[];
 };
 
 export function shouldShowCommandDeck(messages: Array<Pick<ChatMessage, "role">>) {
@@ -663,6 +665,7 @@ export function ContentAgentChat({
               content: message.content,
               actions: message.actions,
               dataSources: message.dataSources,
+              executionTrace: message.executionTrace,
             }))
           : [];
         setMessages(loadedMessages.length ? loadedMessages : [introMessage]);
@@ -739,6 +742,7 @@ export function ContentAgentChat({
           content: data.output,
           actions: data.actions,
           dataSources: data.dataSources,
+          executionTrace: data.executionTrace,
         },
       ]);
     } catch (err) {
@@ -864,7 +868,10 @@ export function ContentAgentChat({
                 >
                   <div className="whitespace-pre-wrap break-words">{message.content}</div>
                   {message.role === "assistant" ? (
-                    <AgentInsightPanel sources={message.dataSources} />
+                    <>
+                      <AgentExecutionTimeline steps={message.executionTrace} />
+                      <AgentInsightPanel sources={message.dataSources} />
+                    </>
                   ) : null}
                   {message.actions?.map((action) => (
                     <ActionBubble

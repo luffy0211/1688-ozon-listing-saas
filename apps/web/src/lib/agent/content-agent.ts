@@ -34,6 +34,7 @@ import {
   listOzonPromotions,
   preparePromotionEnrollment,
 } from "./promotions";
+import { buildAgentExecutionTrace, buildAgentPlan } from "./execution-trace";
 
 type StoreRef = {
   id: string;
@@ -943,12 +944,18 @@ export async function runOzonContentAgent(params: {
 
   const toolCalls: ToolCallLog[] = [];
   const requiredToolName = requiredOzonToolForPrompt(prompt, offerId);
+  const createdActionIds: string[] = [];
+  const agentPlan = buildAgentPlan({
+    prompt,
+    requiredToolName,
+    offerId,
+    competitorsPerCategory,
+  });
 
   try {
     requireConfiguredModel();
 
     let latestProductContent: NormalizedProductContent | null = null;
-    const createdActionIds: string[] = [];
     const listedPromotionIds = new Set<number>();
     let latestPromotionCandidateActionId: number | null = null;
     let preloadedContext = "";
@@ -1591,10 +1598,15 @@ export async function runOzonContentAgent(params: {
       select: { role: true, content: true },
     });
     const competitorMemoryContext = await loadCompetitorMemoryContext(params.tenantId);
+    const planContext = [
+      "本次任务必须按以下计划执行；涉及真实店铺、竞品、商品、活动和 Ozon 写操作时，必须调用对应工具，不允许猜测。",
+      ...agentPlan.map((item, index) => `${index + 1}. ${item.title}：${item.description}`),
+    ].join("\n");
 
     if (requiredToolName === "get_ozon_store_snapshot") {
       const snapshot = await readStoreSnapshot(params.storeId);
       preloadedContext = [
+        planContext,
         competitorMemoryContext,
         `店铺：${snapshot.store?.name ?? "未选择"}`,
         `商品数：${snapshot.latestSnapshot?.productCount ?? "未知"}`,
@@ -1603,7 +1615,7 @@ export async function runOzonContentAgent(params: {
         `同步时间：${snapshot.latestSnapshot?.syncedAt ?? snapshot.capturedAt}`,
       ].filter(Boolean).join("\n");
     } else {
-      preloadedContext = competitorMemoryContext;
+      preloadedContext = [planContext, competitorMemoryContext].filter(Boolean).join("\n");
     }
 
     const agent = new Agent({
@@ -1759,6 +1771,12 @@ export async function runOzonContentAgent(params: {
       ? blockedMissingToolOutput(requiredToolName)
       : output;
     const dataSources = contentAgentDataSourcesFromToolCalls(toolCalls);
+    const executionTrace = buildAgentExecutionTrace({
+      plan: agentPlan,
+      toolCalls,
+      createdActionIds,
+      runStatus: "SUCCEEDED",
+    });
 
     await finishContentRun({
       tenantId: params.tenantId,
@@ -1772,6 +1790,8 @@ export async function runOzonContentAgent(params: {
         createdActionIds,
         requiredToolName,
         blockedMissingTool,
+        plan: agentPlan,
+        executionTrace,
         dataSources,
       },
     });
@@ -1785,9 +1805,17 @@ export async function runOzonContentAgent(params: {
       output: guardedOutput,
       actions,
       dataSources,
+      plan: agentPlan,
+      executionTrace,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const executionTrace = buildAgentExecutionTrace({
+      plan: agentPlan,
+      toolCalls,
+      createdActionIds,
+      runStatus: "FAILED",
+    });
     await prisma.agentRun.update({
       where: { id: runRecord.id },
       data: {
@@ -1797,6 +1825,8 @@ export async function runOzonContentAgent(params: {
           agent: "ozon_content_v1",
           offerId,
           toolCalls,
+          plan: agentPlan,
+          executionTrace,
           dataSources: contentAgentDataSourcesFromToolCalls(toolCalls),
         } as never,
         finishedAt: new Date(),
@@ -1853,5 +1883,7 @@ export function serializeContentAgentResult(
     output: result.output,
     actions: result.actions.map((action) => serializeContentAgentAction(action)),
     dataSources: result.dataSources,
+    plan: result.plan,
+    executionTrace: result.executionTrace,
   };
 }

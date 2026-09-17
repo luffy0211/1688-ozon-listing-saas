@@ -36,6 +36,11 @@ function dataSourcesFromRun(run: { toolCallsJson: unknown } | null | undefined) 
     : [];
 }
 
+function arrayFromRun(run: { toolCallsJson: unknown } | null | undefined, key: string) {
+  const value = asRecord(run?.toolCallsJson)[key];
+  return Array.isArray(value) ? value : [];
+}
+
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const requestSession = await sessionFromRequest(req);
@@ -136,6 +141,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
         content: message.content,
         createdAt: message.createdAt.toISOString(),
         dataSources: message.role === "ASSISTANT" ? dataSourcesFromRun(run) : [],
+        plan: message.role === "ASSISTANT" ? arrayFromRun(run, "plan") : [],
+        executionTrace: message.role === "ASSISTANT" ? arrayFromRun(run, "executionTrace") : [],
         actions: runId
           ? (actionsByRunId.get(runId) ?? []).map((action) =>
               serializeContentAgentAction(action),
