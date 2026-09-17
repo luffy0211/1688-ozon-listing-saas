@@ -281,6 +281,8 @@ export function buildAgentExecutionTrace(params: {
   toolCalls: ToolCallLike[];
   createdActionIds?: string[];
   runStatus?: "RUNNING" | "SUCCEEDED" | "FAILED";
+  runningToolName?: string | null;
+  runningStartedAt?: string | null;
 }) {
   const callsByStepId = new Map<string, ToolCallLike>();
   for (const call of params.toolCalls) {
@@ -292,6 +294,7 @@ export function buildAgentExecutionTrace(params: {
   let reachedFailure = false;
   return params.plan.map((planStep, index): AgentExecutionStep => {
     const call = callsByStepId.get(planStep.id);
+    const runningStepId = params.runningToolName ? mapToolToStepId(params.runningToolName) : null;
     const isSyntheticStart = planStep.kind === "RECEIVE_TASK" || planStep.kind === "PLAN_TASK";
     const createsActions = planStep.kind === "CREATE_ACTIONS";
     const waitsForApproval = planStep.kind === "WAIT_FOR_APPROVAL";
@@ -310,6 +313,20 @@ export function buildAgentExecutionTrace(params: {
         inputSummary: summarizeInput(call.input),
         outputSummary: failed ? null : summarizeOutput(call.output),
         error: call.error ?? null,
+      };
+    }
+
+    if (runningStepId === planStep.id) {
+      return {
+        ...planStep,
+        status: "running",
+        startedAt: params.runningStartedAt ?? new Date().toISOString(),
+        finishedAt: null,
+        durationMs: null,
+        toolName: params.runningToolName ?? planStep.expectedTool ?? null,
+        inputSummary: null,
+        outputSummary: "正在调用真实工具",
+        error: null,
       };
     }
 

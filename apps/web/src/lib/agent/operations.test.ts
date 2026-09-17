@@ -8,6 +8,7 @@ import {
   lowContentRatingProducts,
   selectCompetitorDiagnosisTargets,
   selectCompetitorTargets,
+  summarizeCompetitorEvidence,
   summarizeProductRecommendations,
   summarizeFinanceTransactions,
   targetsWithoutCompetitorEvidence,
@@ -57,6 +58,39 @@ describe("Ozon operations helpers", () => {
 
     expect(targetsWithoutCompetitorEvidence(targets as never, results as never))
       .toEqual([targets[1]]);
+  });
+
+  it("summarizes competitor evidence quality and crawler blocking risks", () => {
+    const targets = [
+      { descriptionCategoryId: 10, typeId: 20, offerId: "a", title: "Поло" },
+      { descriptionCategoryId: 10, typeId: 30, offerId: "b", title: "Рубашка" },
+    ];
+
+    const quality = summarizeCompetitorEvidence({
+      requestedPerCategory: 5,
+      targets: targets as never,
+      reports: [{
+        target: targets[0],
+        category: { name: "Поло" },
+        source: "ozon_http_crawler",
+        competitors: [{ sku: "1" }, { sku: "2" }, { sku: "3" }, { sku: "4" }, { sku: "5" }],
+        cached: true,
+      }],
+      warnings: ["a：page1 扫描失败: HTTP 403"],
+    });
+
+    expect(quality).toMatchObject({
+      categoryCount: 2,
+      coveredCategoryCount: 1,
+      sufficientCategoryCount: 1,
+      insufficientCategoryCount: 1,
+      competitorCount: 5,
+      reusedCacheCount: 1,
+      hasCrawlerBlocked: true,
+    });
+    expect(quality.insufficientCategories).toEqual([
+      expect.objectContaining({ categoryName: "Рубашка", competitorCount: 0 }),
+    ]);
   });
 
   it("builds one approval-gated batch from evidence-backed attribute additions", () => {

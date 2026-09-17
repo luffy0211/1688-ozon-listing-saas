@@ -15,7 +15,7 @@ import {
   AgentInsightPanel,
   type AgentInsightSource,
 } from "./agent-insight-panel";
-import { AgentExecutionTimeline, type AgentTimelineStep } from "./agent-execution-timeline";
+import type { AgentTimelineStep } from "./agent-execution-timeline";
 import { buildPendingAgentExecutionTrace } from "@/lib/agent/execution-trace";
 
 type StoreOption = {
@@ -60,7 +60,6 @@ type ChatMessage = {
   content: string;
   actions?: ContentAgentActionView[];
   dataSources?: AgentInsightSource[];
-  executionTrace?: AgentTimelineStep[];
 };
 
 export function shouldShowCommandDeck(messages: Array<Pick<ChatMessage, "role">>) {
@@ -308,6 +307,72 @@ async function getJson(path: string) {
     throw new Error(json.error?.message ?? "加载历史失败");
   }
   return json.data;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const runningToolLabels: Record<string, string> = {
+  get_ozon_store_snapshot: "正在读取店铺数据...",
+  get_ozon_product_content: "正在读取商品内容...",
+  diagnose_ozon_store: "正在诊断店铺经营情况...",
+  analyze_ozon_competitors: "正在采集并分析竞品数据...",
+  list_ozon_promotions: "正在读取 Ozon 活动...",
+  get_ozon_promotion_candidates: "正在读取活动候选商品...",
+  compile_promotion_policy: "正在整理活动报名规则...",
+  propose_promotion_enrollment: "正在生成活动报名方案...",
+  propose_content_draft: "正在生成内容修改建议...",
+  propose_product_mutation_actions: "正在生成待确认修改动作...",
+};
+
+const runningKindLabels: Record<string, string> = {
+  RECEIVE_TASK: "正在接收任务...",
+  PLAN_TASK: "正在规划执行步骤...",
+  READ_STORE_SNAPSHOT: "正在读取店铺数据...",
+  READ_PRODUCT_CONTENT: "正在读取商品内容...",
+  DIAGNOSE_STORE: "正在诊断店铺经营情况...",
+  COLLECT_COMPETITORS: "正在采集并分析竞品数据...",
+  SUMMARIZE_CATEGORY_PLAYBOOK: "正在总结类目属性经验...",
+  DIAGNOSE_PRODUCTS: "正在检查自家商品差距...",
+  LIST_PROMOTIONS: "正在读取 Ozon 活动...",
+  READ_PROMOTION_CANDIDATES: "正在读取活动候选商品...",
+  COMPILE_PROMOTION_POLICY: "正在整理活动报名规则...",
+  PROPOSE_PROMOTION_ENROLLMENT: "正在生成活动报名方案...",
+  CREATE_ACTIONS: "正在生成待确认建议...",
+  WAIT_FOR_APPROVAL: "正在准备人工确认项...",
+  DIRECT_ANSWER: "正在整理回复...",
+};
+
+function runningAgentStatus(steps: AgentTimelineStep[]) {
+  const current =
+    steps.find((step) => step.status === "running") ??
+    steps.find((step) => step.status === "pending") ??
+    null;
+  if (!current) return "Agent 正在处理...";
+  return (
+    runningToolLabels[current.toolName ?? ""] ??
+    runningToolLabels[current.expectedTool ?? ""] ??
+    runningKindLabels[current.kind] ??
+    "Agent 正在处理..."
+  );
+}
+
+async function pollAgentRunTrace(
+  runId: string,
+  onUpdate: (trace: AgentTimelineStep[]) => void,
+) {
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    const data = await getJson(`/api/v1/agent/runs/${runId}/trace`);
+    if (Array.isArray(data.executionTrace)) {
+      onUpdate(data.executionTrace);
+    }
+    if (data.status === "succeeded" || data.status === "failed") {
+      return data;
+    }
+    await wait(1000);
+  }
+  throw new Error("Agent 执行超时，请到任务中心查看结果。");
 }
 
 function replaceAction(messages: ChatMessage[], action: ContentAgentActionView): ChatMessage[] {
@@ -667,7 +732,6 @@ export function ContentAgentChat({
               content: message.content,
               actions: message.actions,
               dataSources: message.dataSources,
-              executionTrace: message.executionTrace,
             }))
           : [];
         setMessages(loadedMessages.length ? loadedMessages : [introMessage]);
@@ -715,37 +779,41 @@ export function ContentAgentChat({
     setRunning(true);
 
     try {
-      const data = await postJson(
-        `/api/v1/agent/content/sessions/${requestSessionId}/messages`,
+      const started = await postJson(
+        `/api/v1/agent/content/sessions/${requestSessionId}/messages/start`,
         {
           prompt: content,
           storeId: selectedStoreId || null,
         },
       );
+      if (Array.isArray(started.executionTrace)) {
+        setRunningTrace(started.executionTrace);
+      }
       const updatedAt = new Date().toISOString();
       setSessionList((current) =>
         upsertSession(current, {
-          id: data.sessionId,
+          id: started.sessionId,
           title:
-            current.find((session) => session.id === data.sessionId)?.title ??
+            current.find((session) => session.id === started.sessionId)?.title ??
             sessionTitleFromPrompt(content),
           status:
-            current.find((session) => session.id === data.sessionId)?.status ?? "OPEN",
+            current.find((session) => session.id === started.sessionId)?.status ?? "OPEN",
           updatedAt,
         }),
       );
-      if (requestSessionId !== data.sessionId) {
-        setSelectedSessionId(data.sessionId);
+      if (requestSessionId !== started.sessionId) {
+        setSelectedSessionId(started.sessionId);
       }
+
+      const data = await pollAgentRunTrace(started.runId, setRunningTrace);
       setMessages((current) => [
         ...current,
         {
-          id: `assistant-${data.runId}`,
+          id: `assistant-${started.runId}`,
           role: "assistant",
-          content: data.output,
+          content: data.status === "failed" ? data.error ?? "Agent 执行失败" : data.output,
           actions: data.actions,
           dataSources: data.dataSources,
-          executionTrace: data.executionTrace,
         },
       ]);
     } catch (err) {
@@ -872,10 +940,7 @@ export function ContentAgentChat({
                 >
                   <div className="whitespace-pre-wrap break-words">{message.content}</div>
                   {message.role === "assistant" ? (
-                    <>
-                      <AgentExecutionTimeline steps={message.executionTrace} />
-                      <AgentInsightPanel sources={message.dataSources} />
-                    </>
+                    <AgentInsightPanel sources={message.dataSources} />
                   ) : null}
                   {message.actions?.map((action) => (
                     <ActionBubble
@@ -897,12 +962,9 @@ export function ContentAgentChat({
             ) : null}
             {running ? (
               <div className="flex justify-start">
-                <div className="max-w-[94%] rounded-2xl rounded-bl-md border border-white bg-white px-4 py-3 text-sm leading-6 text-[#35415a] shadow-[0_10px_28px_rgba(49,78,122,0.09)]">
-                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-[#6c55a6]">
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    Agent 正在按计划执行
-                  </div>
-                  <AgentExecutionTimeline steps={runningTrace} />
+                <div className="inline-flex max-w-[94%] items-center gap-2 rounded-2xl rounded-bl-md border border-white bg-white px-4 py-3 text-sm font-semibold leading-6 text-[#6c55a6] shadow-[0_10px_28px_rgba(49,78,122,0.09)]">
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                  <span>{runningAgentStatus(runningTrace)}</span>
                 </div>
               </div>
             ) : null}

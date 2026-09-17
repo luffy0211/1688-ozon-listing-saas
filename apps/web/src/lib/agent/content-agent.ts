@@ -6,7 +6,12 @@ import {
   decryptSecret,
   prisma,
 } from "@saas/db";
-import { OzonClient, type OzonProductInfoItem, type OzonProductStockItem } from "@saas/ozon";
+import {
+  OzonClient,
+  type CategoryAttributePlaybook,
+  type OzonProductInfoItem,
+  type OzonProductStockItem,
+} from "@saas/ozon";
 import { z } from "zod";
 import { env } from "@/lib/env";
 import { consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
@@ -35,6 +40,11 @@ import {
   preparePromotionEnrollment,
 } from "./promotions";
 import { buildAgentExecutionTrace, buildAgentPlan } from "./execution-trace";
+import {
+  clearAgentRunProgressLater,
+  setAgentRunProgress,
+  type AgentRunProgressSnapshot,
+} from "./run-progress";
 
 type StoreRef = {
   id: string;
@@ -83,6 +93,109 @@ export type ContentAgentDataSource = {
   categories?: string[];
   error?: string | null;
 };
+
+const ruZhTranslations: Record<string, string> = {
+  "Поло": "Polo衫",
+  "Рубашка": "衬衫",
+  "Толстовка": "卫衣",
+  "Лонгслив": "长袖T恤",
+  "Худи": "连帽卫衣",
+  "Футболка": "T恤",
+  "Платье": "连衣裙",
+  "Сезон": "季节",
+  "Материал": "材质",
+  "Состав материала": "面料成分",
+  "Коллекция": "系列",
+  "Рост": "适用身高",
+  "Тип": "商品类型",
+  "Стиль": "风格",
+  "Российский размер": "俄罗斯尺码",
+  "Пол": "性别",
+  "Бренд": "品牌",
+  "Цвет товара": "商品颜色",
+  "Цвет": "颜色",
+  "Объединить на одной карточке": "合并到同一商品卡",
+  "Размер на модели": "模特尺码",
+  "Рост модели на фото": "图片中模特身高",
+  "На любой сезон": "四季通用",
+  "Демисезон": "春秋季",
+  "Лето": "夏季",
+  "Зима": "冬季",
+  "Хлопок": "棉",
+  "Мерсеризованный хлопок": "丝光棉",
+  "Лён": "亚麻",
+  "Муслин": "棉纱/慕斯林",
+  "Политекс": "Politeks面料",
+  "Сорочка": "衬衫面料",
+  "Полиэфирное волокно": "聚酯纤维",
+  "Полиэстер": "涤纶",
+  "Полиэфир": "聚酯",
+  "Кулирная гладь": "平纹针织棉",
+  "Базовая коллекция": "基础系列",
+  "Повседневный": "日常休闲",
+  "Мужской": "男士",
+  "Женский": "女士",
+};
+
+function translateRu(value: string) {
+  const text = value.trim();
+  if (!text) return "";
+  const direct = ruZhTranslations[text];
+  if (direct) return direct;
+  if (/^Весна-лето(?:\s+[\d/]+)?$/i.test(text)) {
+    return text.replace(/^Весна-лето/i, "春夏");
+  }
+  if (/^Осень-зима(?:\s+[\d/]+)?$/i.test(text)) {
+    return text.replace(/^Осень-зима/i, "秋冬");
+  }
+  if (/^\d+(?:-\d+)?$/.test(text)) return text;
+  if (/^\d+(?:-\d+)?\s*см$/i.test(text)) return text.replace(/см/i, "厘米");
+  return "中文待确认";
+}
+
+function ruWithZh(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return "";
+  return `${text}（${translateRu(text)}）`;
+}
+
+function commonValueText(value: { value: string; count: number }, sampleSize: number) {
+  const countText = sampleSize > 0 ? `，${value.count}/${sampleSize}` : "";
+  return `${ruWithZh(value.value)}${countText}`;
+}
+
+export function categoryExperienceSummary(playbooks: CategoryAttributePlaybook[]) {
+  return playbooks.map((playbook, index) => {
+    const usefulAttributes = playbook.attributes
+      .filter((attribute) => attribute.coverageCount > 0)
+      .slice(0, 6);
+    const required = playbook.attributes
+      .filter((attribute) => attribute.required)
+      .map((attribute) => ruWithZh(attribute.ozonNameRu ?? attribute.competitorNameRu))
+      .filter(Boolean)
+      .slice(0, 8);
+    const lines = [
+      `${index + 1}. ${ruWithZh(playbook.categoryName)}（${playbook.categoryKey}，${playbook.sampleSize}样本）`,
+      `- 规律：头部竞品通常重点填写 ${usefulAttributes
+        .slice(0, 4)
+        .map((attribute) => ruWithZh(attribute.ozonNameRu ?? attribute.competitorNameRu))
+        .filter(Boolean)
+        .join("、") || "暂无稳定字段"}。`,
+      ...usefulAttributes.map((attribute) => {
+        const name = ruWithZh(attribute.ozonNameRu ?? attribute.competitorNameRu);
+        const values = attribute.commonValues.length
+          ? attribute.commonValues
+            .slice(0, 4)
+            .map((value) => commonValueText(value, playbook.sampleSize))
+            .join("、")
+          : "无稳定多数值";
+        return `- ${name}：${values}`;
+      }),
+      required.length ? `- 必填项：${required.join("、")}` : "",
+    ].filter(Boolean);
+    return lines.join("\n");
+  }).join("\n\n");
+}
 
 async function chargeContentAgentFeature(params: {
   tenantId: string;
@@ -528,6 +641,8 @@ function buildInstructions(offerId: string | null) {
     "用户要求重新采集竞品分析时，先确认用户明确说明每个类目分析多少个竞品，允许 1 至 10 个；未说明时只询问数量，不调用工具。说明后必须调用 analyze_ozon_competitors；该工具统计自家店铺全部未归档 Ozon 官方类目，每个类目选择一个代表商品获取竞品证据，再用类目经验诊断该类目的全部自家商品。用户要求基于已保存、之前、历史竞品分析时，优先使用系统预读的竞品记忆，不要重新采集。竞品结论必须带页面证据，不得复制竞品整段文案。",
     "竞品分析默认复用已经保存的证据；只有用户明确要求重新采集或刷新竞品时才调用本地 Ozon 采集器，采集器不可用时才回退 Tavily。",
     "竞品分析工具已经生成确定性的类目属性经验、Ozon 官方字段映射和自家商品建议。回复固定分成：类目填写经验、自家商品修改建议、待确认批量操作。不要把分析改写成属性冲突报告。",
+    "竞品分析回复中的“类目填写经验”必须优先使用工具返回的 categoryExperienceSummary。它已经按“俄语（中文）”格式整理。多个俄语值也要逐个翻译。不要翻译 offerId、productId、SKU、descriptionCategoryId、typeId、categoryKey。",
+    "竞品分析回复必须检查 evidenceQuality：如果 insufficientCategoryCount 大于 0，必须先说明哪些类目证据不足；如果 hasCrawlerBlocked 为 true，说明本地 Ozon 公开页采集可能被 403、cookie、代理或风控拦截；如果 hasSearchFallbackFailure 为 true，说明 Tavily/搜索索引回退也失败。证据不足时不能生成看似完整的经验结论。",
     "竞品总数必须使用工具返回的 uniqueCompetitorCount，不得把多个自家商品共享的同一竞品重复相加；类目有效样本少于 3 个时必须明确标为证据不足。",
     "竞品多数值只是经验，不是自家商品事实。只有工具返回 status=ADD 的建议有自家商品证据并可进入待确认操作；NEEDS_CONFIRMATION 只能提示人工补充，COMPLETE 不修改，UNMAPPED 不执行。",
     "只有用户明确询问价格或销量时，才说明这些字段是否可用；不能让价格或销量缺失掩盖已经返回的商品内容。搜索顺序不是销量排名，评价数不是销量，索引页面没有转化率或广告消耗。",
@@ -894,6 +1009,7 @@ export async function runOzonContentAgent(params: {
   prompt: string;
   sessionId?: string | null;
   storeId?: string | null;
+  onStarted?: (snapshot: AgentRunProgressSnapshot) => void;
 }) {
   const prompt = redactSensitiveText(params.prompt);
   const offerId = extractOfferId(prompt);
@@ -951,6 +1067,55 @@ export async function runOzonContentAgent(params: {
     offerId,
     competitorsPerCategory,
   });
+  let runningToolName: string | null = null;
+  let runningStartedAt: string | null = null;
+
+  function publishProgress(
+    status: "running" | "succeeded" | "failed" = "running",
+    data?: {
+      output?: string | null;
+      error?: string | null;
+      actions?: unknown[];
+      dataSources?: unknown[];
+    },
+  ) {
+    const snapshot: AgentRunProgressSnapshot = {
+      tenantId: params.tenantId,
+      sessionId: session.id,
+      runId: runRecord.id,
+      status,
+      output: data?.output ?? null,
+      error: data?.error ?? null,
+      plan: agentPlan,
+      executionTrace: buildAgentExecutionTrace({
+        plan: agentPlan,
+        toolCalls,
+        createdActionIds,
+        runStatus: status === "failed" ? "FAILED" : status === "succeeded" ? "SUCCEEDED" : "RUNNING",
+        runningToolName: status === "running" ? runningToolName : null,
+        runningStartedAt: status === "running" ? runningStartedAt : null,
+      }),
+      actions: data?.actions ?? [],
+      dataSources: data?.dataSources ?? contentAgentDataSourcesFromToolCalls(toolCalls),
+      updatedAt: new Date().toISOString(),
+    };
+    setAgentRunProgress(snapshot);
+    return snapshot;
+  }
+
+  function startToolProgress(toolName: string) {
+    runningToolName = toolName;
+    runningStartedAt = new Date().toISOString();
+    publishProgress("running");
+  }
+
+  function finishToolProgress() {
+    runningToolName = null;
+    runningStartedAt = null;
+    publishProgress("running");
+  }
+
+  params.onStarted?.(publishProgress("running"));
 
   try {
     requireConfiguredModel();
@@ -963,6 +1128,7 @@ export async function runOzonContentAgent(params: {
 
     async function readStoreSnapshot(storeId: string | null | undefined) {
       const at = new Date().toISOString();
+      startToolProgress("get_ozon_store_snapshot");
       try {
         const snapshot = await getAgentStoreSnapshot({
           tenantId: params.tenantId,
@@ -992,6 +1158,7 @@ export async function runOzonContentAgent(params: {
             syncedAt: snapshot.latestSnapshot?.syncedAt ?? null,
           },
         });
+        finishToolProgress();
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1001,6 +1168,7 @@ export async function runOzonContentAgent(params: {
           input: { storeId: storeId ?? params.storeId ?? null },
           error: message,
         });
+        finishToolProgress();
         throw error;
       }
     }
@@ -1026,6 +1194,7 @@ export async function runOzonContentAgent(params: {
         const at = new Date().toISOString();
         const creditKey = `agent-tool:${runRecord.id}:diagnose_ozon_store`;
         let charged = false;
+        startToolProgress("diagnose_ozon_store");
         try {
           await chargeContentAgentFeature({
             tenantId: params.tenantId,
@@ -1059,6 +1228,7 @@ export async function runOzonContentAgent(params: {
               })),
             },
           });
+          finishToolProgress();
           return result;
         } catch (error) {
           if (charged) {
@@ -1078,6 +1248,7 @@ export async function runOzonContentAgent(params: {
             input: { storeId: storeId ?? params.storeId ?? null },
             error: message,
           });
+          finishToolProgress();
           throw error;
         }
       },
@@ -1092,6 +1263,7 @@ export async function runOzonContentAgent(params: {
         const at = new Date().toISOString();
         const creditKey = `agent-tool:${runRecord.id}:analyze_ozon_competitors`;
         let charged = false;
+        startToolProgress("analyze_ozon_competitors");
         try {
           if (!competitorsPerCategory) {
             throw new ContentAgentInputError(
@@ -1133,6 +1305,9 @@ export async function runOzonContentAgent(params: {
           const reportRecords = result.reports.map(rawRecord);
           const competitorCount = countUniqueCompetitors(result.reports);
           const diagnosisSummary = summarizeProductRecommendations(result.productRecommendations);
+          const formattedCategoryExperience = categoryExperienceSummary(
+            result.categoryPlaybooks.map((item) => item.playbook),
+          );
           const categories = [...new Set(reportRecords
             .map((report) => stringField(rawRecord(report.category).name))
             .filter((name): name is string => Boolean(name)))];
@@ -1150,6 +1325,8 @@ export async function runOzonContentAgent(params: {
               competitorCount,
               categories,
               playbookCount: result.categoryPlaybooks.length,
+              evidenceQuality: result.evidenceQuality,
+              categoryExperienceSummary: formattedCategoryExperience,
               recommendationCount: result.productRecommendations.reduce(
                 (total, product) => total + product.recommendations.length,
                 0,
@@ -1157,6 +1334,7 @@ export async function runOzonContentAgent(params: {
               pendingActionId: created[0]?.id ?? null,
             },
           });
+          finishToolProgress();
           return {
             store: result.store,
             competitorsPerCategory: result.competitorsPerCategory,
@@ -1164,6 +1342,8 @@ export async function runOzonContentAgent(params: {
             capturedAt: result.capturedAt,
             uniqueCompetitorCount: competitorCount,
             categories,
+            evidenceQuality: result.evidenceQuality,
+            categoryExperienceSummary: formattedCategoryExperience,
             categoryPlaybooks: result.categoryPlaybooks.map((item) => item.playbook),
             diagnosisSummary,
             warnings: result.warnings,
@@ -1189,6 +1369,7 @@ export async function runOzonContentAgent(params: {
             input: { storeId: storeId ?? params.storeId ?? null },
             error: message,
           });
+          finishToolProgress();
           throw error;
         }
       },
@@ -1799,6 +1980,12 @@ export async function runOzonContentAgent(params: {
       where: { tenantId: params.tenantId, runId: runRecord.id },
       orderBy: { createdAt: "asc" },
     });
+    publishProgress("succeeded", {
+      output: guardedOutput,
+      actions: actions.map((action) => serializeContentAgentAction(action)),
+      dataSources,
+    });
+    clearAgentRunProgressLater(runRecord.id);
     return {
       sessionId: session.id,
       runId: runRecord.id,
@@ -1836,6 +2023,11 @@ export async function runOzonContentAgent(params: {
       where: { id: session.id },
       data: { updatedAt: new Date() },
     });
+    publishProgress("failed", {
+      error: message,
+      dataSources: contentAgentDataSourcesFromToolCalls(toolCalls),
+    });
+    clearAgentRunProgressLater(runRecord.id);
     throw error;
   }
 }

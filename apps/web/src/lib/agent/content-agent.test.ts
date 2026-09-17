@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   competitorsPerCategoryFromPrompt,
   competitorMemoryContextFromReports,
+  categoryExperienceSummary,
   contentAgentModelName,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
@@ -284,5 +285,50 @@ describe("content agent tool enforcement helpers", () => {
       analyzedProductCount: 87,
       competitorCount: 20,
     });
+  });
+
+  it("formats category experience with Chinese translations after Russian text", () => {
+    const summary = categoryExperienceSummary([{
+      kind: "category_attribute_playbook",
+      schemaVersion: 1,
+      categoryKey: "200000933:93194",
+      descriptionCategoryId: 200000933,
+      typeId: 93194,
+      categoryName: "Поло",
+      sampleSize: 5,
+      capturedAt: "2026-09-17T00:00:00.000Z",
+      attributes: [
+        {
+          competitorNameRu: "Сезон",
+          ozonAttributeId: 4495,
+          ozonNameRu: "Сезон",
+          required: false,
+          dictionaryId: 1,
+          coverageCount: 5,
+          coverageRate: 1,
+          mappingStatus: "EXACT",
+          commonValues: [{ value: "На любой сезон", count: 5, rate: 1, dictionaryValueId: 1 }],
+          evidenceUrls: ["https://www.ozon.ru/product/1/"],
+        },
+        {
+          competitorNameRu: "Тип",
+          ozonAttributeId: 8229,
+          ozonNameRu: "Тип",
+          required: true,
+          dictionaryId: 2,
+          coverageCount: 5,
+          coverageRate: 1,
+          mappingStatus: "EXACT",
+          commonValues: [{ value: "Поло", count: 5, rate: 1, dictionaryValueId: 2 }],
+          evidenceUrls: ["https://www.ozon.ru/product/2/"],
+        },
+      ],
+      descriptionPatterns: { availableCount: 0, averageLength: 0, samples: [] },
+    }]);
+
+    expect(summary).toContain("Поло（Polo衫）");
+    expect(summary).toContain("Сезон（季节）");
+    expect(summary).toContain("На любой сезон（四季通用）");
+    expect(summary).toContain("Тип（商品类型）");
   });
 });

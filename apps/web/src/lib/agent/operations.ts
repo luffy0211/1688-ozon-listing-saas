@@ -256,6 +256,10 @@ function competitorCategoryKey(value: {
     : null;
 }
 
+function textField(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 export function targetsWithoutCompetitorEvidence(
   targets: OzonCompetitorTarget[],
   results: Pick<OzonCategoryCompetitorResult, "target" | "competitors">[],
@@ -268,6 +272,72 @@ export function targetsWithoutCompetitorEvidence(
     const key = competitorCategoryKey(target);
     return !key || !covered.has(key);
   });
+}
+
+export function summarizeCompetitorEvidence(params: {
+  targets: OzonCompetitorTarget[];
+  reports: unknown[];
+  requestedPerCategory: number;
+  warnings?: string[];
+}) {
+  const byCategory = new Map<string, {
+    categoryKey: string;
+    categoryName: string;
+    competitorCount: number;
+    cached: boolean;
+    source: string;
+    sufficient: boolean;
+  }>();
+  params.reports.forEach((report) => {
+    const item = record(report);
+    const target = record(item.target);
+    const key = competitorCategoryKey({
+      descriptionCategoryId: Number(target.descriptionCategoryId) || null,
+      typeId: Number(target.typeId) || null,
+    });
+    if (!key) return;
+    const competitors = Array.isArray(item.competitors) ? item.competitors : [];
+    byCategory.set(key, {
+      categoryKey: key,
+      categoryName:
+        textField(record(item.category).name) ??
+        textField(target.categoryNameRu) ??
+        textField(target.title) ??
+        key,
+      competitorCount: competitors.length,
+      cached: item.cached === true,
+      source: textField(item.source) ?? "unknown",
+      sufficient: competitors.length >= params.requestedPerCategory,
+    });
+  });
+
+  const categories = params.targets.map((target) => {
+    const key = competitorCategoryKey(target) ?? `${target.offerId}:uncategorized`;
+    return byCategory.get(key) ?? {
+      categoryKey: key,
+      categoryName: target.categoryNameRu ?? target.title,
+      competitorCount: 0,
+      cached: false,
+      source: "none",
+      sufficient: false,
+    };
+  });
+  const insufficient = categories.filter((category) => !category.sufficient);
+  const warningTexts = params.warnings ?? [];
+  return {
+    requestedPerCategory: params.requestedPerCategory,
+    categoryCount: categories.length,
+    coveredCategoryCount: categories.filter((category) => category.competitorCount > 0).length,
+    sufficientCategoryCount: categories.filter((category) => category.sufficient).length,
+    insufficientCategoryCount: insufficient.length,
+    competitorCount: categories.reduce((total, category) => total + category.competitorCount, 0),
+    reusedCacheCount: categories.filter((category) => category.cached).length,
+    hasCrawlerBlocked: warningTexts.some((warning) => /403|HTTP|采集失败|扫描失败|cookie|代理|proxy/i.test(warning)),
+    hasSearchFallbackFailure: warningTexts.some((warning) => /Tavily|搜索索引.*失败|fetch failed/i.test(warning)),
+    categories,
+    insufficientCategories: insufficient,
+    warnings: warningTexts.slice(0, 20),
+  };
 }
 
 export function selectCompetitorDiagnosisTargets(
@@ -1016,6 +1086,7 @@ export async function analyzeOzonCompetitors(params: {
     : reportSources.has("ozon_http_crawler")
       ? "本地 Ozon 纯 HTTP 采集器"
       : "Tavily / Ozon 搜索引擎收录页面";
+  const combinedWarnings = [...warnings, ...playbooks.warnings];
   return {
     store: { id: store.id, name: store.name },
     periodDays: 30,
@@ -1026,6 +1097,12 @@ export async function analyzeOzonCompetitors(params: {
     categoryPlaybooks: playbooks.playbookReports,
     productRecommendations: playbooks.productRecommendations,
     analyzedProductCount: playbooks.productRecommendations.length,
-    warnings: [...warnings, ...playbooks.warnings],
+    evidenceQuality: summarizeCompetitorEvidence({
+      targets,
+      reports,
+      requestedPerCategory: params.competitorsPerCategory,
+      warnings: combinedWarnings,
+    }),
+    warnings: combinedWarnings,
   };
 }
