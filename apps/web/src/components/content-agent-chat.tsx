@@ -16,6 +16,7 @@ import {
   type AgentInsightSource,
 } from "./agent-insight-panel";
 import { AgentExecutionTimeline, type AgentTimelineStep } from "./agent-execution-timeline";
+import { buildPendingAgentExecutionTrace } from "@/lib/agent/execution-trace";
 
 type StoreOption = {
   id: string;
@@ -605,6 +606,7 @@ export function ContentAgentChat({
   const [sessionList, setSessionList] = useState(sessions);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
+  const [runningTrace, setRunningTrace] = useState<AgentTimelineStep[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -709,6 +711,7 @@ export function ContentAgentChat({
       { id: `user-${Date.now()}`, role: "user", content },
     ]);
     setPrompt("");
+    setRunningTrace(buildPendingAgentExecutionTrace(content));
     setRunning(true);
 
     try {
@@ -756,6 +759,7 @@ export function ContentAgentChat({
       ]);
     } finally {
       setRunning(false);
+      setRunningTrace([]);
     }
   }
 
@@ -893,9 +897,12 @@ export function ContentAgentChat({
             ) : null}
             {running ? (
               <div className="flex justify-start">
-                <div className="inline-flex items-center gap-2 rounded-xl border border-[#e7dcfa] bg-[#f8f4ff] px-4 py-3 text-sm font-semibold text-[#6c55a6] shadow-sm">
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  正在处理
+                <div className="max-w-[94%] rounded-2xl rounded-bl-md border border-white bg-white px-4 py-3 text-sm leading-6 text-[#35415a] shadow-[0_10px_28px_rgba(49,78,122,0.09)]">
+                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-[#6c55a6]">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Agent 正在按计划执行
+                  </div>
+                  <AgentExecutionTimeline steps={runningTrace} />
                 </div>
               </div>
             ) : null}

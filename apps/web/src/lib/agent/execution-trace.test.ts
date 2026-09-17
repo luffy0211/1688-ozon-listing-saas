@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentExecutionTrace, buildAgentPlan } from "./execution-trace";
+import { buildAgentExecutionTrace, buildAgentPlan, buildPendingAgentExecutionTrace } from "./execution-trace";
 
 describe("agent execution trace", () => {
   it("plans competitor analysis as a controlled workflow", () => {
@@ -76,5 +76,14 @@ describe("agent execution trace", () => {
 
     expect(trace.find((step) => step.id === "read-product")?.status).toBe("failed");
     expect(trace.find((step) => step.id === "create-actions")?.status).toBe("skipped");
+  });
+
+  it("builds a pending trace immediately for the chat UI", () => {
+    const trace = buildPendingAgentExecutionTrace("根据我的店铺商品做一次竞品分析，每个二级类目分析 5 个商品数据");
+
+    expect(trace.map((step) => step.id)).toContain("collect-competitors");
+    expect(trace[0]?.status).toBe("succeeded");
+    expect(trace[1]?.status).toBe("running");
+    expect(trace.find((step) => step.id === "collect-competitors")?.status).toBe("pending");
   });
 });

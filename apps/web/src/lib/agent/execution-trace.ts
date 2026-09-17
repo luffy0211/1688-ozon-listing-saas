@@ -51,6 +51,19 @@ type PlanParams = {
   competitorsPerCategory?: number | null;
 };
 
+const chineseNumbers: Record<string, number> = {
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -161,6 +174,60 @@ export function buildAgentPlan(params: PlanParams): AgentPlanStep[] {
 
   steps.push(step("direct-answer", "DIRECT_ANSWER", "直接回答", "不涉及实时店铺写操作时，直接给出建议。"));
   return steps;
+}
+
+function competitorsPerCategoryFromPrompt(prompt: string) {
+  const match =
+    prompt.match(/([1-9]\d?|[一二三四五六七八九十])\s*个?\s*(?:同类)?(?:竞品|商品(?:数据)?)/i) ??
+    prompt.match(/每(?:个)?(?:二级)?类目.{0,12}([1-9]\d?|[一二三四五六七八九十])\s*个?/i) ??
+    prompt.trim().match(/^([1-9]\d?|[一二三四五六七八九十])\s*个?$/);
+  if (!match?.[1]) return null;
+  const count = chineseNumbers[match[1]] ?? Number(match[1]);
+  return Number.isInteger(count) && count >= 1 && count <= 10 ? count : null;
+}
+
+function offerIdFromPrompt(prompt: string) {
+  return prompt.match(/(?:offerId|offer_id|offer id)\s*[:：]?\s*([A-Za-z0-9_-]+)/i)?.[1] ?? null;
+}
+
+function requiredToolFromPrompt(prompt: string, offerId: string | null, competitorsPerCategory: number | null) {
+  if (/(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt)) {
+    return competitorsPerCategory ? "analyze_ozon_competitors" : null;
+  }
+  if (/(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt)) {
+    return "diagnose_ozon_store";
+  }
+  if (/(?:活动|促销).{0,8}(?:规则|流程|sop|价格|计算)|(?:报名规则|报名流程|计算方法|活动价)/i.test(prompt)) {
+    return "compile_promotion_policy";
+  }
+  if (/(?:把|将|立即|确认).{0,12}(?:报名|加入).{0,8}(?:活动|促销)|(?:报名|加入).{0,8}(?:活动|促销).{0,12}(?:编号|id|\d{4,})/i.test(prompt)) {
+    return "propose_promotion_enrollment";
+  }
+  if (/(?:活动|促销|报名)/i.test(prompt)) return "list_ozon_promotions";
+  if (offerId) return "get_ozon_product_content";
+  if (/(?:自家|自己|我的|我家|店铺|商品数|多少商品|库存|订单|价格|草稿|状态|在售|可见|低库存|总库存|销量|销售|货|offerId|offer_id|offer id)/i.test(prompt)) {
+    return "get_ozon_store_snapshot";
+  }
+  return null;
+}
+
+export function buildPendingAgentExecutionTrace(prompt: string) {
+  const offerId = offerIdFromPrompt(prompt);
+  const competitorsPerCategory = competitorsPerCategoryFromPrompt(prompt);
+  const requiredToolName = requiredToolFromPrompt(prompt, offerId, competitorsPerCategory);
+  const plan = buildAgentPlan({ prompt, requiredToolName, offerId, competitorsPerCategory });
+  const now = new Date().toISOString();
+  return plan.map((planStep, index): AgentExecutionStep => ({
+    ...planStep,
+    status: index === 0 ? "succeeded" : index === 1 ? "running" : "pending",
+    startedAt: index <= 1 ? now : null,
+    finishedAt: index === 0 ? now : null,
+    durationMs: null,
+    toolName: planStep.expectedTool ?? null,
+    inputSummary: index === 0 ? "等待后端 Agent 接收任务" : null,
+    outputSummary: index === 0 ? "已提交到 Agent" : null,
+    error: null,
+  }));
 }
 
 function summarizeInput(input: unknown) {
