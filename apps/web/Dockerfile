@@ -15,7 +15,6 @@ COPY packages/ozon/package.json packages/ozon/package.json
 COPY packages/storage/package.json packages/storage/package.json
 COPY packages/xiangji/package.json packages/xiangji/package.json
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @saas/web exec playwright install --with-deps chromium
 
 FROM deps AS app
 ENV DATABASE_URL=postgresql://saas:saas@postgres:5432/listing?schema=public
