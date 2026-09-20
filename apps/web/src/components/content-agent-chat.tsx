@@ -670,13 +670,15 @@ export function ContentAgentChat({
   agentConfig: AgentConfig;
 }) {
   const defaultStoreId = stores.find((store) => store.isDefault)?.id ?? stores[0]?.id ?? "";
+  const initialSessionId = initialContentAgentSessionId(sessions);
+  const opensExistingSession = initialSessionId !== "new";
   const [selectedStoreId, setSelectedStoreId] = useState(defaultStoreId);
-  const [selectedSessionId, setSelectedSessionId] = useState(() => initialContentAgentSessionId(sessions));
+  const [selectedSessionId, setSelectedSessionId] = useState(initialSessionId);
   const [sessionList, setSessionList] = useState(sessions);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [runningTrace, setRunningTrace] = useState<AgentTimelineStep[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(opensExistingSession);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const introMessage = useMemo(
@@ -690,19 +692,23 @@ export function ContentAgentChat({
         .slice(0, 3),
     [initialActions],
   );
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    introMessageFor(agentConfig),
-    ...(pendingInitialActions.length
-      ? [
-          {
-            id: "initial-actions",
-            role: "assistant" as const,
-            content: "这里有最近还没处理完的 Agent 动作。",
-            actions: pendingInitialActions,
-          },
-        ]
-      : []),
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    opensExistingSession
+      ? []
+      : [
+          introMessageFor(agentConfig),
+          ...(pendingInitialActions.length
+            ? [
+                {
+                  id: "initial-actions",
+                  role: "assistant" as const,
+                  content: "这里有最近还没处理完的 Agent 动作。",
+                  actions: pendingInitialActions,
+                },
+              ]
+            : []),
+        ],
+  );
   const canSubmit = agentConfig.configured && stores.length > 0 && !loadingHistory;
   const inputStatus = !agentConfig.configured
     ? "模型未配置，不能发送"
@@ -720,12 +726,14 @@ export function ContentAgentChat({
 
   useEffect(() => {
     if (selectedSessionId === "new") {
+      setLoadingHistory(false);
       setMessages([introMessage]);
       return;
     }
 
     let cancelled = false;
     setLoadingHistory(true);
+    setMessages([]);
     getJson(`/api/v1/agent/content/sessions/${selectedSessionId}/messages`)
       .then((data) => {
         if (cancelled) return;
@@ -766,6 +774,7 @@ export function ContentAgentChat({
   function startNewChat() {
     setSelectedSessionId("new");
     setPrompt("");
+    setLoadingHistory(false);
     setMessages([introMessage]);
   }
 
@@ -902,7 +911,7 @@ export function ContentAgentChat({
           ) : null}
         </div>
 
-        {shouldShowCommandDeck(messages) ? (
+        {selectedSessionId === "new" && !loadingHistory && shouldShowCommandDeck(messages) ? (
           <AgentCommandDeck
             disabled={!canSubmit || running}
             onRun={(value) => void sendPrompt(value)}

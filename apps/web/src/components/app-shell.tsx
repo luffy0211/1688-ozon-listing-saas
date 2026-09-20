@@ -30,7 +30,7 @@ const customerNavItems = [
 ];
 
 const adminNavItems = [
-  { href: "/admin/tenants", label: "平台后台", icon: Settings },
+  { href: "/admin", label: "平台后台", icon: Settings },
   { href: "/workflow", label: "自动化工作流", icon: GitBranch },
 ];
 
