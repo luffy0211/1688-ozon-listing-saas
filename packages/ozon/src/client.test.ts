@@ -150,6 +150,38 @@ describe("OzonClient", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("reads product import task info when real submit is disabled", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        result: {
+          items: [{ offer_id: "offer-1", status: "failed", errors: [{ code: "bad", level: "error" }] }],
+          total: 1,
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OzonClient({
+      clientId: "123456",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+      enableRealSubmit: false,
+    });
+
+    await expect(client.getProductImportInfo(123)).resolves.toMatchObject({
+      items: [{ offer_id: "offer-1", status: "failed" }],
+      total: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/v1/product/import/info",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ task_id: 123 }),
+      }),
+    );
+  });
+
   it("calls price import only when real submit is enabled", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

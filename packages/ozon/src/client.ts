@@ -5,6 +5,7 @@ import type {
   ImportPicturesRequest,
   ImportPricesRequest,
   ImportPricesResult,
+  ImportProductTaskInfoResult,
   ImportProductsRequest,
   ImportProductsResult,
   OzonAction,
@@ -153,6 +154,17 @@ export class OzonClient {
       payload,
     );
     return { task_id: res.result.task_id };
+  }
+
+  async getProductImportInfo(taskId: number | string): Promise<ImportProductTaskInfoResult> {
+    const res = await this.request<{
+      result?: { items?: ImportProductTaskInfoResult["items"]; total?: number };
+    }>("/v1/product/import/info", { task_id: Number(taskId) });
+    return {
+      items: res.result?.items ?? [],
+      total: res.result?.total,
+      raw: res,
+    };
   }
 
   async importPrices(payload: ImportPricesRequest): Promise<ImportPricesResult> {

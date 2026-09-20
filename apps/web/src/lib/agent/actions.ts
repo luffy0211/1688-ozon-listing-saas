@@ -308,6 +308,11 @@ export function contentDraftImportPayload(action: {
     stringField(rawInfo.old_price) ??
     stringField(product.oldPriceRub) ??
     price;
+  const currencyCode =
+    stringField(rawInfo.currency_code) ??
+    stringField(rawInfo.currencyCode) ??
+    stringField(product.currency_code) ??
+    stringField(product.currencyCode);
   const images = stringArray(product.images).length
     ? stringArray(product.images)
     : stringArray(rawInfo.images);
@@ -323,6 +328,7 @@ export function contentDraftImportPayload(action: {
     !descriptionCategoryId ? "description_category_id" : "",
     !typeId ? "type_id" : "",
     !price ? "price" : "",
+    !currencyCode ? "currency_code" : "",
     !images.length ? "images" : "",
     !attributes ? "attributes" : "",
     !weight ? "weight" : "",
@@ -348,7 +354,7 @@ export function contentDraftImportPayload(action: {
           price: price!,
           old_price: oldPrice!,
           vat: stringField(rawInfo.vat) ?? "0",
-          currency_code: "RUB",
+          currency_code: currencyCode!,
           images,
           attributes: attributes as OzonProductPayload["attributes"],
           weight: weight!,
@@ -543,6 +549,38 @@ async function verifyCurrentProduct(params: {
   return product;
 }
 
+function importTaskErrorMessage(error: Record<string, unknown>) {
+  return [
+    stringField(error.code) ?? "unknown",
+    stringField(error.message) ?? stringField(error.description) ?? "unknown_error",
+  ].join(":");
+}
+
+async function assertImportTaskSucceeded(params: {
+  client: OzonClient;
+  taskId: number | string;
+  offerId?: string | null;
+}) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const info = await params.client.getProductImportInfo(params.taskId);
+    const item =
+      info.items.find((candidate) => candidate.offer_id === params.offerId) ??
+      info.items[0];
+    if (item) {
+      const errors = (item.errors ?? [])
+        .map(asRecord)
+        .filter((error) => (stringField(error.level) ?? "error").toLowerCase() === "error");
+      const firstError = errors[0];
+      if (firstError) {
+        throw new Error(`ozon_import_task_failed:${importTaskErrorMessage(firstError)}`);
+      }
+      return info;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  throw new Error(`ozon_import_task_not_ready:${params.taskId}`);
+}
+
 async function markActionExecuted(params: {
   tenantId: string;
   userId: string;
@@ -694,6 +732,11 @@ async function executeContentDraftAction(params: {
     productId: productIdFrom(action),
   });
   const response = await client.importProducts(request);
+  const importInfo = await assertImportTaskSucceeded({
+    client,
+    taskId: response.task_id,
+    offerId: request.items[0]?.offer_id,
+  });
   return markActionExecuted({
     tenantId: params.tenantId,
     userId: params.userId,
@@ -703,6 +746,7 @@ async function executeContentDraftAction(params: {
       ozonTaskId: String(response.task_id),
       requestHash,
       changedFields,
+      importInfo,
     },
   });
 }

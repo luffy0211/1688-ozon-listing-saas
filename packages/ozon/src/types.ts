@@ -51,6 +51,30 @@ export type ImportProductsRequest = { items: OzonProductPayload[] };
 
 export type ImportProductsResult = { task_id: number };
 
+export type ImportProductTaskError = {
+  code?: string;
+  field?: string;
+  level?: string;
+  message?: string;
+  description?: string;
+  attribute_id?: number;
+  attribute_name?: string;
+  state?: string;
+};
+
+export type ImportProductTaskItem = {
+  offer_id?: string;
+  product_id?: number;
+  status?: string;
+  errors?: ImportProductTaskError[];
+};
+
+export type ImportProductTaskInfoResult = {
+  items: ImportProductTaskItem[];
+  total?: number;
+  raw: unknown;
+};
+
 export type ImportPricesRequest = {
   prices: Array<{
     offer_id: string;
