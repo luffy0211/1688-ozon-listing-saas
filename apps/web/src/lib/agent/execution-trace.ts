@@ -123,7 +123,16 @@ export function buildAgentPlan(params: PlanParams): AgentPlanStep[] {
   if (requiredToolName === "diagnose_ozon_store") {
     steps.push(
       step("diagnose-store", "DIAGNOSE_STORE", "读取并诊断店铺", "读取经营数据、低分商品和可改进项。", "diagnose_ozon_store"),
-      step("create-actions", "CREATE_ACTIONS", "生成优化建议", "为低分或高风险商品生成待确认动作。"),
+      step(
+        "collect-competitors",
+        "COLLECT_COMPETITORS",
+        "对比同类竞品",
+        `每个类目采集 ${params.competitorsPerCategory ?? 1} 个同类竞品，分析标题、主图、价格、热度和简介。`,
+        "analyze_ozon_competitors",
+      ),
+      step("summarize-playbook", "SUMMARIZE_CATEGORY_PLAYBOOK", "总结经营差距", "把竞品表现转成自家商品的运营差距。"),
+      step("diagnose-products", "DIAGNOSE_PRODUCTS", "定位重点商品", "找出最值得先优化的商品和字段。"),
+      step("create-actions", "CREATE_ACTIONS", "生成优化建议", "生成待确认草案，确认前不修改 Ozon。"),
       step("wait-approval", "WAIT_FOR_APPROVAL", "等待人工确认", "确认前不会修改 Ozon。"),
     );
     return steps;
@@ -181,7 +190,11 @@ function competitorsPerCategoryFromPrompt(prompt: string) {
     prompt.match(/([1-9]\d?|[一二三四五六七八九十])\s*个?\s*(?:同类)?(?:竞品|商品(?:数据)?)/i) ??
     prompt.match(/每(?:个)?(?:二级)?类目.{0,12}([1-9]\d?|[一二三四五六七八九十])\s*个?/i) ??
     prompt.trim().match(/^([1-9]\d?|[一二三四五六七八九十])\s*个?$/);
-  if (!match?.[1]) return null;
+  if (!match?.[1]) {
+    return /(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)|(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt)
+      ? 1
+      : null;
+  }
   const count = chineseNumbers[match[1]] ?? Number(match[1]);
   return Number.isInteger(count) && count >= 1 && count <= 10 ? count : null;
 }

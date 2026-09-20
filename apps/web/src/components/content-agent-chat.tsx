@@ -271,7 +271,7 @@ function introMessageFor(agentConfig: AgentConfig): ChatMessage {
     id: "intro",
     role: "assistant",
     content: agentConfig.configured
-      ? "你可以直接询问店铺诊断、竞品分析和 Ozon 活动。读取数据会调用真实工具；任何商品改动或活动报名都必须先生成等待人工确认的动作。"
+      ? "你可以直接让 Agent 做店铺诊断、商品优化和 Ozon 活动建议。店铺诊断会自动对比同类竞品；任何商品改动或活动报名都必须先生成待确认动作。"
       : agentConfig.message,
   };
 }
@@ -280,6 +280,10 @@ function upsertSession(sessions: SessionOption[], session: SessionOption) {
   return [session, ...sessions.filter((item) => item.id !== session.id)].sort(
     (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
   );
+}
+
+export function initialContentAgentSessionId(sessions: SessionOption[]) {
+  return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]?.id ?? "new";
 }
 
 function sessionTitleFromPrompt(prompt: string) {
@@ -667,7 +671,7 @@ export function ContentAgentChat({
 }) {
   const defaultStoreId = stores.find((store) => store.isDefault)?.id ?? stores[0]?.id ?? "";
   const [selectedStoreId, setSelectedStoreId] = useState(defaultStoreId);
-  const [selectedSessionId, setSelectedSessionId] = useState("new");
+  const [selectedSessionId, setSelectedSessionId] = useState(() => initialContentAgentSessionId(sessions));
   const [sessionList, setSessionList] = useState(sessions);
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);

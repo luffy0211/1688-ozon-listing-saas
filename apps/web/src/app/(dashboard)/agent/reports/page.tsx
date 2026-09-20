@@ -25,6 +25,20 @@ function competitorCount(reportJson: unknown) {
   return Array.isArray(report.competitors) ? report.competitors.length : 0;
 }
 
+function competitorSamples(reportJson: unknown) {
+  const report = asRecord(reportJson);
+  const competitors = Array.isArray(report.competitors) ? report.competitors : [];
+  return competitors.slice(0, 6).map(asRecord).map((item) => ({
+    url: stringField(item.url),
+    title: stringField(item.title) ?? "未命名竞品",
+    price: typeof item.priceRub === "number" ? item.priceRub : stringField(item.priceRub),
+    rating: typeof item.rating === "number" ? item.rating : stringField(item.rating),
+    reviewCount: typeof item.reviewCount === "number" ? item.reviewCount : stringField(item.reviewCount),
+    description: stringField(item.description),
+    imageUrl: Array.isArray(item.imageUrls) ? stringField(item.imageUrls[0]) : null,
+  }));
+}
+
 function capturedAt(reportJson: unknown) {
   const report = asRecord(reportJson);
   return stringField(report.capturedAt) ?? "-";
@@ -88,6 +102,40 @@ export default async function AgentReportsPage() {
               );
             })}
           </Table>
+        )}
+      </Card>
+
+      <Card>
+        <SectionHeader title="竞品样本展示" description="真实参与分析的竞品商品，方便核对 Agent 建议来源。" />
+        {reports.flatMap((report) => competitorSamples(report.reportJson)).length === 0 ? (
+          <EmptyState title="暂无竞品样本" description="完成一次店铺诊断后，这里会展示竞品商品图、标题、价格和简介摘要。" />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {reports.flatMap((report) => competitorSamples(report.reportJson)).slice(0, 12).map((item, index) => (
+              <a
+                key={`${item.url ?? item.title}-${index}`}
+                href={item.url ?? "#"}
+                target={item.url ? "_blank" : undefined}
+                className="grid grid-cols-[76px_1fr] gap-3 rounded-2xl border border-[#e3ebf5] bg-white p-3 transition hover:border-[#8fb5ff]"
+              >
+                <div className="h-[76px] overflow-hidden rounded-xl bg-[#f2f6fd]">
+                  {item.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={item.imageUrl} alt="" className="h-full w-full object-cover" />
+                  ) : null}
+                </div>
+                <div className="min-w-0">
+                  <div className="line-clamp-2 text-sm font-semibold text-[#17223d]">{item.title}</div>
+                  <div className="mt-1 flex flex-wrap gap-1 text-xs text-[#66758f]">
+                    <span>{item.price ? `${item.price} ₽` : "价格未知"}</span>
+                    <span>{item.rating ? `评分 ${item.rating}` : "无评分"}</span>
+                    <span>{item.reviewCount ? `评价 ${item.reviewCount}` : "无评价数"}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#66758f]">{item.description ?? "暂无简介摘要"}</p>
+                </div>
+              </a>
+            ))}
+          </div>
         )}
       </Card>
 

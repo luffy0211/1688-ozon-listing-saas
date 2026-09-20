@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attributeChangesFromPayload, shouldShowCommandDeck } from "./content-agent-chat";
+import { attributeChangesFromPayload, initialContentAgentSessionId, shouldShowCommandDeck } from "./content-agent-chat";
 
 describe("content agent action preview", () => {
   it("returns every attribute change needed for approval", () => {
@@ -52,5 +52,13 @@ describe("content agent command deck", () => {
   it("only shows before the user starts a conversation", () => {
     expect(shouldShowCommandDeck([{ role: "assistant" }])).toBe(true);
     expect(shouldShowCommandDeck([{ role: "assistant" }, { role: "user" }])).toBe(false);
+  });
+
+  it("opens the latest existing session instead of starting a new chat", () => {
+    expect(initialContentAgentSessionId([
+      { id: "recent", title: "最近", status: "OPEN", updatedAt: "2026-09-20T10:00:00.000Z" },
+      { id: "old", title: "旧", status: "OPEN", updatedAt: "2026-09-19T10:00:00.000Z" },
+    ])).toBe("recent");
+    expect(initialContentAgentSessionId([])).toBe("new");
   });
 });

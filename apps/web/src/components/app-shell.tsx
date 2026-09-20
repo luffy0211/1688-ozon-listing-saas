@@ -7,13 +7,9 @@ import {
   BarChart3,
   Bot,
   ChevronDown,
-  Coins,
   ClipboardList,
-  ClipboardCheck,
-  FileText,
   GitBranch,
   LayoutDashboard,
-  ListChecks,
   PackageSearch,
   Settings,
   ShieldCheck,
@@ -24,21 +20,23 @@ import { CreditBalanceBadge } from "./credit-balance-badge";
 import { LogoutButton } from "./logout-button";
 import { Badge, cn } from "./ui";
 
-const navItems = [
-  { href: "/getting-started", label: "开始使用", icon: ListChecks },
+const customerNavItems = [
+  { href: "/agent/content", label: "运营 Agent", icon: Bot },
   { href: "/dashboard", label: "上架工作台", icon: LayoutDashboard },
-  { href: "/workflow", label: "自动化工作流", icon: GitBranch },
-  { href: "/tasks", label: "任务中心", icon: ClipboardList },
   { href: "/quality", label: "商品体检", icon: ShieldCheck },
   { href: "/analytics", label: "BI 看板", icon: BarChart3 },
-  { href: "/agent/content", label: "运营 Agent", icon: Bot },
-  { href: "/agent/reports", label: "Agent 报告", icon: FileText },
+  { href: "/tasks", label: "任务中心", icon: ClipboardList },
   { href: "/agent/actions", label: "待审批", icon: ShieldCheck },
-  { href: "/agent/evaluations", label: "Agent 评估", icon: ClipboardCheck },
-  { href: "/credits", label: "积分流水", icon: Coins },
-  { href: "/admin/credits", label: "积分管理", icon: Coins, adminOnly: true },
-  { href: "/settings", label: "设置", icon: Settings },
 ];
+
+const adminNavItems = [
+  { href: "/admin/tenants", label: "平台后台", icon: Settings },
+  { href: "/workflow", label: "自动化工作流", icon: GitBranch },
+];
+
+export function visibleNavItemsForRole(role: string) {
+  return role === "admin" ? [...customerNavItems, ...adminNavItems] : customerNavItems;
+}
 
 export function AppShell({
   user,
@@ -75,7 +73,7 @@ export function AppShell({
 
         <nav className="flex-1 space-y-1 px-3 py-5">
           <div className="mb-2 px-3 text-[11px] font-semibold text-[#9aa6ba]">工作空间</div>
-          {navItems.filter((item) => !item.adminOnly || user.role === "admin").map((item) => {
+          {visibleNavItemsForRole(user.role).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
@@ -174,7 +172,7 @@ export function AppShell({
               </div>
             </div>
             <nav className="scrollbar-none flex gap-1 overflow-x-auto border-t border-[#edf2f8] px-3 py-2 lg:hidden">
-              {navItems.filter((item) => !item.adminOnly || user.role === "admin").map((item) => {
+              {visibleNavItemsForRole(user.role).map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (

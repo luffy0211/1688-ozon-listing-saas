@@ -11,6 +11,7 @@ import {
   normalizeOzonProductContent,
   optionalStoreId,
   requiredOzonToolForPrompt,
+  shouldRunCompetitorAnalysisForDiagnosis,
   shouldRefreshCompetitorEvidence,
 } from "./content-agent";
 
@@ -156,7 +157,7 @@ describe("content agent tool enforcement helpers", () => {
     expect(competitorsPerCategoryFromPrompt("分析五个同类竞品")).toBe(5);
     expect(competitorsPerCategoryFromPrompt("每个类目 7 个")).toBe(7);
     expect(competitorsPerCategoryFromPrompt("5个")).toBe(5);
-    expect(competitorsPerCategoryFromPrompt("分析店铺竞品")).toBeNull();
+    expect(competitorsPerCategoryFromPrompt("分析店铺竞品")).toBe(1);
   });
 
   it("requires a store snapshot for own-store data questions", () => {
@@ -179,6 +180,12 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("给我的店铺做一次完整诊断", null)).toBe(
       "diagnose_ozon_store",
     );
+    expect(shouldRunCompetitorAnalysisForDiagnosis("给我的店铺做一次完整诊断")).toBe(true);
+    expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBe(1);
+  });
+
+  it("uses store diagnosis to pick a product when content optimization has no offerId", () => {
+    expect(requiredOzonToolForPrompt("内容优化", null)).toBe("diagnose_ozon_store");
   });
 
   it("requires competitor evidence for competitor analysis", () => {
@@ -188,7 +195,7 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("根据我的店铺商品做一个竞品分析，分析5个商品数据", null)).toBe(
       "analyze_ozon_competitors",
     );
-    expect(requiredOzonToolForPrompt("分析店铺竞品", null)).toBeNull();
+    expect(requiredOzonToolForPrompt("分析店铺竞品", null)).toBe("analyze_ozon_competitors");
   });
 
   it("reuses saved competitor evidence without forcing a fresh crawl", () => {
