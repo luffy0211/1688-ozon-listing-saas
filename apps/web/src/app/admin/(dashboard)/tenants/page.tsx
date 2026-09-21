@@ -1,9 +1,7 @@
 import { prisma } from "@saas/db";
-import { requireAdmin } from "@/lib/auth";
 import { EmptyState, MetricCard, PageHeader, Table } from "@/components/ui";
 
 export default async function AdminTenantsPage() {
-  await requireAdmin();
   const tenants = await prisma.tenant.findMany({
     orderBy: { createdAt: "desc" },
     include: {
@@ -24,7 +22,7 @@ export default async function AdminTenantsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="平台管理" description="查看租户、用户、店铺、商品和任务数量。" />
+      <PageHeader title="租户管理" description="查看租户、用户、店铺、商品和任务数量。" />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard title="租户" value={tenants.length} />
         <MetricCard title="用户" value={users} />
