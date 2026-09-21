@@ -70,6 +70,7 @@ export type ContentAgentDataSource = {
   productCount?: number | null;
   visibleProductCount?: number | null;
   totalStock?: number | null;
+  lowStockCount?: number | null;
   offerId?: string | null;
   productId?: string | null;
   found?: boolean | null;
@@ -86,6 +87,9 @@ export type ContentAgentDataSource = {
     title: string | null;
     imageUrl: string | null;
     contentRating: number;
+    visible?: boolean | null;
+    stock?: number | null;
+    priceRub?: number | null;
     recommendations: string[];
   }>;
   competitorCount?: number | null;
@@ -448,6 +452,9 @@ function lowRatingSourceProducts(value: unknown) {
       title: stringField(item.title),
       imageUrl: stringField(item.imageUrl),
       contentRating,
+      visible: booleanFromRecord(item, "visible"),
+      stock: numberField(item.stock),
+      priceRub: numberField(item.priceRub),
       recommendations: stringArray(item.recommendations),
     }];
   });
@@ -931,6 +938,9 @@ export function contentAgentDataSourcesFromToolCalls(
           productCount: numberFromRecord(output, "productCount"),
           financeDataAvailable: booleanFromRecord(output, "financeDataAvailable"),
           lowContentRatingCount: numberFromRecord(output, "lowContentRatingCount"),
+          visibleProductCount: numberFromRecord(output, "visibleProductCount"),
+          totalStock: numberFromRecord(output, "totalStock"),
+          lowStockCount: numberFromRecord(output, "lowStockCount"),
           issues: stringArray(output.issues),
           lowContentRatingProducts: lowRatingSourceProducts(output.lowContentRatingProducts),
           error: call.error ?? null,
@@ -1349,6 +1359,9 @@ export async function runOzonContentAgent(params: {
             output: {
               storeName: result.store.name,
               productCount: result.current30d.productCount,
+              visibleProductCount: result.current30d.visibleProductCount,
+              totalStock: result.current30d.totalStock,
+              lowStockCount: result.current30d.lowStockCount,
               financeDataAvailable: result.financeDataAvailable,
               lowContentRatingCount: result.lowContentRatingProducts.length,
               issues: result.issues,
@@ -1357,6 +1370,9 @@ export async function runOzonContentAgent(params: {
                 title: product.title,
                 imageUrl: product.imageUrl,
                 contentRating: product.contentRating,
+                visible: product.visible,
+                stock: product.stock,
+                priceRub: product.priceRub,
                 recommendations: product.recommendations,
               })),
             },

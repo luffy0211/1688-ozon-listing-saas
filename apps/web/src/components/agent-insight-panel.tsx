@@ -21,6 +21,7 @@ export type AgentInsightSource = {
   productCount?: number | null;
   visibleProductCount?: number | null;
   totalStock?: number | null;
+  lowStockCount?: number | null;
   offerId?: string | null;
   productId?: string | null;
   stock?: number | null;
@@ -39,6 +40,9 @@ export type AgentInsightSource = {
     title: string | null;
     imageUrl: string | null;
     contentRating: number;
+    visible?: boolean | null;
+    stock?: number | null;
+    priceRub?: number | null;
     recommendations: string[];
   }>;
   error?: string | null;
@@ -205,6 +209,11 @@ function firstContentSample(source: AgentInsightSource) {
   return asRecord(arrayValue(diagnosis.samples)[0]);
 }
 
+function contentSamples(source?: AgentInsightSource | null) {
+  const diagnosis = asRecord(source?.contentDiagnosis);
+  return arrayValue(diagnosis.samples).map(asRecord).filter((sample) => Object.keys(sample).length);
+}
+
 function termLabels(value: unknown) {
   return arrayValue(value)
     .map((item) => stringValue(asRecord(item).term))
@@ -215,6 +224,288 @@ function termLabels(value: unknown) {
 function rub(value: unknown) {
   const number = numberValue(value);
   return number === null ? "-" : `${Math.round(number)} ₽`;
+}
+
+function shortText(value: unknown, fallback = "-") {
+  const text = stringValue(value);
+  if (!text) return fallback;
+  return text.length > 70 ? `${text.slice(0, 70)}...` : text;
+}
+
+function percentLabel(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)}分` : "-";
+}
+
+function problemSummary(product: NonNullable<AgentInsightSource["lowContentRatingProducts"]>[number]) {
+  const text = product.recommendations.join(" ");
+  const parts = [
+    product.visible === false ? "不可见" : null,
+    product.stock === 0 ? "无库存" : product.stock !== null && product.stock !== undefined && product.stock <= 5 ? "低库存" : null,
+    /Аннотация|简介/i.test(text) ? "简介缺失" : null,
+    /Видео|视频/i.test(text) ? "缺视频" : null,
+    /изображ|图片|Изображения/i.test(text) ? "图片不足" : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : product.recommendations[0] ?? "内容信息不完整";
+}
+
+function primaryStoreProblem(source?: AgentInsightSource | null) {
+  if (!source) return "等待店铺诊断结果。";
+  const productCount = source.productCount ?? 0;
+  const visible = source.visibleProductCount ?? null;
+  const invisible = visible === null ? null : Math.max(productCount - visible, 0);
+  if (invisible && invisible > 0) {
+    return `${invisible} 个商品当前不可见，近 30 天没有订单时应先排查可见性、库存、价格和审核状态。`;
+  }
+  if ((source.lowStockCount ?? 0) > 0) return `${source.lowStockCount} 个商品库存偏低，先确认是否需要补货。`;
+  if ((source.lowContentRatingCount ?? 0) > 0) return `${source.lowContentRatingCount} 个商品内容分偏低，优先补简介、图片和视频。`;
+  return "暂未发现高优先级异常，继续观察订单和内容质量。";
+}
+
+function StoreAnomalyOverview({ source }: { source?: AgentInsightSource | null }) {
+  const productCount = source?.productCount ?? 0;
+  const visible = source?.visibleProductCount ?? null;
+  const invisible = visible === null ? null : Math.max(productCount - visible, 0);
+  const products = source?.lowContentRatingProducts ?? [];
+  const zeroStock = products.filter((product) => product.stock === 0).length;
+  const lowStock = source?.lowStockCount ?? products.filter((product) =>
+    typeof product.stock === "number" && product.stock > 0 && product.stock <= 5
+  ).length;
+  const issues = [
+    invisible && invisible > 0
+      ? { label: "商品不可见", value: invisible, action: "先查审核、价格、仓库和库存状态", tone: "bg-red-50 text-red-800 border-red-200" }
+      : null,
+    zeroStock > 0
+      ? { label: "无库存样本", value: zeroStock, action: "确认是否补库存后再优化内容", tone: "bg-orange-50 text-orange-800 border-orange-200" }
+      : null,
+    lowStock > 0
+      ? { label: "低库存商品", value: lowStock, action: "补货或暂停推广", tone: "bg-amber-50 text-amber-800 border-amber-200" }
+      : null,
+    (source?.lowContentRatingCount ?? 0) > 0
+      ? { label: "低内容分", value: source?.lowContentRatingCount ?? 0, action: "补简介、图片、视频和真实属性", tone: "bg-blue-50 text-blue-800 border-blue-200" }
+      : null,
+  ].filter((item): item is { label: string; value: number; action: string; tone: string } => Boolean(item));
+
+  return (
+    <div className="rounded-2xl border border-[#f0d4c3] bg-[#fff8f3] p-4 shadow-[0_10px_28px_rgba(122,73,39,0.08)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-black uppercase tracking-wide text-[#ff5b22]">店铺运营诊断报告</div>
+          <div className="mt-1 text-base font-black text-gray-950">{primaryStoreProblem(source)}</div>
+        </div>
+        <span className="rounded-full bg-[#ff5b22] px-3 py-1 text-xs font-bold text-white">先处理异常，再优化内容</span>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+        <Metric label="可见商品" value={visible === null ? "-" : `${visible}/${productCount}`} accent="#ff5b22" />
+        <Metric label="总库存" value={source?.totalStock ?? "-"} accent="#18a7a0" />
+        <Metric label="低内容分" value={source?.lowContentRatingCount ?? 0} accent="#d858a8" />
+        <Metric label="经营异常" value={issues.length || source?.issues?.length || 0} accent="#f5c842" />
+      </div>
+
+      {issues.length ? (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {issues.map((issue) => (
+            <div key={issue.label} className={cn("rounded-xl border px-3 py-2", issue.tone)}>
+              <div className="text-xs font-bold">{issue.label}：{issue.value}</div>
+              <div className="mt-1 text-xs">{issue.action}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PriorityProducts({ source }: { source?: AgentInsightSource | null }) {
+  const products = (source?.lowContentRatingProducts ?? []).slice(0, 4);
+  if (!products.length) return null;
+  return (
+    <div className="rounded-2xl border border-[#dce8f5] bg-white p-4 shadow-[0_10px_28px_rgba(45,78,128,0.08)]">
+      <div className="text-sm font-black text-gray-950">优先处理商品</div>
+      <div className="mt-3 grid gap-3 xl:grid-cols-2">
+        {products.map((product) => (
+          <div key={product.offerId} className="grid grid-cols-[64px_1fr] gap-3 rounded-xl border border-[#e6edf6] bg-[#f8fbff] p-3">
+            {product.imageUrl ? (
+              <img src={product.imageUrl} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
+            ) : (
+              <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">无图</div>
+            )}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="break-all text-xs font-black text-gray-950">{product.offerId}</span>
+                <span className="rounded-full bg-[#fff0e7] px-2 py-0.5 text-[11px] font-bold text-[#c2410c]">
+                  {percentLabel(product.contentRating)}
+                </span>
+              </div>
+              <div className="mt-1 line-clamp-1 text-xs text-gray-600">{product.title ?? "未命名商品"}</div>
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                <span className="rounded-md bg-white px-2 py-1 text-gray-700">库存 {product.stock ?? "-"}</span>
+                <span className="rounded-md bg-white px-2 py-1 text-gray-700">价格 {rub(product.priceRub)}</span>
+                <span className="rounded-md bg-white px-2 py-1 text-gray-700">{product.visible === false ? "不可见" : "可见状态未知"}</span>
+              </div>
+              <div className="mt-2 text-xs font-semibold text-[#7c2d12]">{problemSummary(product)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function compareRows(sample: Record<string, unknown>) {
+  const comparison = asRecord(sample.comparison);
+  const title = asRecord(comparison.title);
+  const mainImage = asRecord(comparison.mainImage);
+  const price = asRecord(comparison.price);
+  const heat = asRecord(comparison.heat);
+  const themes = asRecord(comparison.themes);
+  const description = asRecord(comparison.description);
+  const own = asRecord(sample.own);
+  const competitor = asRecord(arrayValue(sample.competitors)[0]);
+  const competitorTitle = shortText(competitor.title, "本次未拿到竞品标题");
+  const ownTitle = shortText(own.title, shortText(sample.offerId));
+  const ownImageCount = numberValue(mainImage.ownImageCount) ?? numberValue(own.imageCount) ?? 0;
+  const competitorImageCount = numberValue(mainImage.competitorMedianImageCount);
+  const titleTerms = termLabels(themes.titleTerms).join("、");
+  const descriptionTerms = termLabels(themes.descriptionTerms).join("、");
+  return [
+    {
+      label: "标题",
+      own: `${ownTitle}（${numberValue(title.ownLength) ?? "-"}字）`,
+      competitor: `${competitorTitle}（中位${numberValue(title.competitorMedianLength) ?? "-"}字）`,
+      action: (numberValue(title.ownLength) ?? 0) > (numberValue(title.competitorMedianLength) ?? 999)
+        ? "压缩标题，保留品类、颜色、版型和面料"
+        : "保留核心词，减少无效修饰",
+    },
+    {
+      label: "主图",
+      own: `${ownImageCount}张图${ownImageCount < 8 ? "，未达8张" : ""}`,
+      competitor: competitorImageCount === null ? "竞品图片数未采到" : `竞品中位${competitorImageCount}张`,
+      action: ownImageCount < 8 ? "补图到8张以上，优先补视频/视频封面" : "主图数量先不动，检查清晰度",
+    },
+    {
+      label: "价格",
+      own: rub(price.ownRub),
+      competitor: numberValue(price.competitorMedianRub) === null ? "竞品价格未采到" : `竞品中位${rub(price.competitorMedianRub)}`,
+      action: numberValue(price.competitorMedianRub) === null ? "暂不按价格调整" : "只作为定价参考，确认利润后再改价",
+    },
+    {
+      label: "热度",
+      own: `评价${numberValue(heat.ownReviewCount) ?? "-"}，不是销量`,
+      competitor: `竞品评价中位${numberValue(heat.competitorMedianReviewCount) ?? "-"}，搜索位仅作参考`,
+      action: "Ozon不返回真实销量，先恢复可见性和内容分",
+    },
+    {
+      label: "关键词",
+      own: titleTerms || "自家关键词弱",
+      competitor: descriptionTerms || titleTerms || "竞品关键词未采到",
+      action: "把高频俄语词自然写进标题和简介",
+    },
+    {
+      label: "简介",
+      own: description.ownAvailable ? "已有简介" : "简介为空",
+      competitor: `竞品${numberValue(description.competitorAvailableCount) ?? 0}个有简介`,
+      action: description.ownAvailable ? "优化表达，不复制竞品文案" : "补100-500字俄语简介",
+    },
+  ];
+}
+
+function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource | null }) {
+  const samples = contentSamples(source).slice(0, 4);
+  if (!source) return null;
+  if (!samples.length) {
+    return (
+      <div className="rounded-2xl border border-[#ccebe6] bg-[#f3fcfa] p-4">
+        <div className="text-sm font-black text-[#075e5a]">同类竞品对比</div>
+        <div className="mt-2 text-sm text-gray-600">本次没有拿到有效竞品页面，暂不生成竞品结论。</div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-2xl border border-[#ccebe6] bg-[#f3fcfa] p-4 shadow-[0_10px_28px_rgba(18,109,102,0.08)]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-black text-[#075e5a]">
+          <ScanSearch className="h-4 w-4" aria-hidden="true" /> 同类竞品对比
+        </div>
+        <span className="text-xs font-semibold text-[#087f78]">自家商品 / 竞品参考 / Agent建议</span>
+      </div>
+      <div className="mt-3 space-y-4">
+        {samples.map((sample, index) => {
+          const own = asRecord(sample.own);
+          const competitors = arrayValue(sample.competitors).map(asRecord);
+          const firstCompetitor = competitors[0];
+          return (
+            <div key={`${stringValue(sample.offerId) ?? index}`} className="overflow-hidden rounded-xl border border-[#ccebe6] bg-white">
+              <div className="grid gap-3 border-b border-[#e4f4f1] bg-[#f8fffd] p-3 lg:grid-cols-[1fr_1fr]">
+                <div className="grid grid-cols-[64px_1fr] gap-3">
+                  {stringValue(own.imageUrl) ? (
+                    <img src={stringValue(own.imageUrl)!} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
+                  ) : (
+                    <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">自家无图</div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold text-[#087f78]">自家商品 · {stringValue(sample.categoryName) ?? "未知类目"}</div>
+                    <div className="mt-1 break-all text-xs font-black text-gray-950">{stringValue(sample.offerId) ?? "-"}</div>
+                    <div className="mt-1 line-clamp-2 text-xs text-gray-600">{shortText(own.title, "未命名商品")}</div>
+                    <div className="mt-1 text-[11px] text-gray-500">价格 {rub(own.priceRub)} · 评价 {numberValue(own.reviewCount) ?? "-"}</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-[64px_1fr] gap-3">
+                  {stringValue(firstCompetitor?.imageUrl) ? (
+                    <img src={stringValue(firstCompetitor?.imageUrl)!} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
+                  ) : (
+                    <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">竞品无图</div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-bold text-[#087f78]">竞品参考</div>
+                    <a
+                      href={stringValue(firstCompetitor?.url) ?? undefined}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 line-clamp-2 text-xs font-black text-gray-950 hover:text-[#087f78]"
+                    >
+                      {shortText(firstCompetitor?.title, "本类目暂无有效竞品")}
+                    </a>
+                    <div className="mt-1 text-[11px] text-gray-500">
+                      价格 {rub(firstCompetitor?.priceRub)} · 评分 {numberValue(firstCompetitor?.rating) ?? "-"} · 评价 {numberValue(firstCompetitor?.reviewCount) ?? "-"}
+                    </div>
+                    <div className="mt-1 line-clamp-1 text-[11px] text-gray-500">{shortText(firstCompetitor?.description, "暂无简介摘要")}</div>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-[70px_1fr_1fr_1fr] border-b border-[#e4f4f1] bg-[#ecfaf7] px-3 py-2 text-xs font-black text-[#075e5a]">
+                <div>对比项</div>
+                <div>自家商品</div>
+                <div>竞品参考</div>
+                <div>Agent 建议</div>
+              </div>
+              {compareRows(sample).map((row) => (
+                <div key={row.label} className="grid grid-cols-[70px_1fr_1fr_1fr] border-b border-[#edf7f5] px-3 py-2 text-xs last:border-b-0">
+                  <div className="font-bold text-[#075e5a]">{row.label}</div>
+                  <div className="text-gray-700">{row.own}</div>
+                  <div className="text-gray-700">{row.competitor}</div>
+                  <div className="font-semibold text-gray-950">{row.action}</div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function OperationsDiagnosisReport({ sources }: { sources: AgentInsightSource[] }) {
+  const diagnosis = sources.find((source) => source.status === "ok" && source.toolName === "diagnose_ozon_store");
+  const competitor = sources.find((source) => source.status === "ok" && source.toolName === "analyze_ozon_competitors");
+  if (!diagnosis && !competitor) return null;
+  return (
+    <div className="space-y-3">
+      <StoreAnomalyOverview source={diagnosis} />
+      <PriorityProducts source={diagnosis} />
+      <CompetitorBusinessComparison source={competitor} />
+    </div>
+  );
 }
 
 function CompetitorCards({ sample }: { sample: Record<string, unknown> }) {
@@ -360,22 +651,26 @@ function DefaultInsight({ source }: { source: AgentInsightSource }) {
 
 export function AgentInsightPanel({ sources }: { sources?: AgentInsightSource[] }) {
   if (!sources?.length) return null;
+  const reportSources = sources.filter((source) =>
+    ["diagnose_ozon_store", "analyze_ozon_competitors"].includes(source.toolName)
+  );
+  const errorSources = sources.filter((source) => source.status === "error");
+  const otherSources = sources.filter((source) =>
+    source.status !== "error" &&
+    !["diagnose_ozon_store", "analyze_ozon_competitors", "get_ozon_product_content"].includes(source.toolName)
+  );
   return (
     <div className="mt-3 space-y-2">
-      {sources.map((source, index) => (
+      <OperationsDiagnosisReport sources={reportSources} />
+      {errorSources.map((source, index) => (
+        <div key={`${source.toolName}-${source.at}-${index}`} className="flex items-start gap-2 border-l-4 border-red-500 bg-red-50 p-3 text-xs text-red-800">
+          <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{source.label}：{source.error ?? "读取失败"}</span>
+        </div>
+      ))}
+      {otherSources.map((source, index) => (
         <div key={`${source.toolName}-${source.at}-${index}`}>
-          {source.status === "error" ? (
-            <div className="flex items-start gap-2 border-l-4 border-red-500 bg-red-50 p-3 text-xs text-red-800">
-              <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{source.label}：{source.error ?? "读取失败"}</span>
-            </div>
-          ) : source.toolName === "diagnose_ozon_store" ? (
-            <DiagnosisInsight source={source} />
-          ) : source.toolName === "analyze_ozon_competitors" ? (
-            <CompetitorInsight source={source} />
-          ) : (
-            <DefaultInsight source={source} />
-          )}
+          <DefaultInsight source={source} />
         </div>
       ))}
     </div>
