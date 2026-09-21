@@ -581,6 +581,34 @@ async function assertImportTaskSucceeded(params: {
   throw new Error(`ozon_import_task_not_ready:${params.taskId}`);
 }
 
+async function assertContentDraftApplied(params: {
+  client: OzonClient;
+  request: ImportProductsRequest;
+  changedFields: string[];
+}) {
+  const item = params.request.items[0];
+  const offerId = item?.offer_id;
+  if (!offerId) return null;
+  const expectedTitle = params.changedFields.includes("title") ? stringField(item.name) : null;
+  const expectedDescription = params.changedFields.includes("description")
+    ? stringField(item.description)
+    : null;
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const [info] = await params.client.getProductInfoAttributes({ offerIds: [offerId] });
+    const actualTitle = stringField(info?.name);
+    const actualDescription = stringField(info?.description);
+    const titleApplied = !expectedTitle || actualTitle === expectedTitle;
+    const descriptionApplied = !expectedDescription || actualDescription === expectedDescription;
+    if (titleApplied && descriptionApplied) {
+      return { offerId, titleApplied, descriptionApplied, attempt };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+
+  throw new Error("content_draft_not_reflected_after_import");
+}
+
 async function markActionExecuted(params: {
   tenantId: string;
   userId: string;
@@ -737,6 +765,7 @@ async function executeContentDraftAction(params: {
     taskId: response.task_id,
     offerId: request.items[0]?.offer_id,
   });
+  const verification = await assertContentDraftApplied({ client, request, changedFields });
   return markActionExecuted({
     tenantId: params.tenantId,
     userId: params.userId,
@@ -747,6 +776,7 @@ async function executeContentDraftAction(params: {
       requestHash,
       changedFields,
       importInfo,
+      verification,
     },
   });
 }

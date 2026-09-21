@@ -86,4 +86,13 @@ describe("agent execution trace", () => {
     expect(trace[1]?.status).toBe("running");
     expect(trace.find((step) => step.id === "collect-competitors")?.status).toBe("pending");
   });
+
+  it("defaults competitor analysis to one competitor per category", () => {
+    const trace = buildPendingAgentExecutionTrace("分析店铺竞品");
+
+    expect(trace.map((step) => step.id)).toContain("collect-competitors");
+    expect(trace.find((step) => step.id === "collect-competitors")?.description).toContain(
+      "每个类目采集 1 个",
+    );
+  });
 });

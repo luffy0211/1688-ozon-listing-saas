@@ -647,8 +647,8 @@ function buildInstructions(offerId: string | null) {
     "竞品分析和店铺诊断默认不要围绕属性写报告，重点分析标题、主图、价格、热度代理、主题标签、简介内容；属性只能作为辅助证据，用户明确要求属性时再提。",
     "工具返回 contentDiagnosis 时，优先使用里面的竞品样本、字段对比和视觉分析结果；把结论写成运营能看懂的差距和动作。",
     "竞品分析回复中的“类目填写经验”只在用户明确要求属性时使用。它已经按“俄语（中文）”格式整理。多个俄语值也要逐个翻译。不要翻译 offerId、productId、SKU、descriptionCategoryId、typeId、categoryKey。",
-    "竞品分析回复必须检查 evidenceQuality：如果 insufficientCategoryCount 大于 0，必须先说明哪些类目证据不足；如果 hasCrawlerBlocked 为 true，说明本地 Ozon 公开页采集可能被 403、cookie、代理或风控拦截；如果 hasSearchFallbackFailure 为 true，说明 Tavily/搜索索引回退也失败。证据不足时不能生成看似完整的经验结论。",
-    "竞品总数必须使用工具返回的 uniqueCompetitorCount，不得把多个自家商品共享的同一竞品重复相加；类目有效样本少于 3 个时必须明确标为证据不足。",
+    "竞品分析回复必须检查 evidenceQuality，但主回答只能用业务语言表达：哪些类目有可参考竞品，哪些类目暂时没有拿到可参考竞品。不要输出 insufficientCategoryCount、hasCrawlerBlocked、hasSearchFallbackFailure、HTTP、缓存等技术字段。",
+    "竞品总数必须使用工具返回的 uniqueCompetitorCount，不得把多个自家商品共享的同一竞品重复相加。证据是否足够按用户本次要求的每类数量判断；未说明时每类 1 个有效竞品即可进入诊断。",
     "竞品多数值只是经验，不是自家商品事实。只有工具返回 status=ADD 的建议有自家商品证据并可进入待确认操作；NEEDS_CONFIRMATION 只能提示人工补充，COMPLETE 不修改，UNMAPPED 不执行。",
     "只有用户明确询问价格或销量时，才说明这些字段是否可用；不能让价格或销量缺失掩盖已经返回的商品内容。搜索顺序不是销量排名，评价数不是销量，索引页面没有转化率或广告消耗。",
     "竞品分析工具不会自动写属性。需要执行内容修改时，只能先读取具体商品，再创建 CONTENT_DRAFT；价格和主图只给建议，不得仅凭竞品价格创建改价动作，也不得自动换主图。",
@@ -730,7 +730,7 @@ function competitorAnalysisIntent(prompt: string) {
 }
 
 function storeDiagnosisIntent(prompt: string) {
-  return /(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt);
+  return /(?:店铺|经营|运营).{0,8}(?:诊断|体检)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)|店铺分析/i.test(prompt);
 }
 
 export function shouldRunCompetitorAnalysisForDiagnosis(prompt: string) {
@@ -761,12 +761,12 @@ export function competitorsPerCategoryFromPrompt(prompt: string) {
 }
 
 export function requiredOzonToolForPrompt(prompt: string, offerId: string | null) {
+  if (storeDiagnosisIntent(prompt)) {
+    return "diagnose_ozon_store";
+  }
   if (competitorAnalysisIntent(prompt)) {
     if (savedCompetitorEvidenceIntent(prompt) && !shouldRefreshCompetitorEvidence(prompt)) return null;
     return competitorsPerCategoryFromPrompt(prompt) ? "analyze_ozon_competitors" : null;
-  }
-  if (storeDiagnosisIntent(prompt)) {
-    return "diagnose_ozon_store";
   }
   if (!offerId && contentOptimizationIntent(prompt)) return "diagnose_ozon_store";
   if (/(?:活动|促销).{0,8}(?:规则|流程|sop|价格|计算)|(?:报名规则|报名流程|计算方法|活动价)/i.test(prompt)) {
@@ -1226,10 +1226,12 @@ export async function runOzonContentAgent(params: {
           idempotencyKey: creditKey,
         });
         charged = true;
+        const requestedStoreId =
+          optionalStoreId(params.storeId) ?? optionalStoreId(paramsForRun.storeId);
         const result = await analyzeOzonCompetitors({
           tenantId: params.tenantId,
           userId: params.userId,
-          storeId: params.storeId ?? paramsForRun.storeId,
+          storeId: requestedStoreId,
           competitorsPerCategory: competitorsPerCategory ?? 1,
           refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
         });
@@ -1248,7 +1250,7 @@ export async function runOzonContentAgent(params: {
           name: "analyze_ozon_competitors",
           at,
           input: {
-            storeId: paramsForRun.storeId ?? params.storeId ?? null,
+            storeId: requestedStoreId,
             refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
           },
           output: {
@@ -1301,7 +1303,9 @@ export async function runOzonContentAgent(params: {
         toolCalls.push({
           name: "analyze_ozon_competitors",
           at,
-          input: { storeId: paramsForRun.storeId ?? params.storeId ?? null },
+          input: {
+            storeId: optionalStoreId(params.storeId) ?? optionalStoreId(paramsForRun.storeId),
+          },
           error: message,
         });
         finishToolProgress();
@@ -1318,6 +1322,7 @@ export async function runOzonContentAgent(params: {
         "Read own-store operations data, then automatically compare same-category competitor products as part of the store diagnosis. Net payout is not accounting profit.",
       parameters: z.object({ storeId: z.string().nullable() }),
       execute: async ({ storeId }) => {
+        const requestedStoreId = optionalStoreId(params.storeId) ?? optionalStoreId(storeId);
         const at = new Date().toISOString();
         const creditKey = `agent-tool:${runRecord.id}:diagnose_ozon_store`;
         let charged = false;
@@ -1334,13 +1339,13 @@ export async function runOzonContentAgent(params: {
           charged = true;
           const result = await diagnoseOzonStore({
             tenantId: params.tenantId,
-            storeId: params.storeId ?? storeId,
+            storeId: requestedStoreId,
           });
           latestLowContentOfferId = result.lowContentRatingProducts[0]?.offerId ?? null;
           toolCalls.push({
             name: "diagnose_ozon_store",
             at,
-            input: { storeId: storeId ?? params.storeId ?? null },
+            input: { storeId: requestedStoreId },
             output: {
               storeName: result.store.name,
               productCount: result.current30d.productCount,
@@ -1377,7 +1382,7 @@ export async function runOzonContentAgent(params: {
           toolCalls.push({
             name: "diagnose_ozon_store",
             at,
-            input: { storeId: storeId ?? params.storeId ?? null },
+            input: { storeId: requestedStoreId },
             error: message,
           });
           finishToolProgress();
@@ -1402,17 +1407,18 @@ export async function runOzonContentAgent(params: {
       parameters: z.object({ storeId: z.string().nullable() }),
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
+        const requestedStoreId = optionalStoreId(storeId) ?? optionalStoreId(params.storeId);
         try {
           const result = await listOzonPromotions({
             tenantId: params.tenantId,
-            storeId: storeId ?? params.storeId,
+            storeId: requestedStoreId,
           });
           listedPromotionIds.clear();
           result.actions.forEach((action) => listedPromotionIds.add(action.id));
           toolCalls.push({
             name: "list_ozon_promotions",
             at,
-            input: { storeId: storeId ?? params.storeId ?? null },
+            input: { storeId: requestedStoreId },
             output: { storeName: result.store.name, actionCount: result.actions.length },
           });
           return result;
@@ -1421,7 +1427,7 @@ export async function runOzonContentAgent(params: {
           toolCalls.push({
             name: "list_ozon_promotions",
             at,
-            input: { storeId: storeId ?? params.storeId ?? null },
+            input: { storeId: requestedStoreId },
             error: message,
           });
           throw error;
@@ -1442,17 +1448,18 @@ export async function runOzonContentAgent(params: {
           throw new Error("必须先调用 list_ozon_promotions 并使用其返回的活动 ID。");
         }
         const at = new Date().toISOString();
+        const requestedStoreId = optionalStoreId(storeId) ?? optionalStoreId(params.storeId);
         try {
           const result = await getOzonPromotionCandidates({
             tenantId: params.tenantId,
-            storeId: storeId ?? params.storeId,
+            storeId: requestedStoreId,
             actionId,
           });
           latestPromotionCandidateActionId = actionId;
           toolCalls.push({
             name: "get_ozon_promotion_candidates",
             at,
-            input: { actionId, storeId: storeId ?? params.storeId ?? null },
+            input: { actionId, storeId: requestedStoreId },
             output: { actionId, candidateCount: result.total },
           });
           return result;
@@ -1461,7 +1468,7 @@ export async function runOzonContentAgent(params: {
           toolCalls.push({
             name: "get_ozon_promotion_candidates",
             at,
-            input: { actionId, storeId: storeId ?? params.storeId ?? null },
+            input: { actionId, storeId: requestedStoreId },
             error: message,
           });
           throw error;

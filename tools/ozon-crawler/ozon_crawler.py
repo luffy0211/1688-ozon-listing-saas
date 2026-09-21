@@ -36,7 +36,7 @@ DEFAULT_PROXY = "socks5h://127.0.0.1:10808"
 DEFAULT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0.0.0")
 REQUEST_INTERVAL = 1.5          # 秒，请求间隔（限速，请勿调太小）
-HTTP_TIMEOUT = 45
+HTTP_TIMEOUT = 12
 GLOBAL_PARAM = "from_global=true"   # 海外访问必须带，否则 Ozon 返回空壳页
 
 # 详情页“完整特性”懒加载分块（layout_container=pdpPage2column）所需的客户端版本头
@@ -97,11 +97,12 @@ class Fetcher:
     """
 
     def __init__(self, cookie_file, proxy=DEFAULT_PROXY, ua=DEFAULT_UA,
-                 workdir=None):
+                 workdir=None, timeout=HTTP_TIMEOUT):
         self.cookie_file = os.path.abspath(cookie_file)
         workdir = workdir or tempfile.gettempdir()
         self.proxy = proxy
         self.ua = ua
+        self.timeout = max(1.0, float(timeout or HTTP_TIMEOUT))
         self._cookie_discard = os.path.join(workdir, "ozon_cj_discard.txt")
         if os.path.exists(self._cookie_discard):
             os.remove(self._cookie_discard)
@@ -112,7 +113,8 @@ class Fetcher:
     def _raw_get(self, url, referer):
         out = os.path.join(tempfile.gettempdir(), "ozon_fetch_out.html")
         cmd = [curl_bin(), "-sS", "--compressed", "-L",
-               "--max-redirs", "8", "--max-time", str(HTTP_TIMEOUT),
+               "--max-redirs", "8", "--connect-timeout", str(min(10.0, self.timeout)),
+               "--max-time", str(self.timeout),
                "-b", self.cookie_file, "-c", self._cookie_discard,
                "-H", f"User-Agent: {self.ua}",
                "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -136,7 +138,8 @@ class Fetcher:
         """调用 entrypoint/composer 的 JSON 接口（带 dweb_client 客户端头），返回响应文本"""
         out = os.path.join(tempfile.gettempdir(), "ozon_json_out.txt")
         cmd = [curl_bin(), "-sS", "--compressed", "-L",
-               "--max-redirs", "8", "--max-time", str(HTTP_TIMEOUT),
+               "--max-redirs", "8", "--connect-timeout", str(min(10.0, self.timeout)),
+               "--max-time", str(self.timeout),
                "-b", self.cookie_file, "-c", self._cookie_discard,
                "-H", f"User-Agent: {self.ua}",
                "-H", "Accept: application/json",
@@ -183,6 +186,9 @@ def _image_urls(*values):
             return
         if not re.search(r"\.(?:avif|jpe?g|png|webp)(?:\?|$)", value, re.I):
             return
+        low = value.casefold()
+        if any(token in low for token in ("/assets/", "/cms/", "logo", "touch-icon", "bmg_")):
+            return
         if value not in found:
             found.append(value)
 
@@ -199,6 +205,37 @@ def _image_urls(*values):
         else:
             add(value)
     return found[:30]
+
+
+def _image_key(url):
+    m = re.search(r"/([^/]+)\.(?:avif|jpe?g|png|webp)(?:\?|$)", url, re.I)
+    return m.group(1) if m else url
+
+
+def _selected_product_images(urls, limit=6):
+    selected = []
+    seen = set()
+    for url in urls or []:
+        if re.search(r"/(?:wc50|wc75|wc100|ws100)/", url, re.I):
+            continue
+        key = _image_key(url)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(url)
+        if len(selected) >= limit:
+            break
+    if selected:
+        return selected
+    for url in urls or []:
+        key = _image_key(url)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(url)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def parse_cards(html_text):
@@ -592,6 +629,44 @@ def _search_path(query):
             + GLOBAL_PARAM + "&text=" + quote(query))
 
 
+def _with_sorting(path, sorting):
+    path = _ozon_path(path)
+    if re.search(r"([?&])sorting=[^&]*", path):
+        return re.sub(r"([?&])sorting=[^&]*", rf"\1sorting={sorting}", path, count=1)
+    return path + ("&" if "?" in path else "?") + f"sorting={sorting}"
+
+
+def _gender_query_word(value):
+    text = clean(str(value or "")).casefold()
+    if "муж" in text:
+        return "мужские"
+    if "жен" in text:
+        return "женские"
+    if "дет" in text:
+        return "детские"
+    return ""
+
+
+def _candidate_paths(primary_path, cat):
+    paths = []
+
+    def add(path):
+        path = _ozon_path(path)
+        if path and path not in paths:
+            paths.append(path)
+
+    add(primary_path)
+    if _ozon_path(primary_path).startswith("/category/"):
+        add(_with_sorting(primary_path, "popular"))
+    query = clean(str(cat.get("ozonQuery") or ""))
+    product_type = clean(str(cat.get("productType") or cat.get("categoryNameRu") or ""))
+    if not query and product_type:
+        query = " ".join(part for part in (product_type, _gender_query_word(cat.get("gender"))) if part)
+    if query:
+        add(_search_path(query))
+    return paths
+
+
 def _category_keyword(product_type):
     kw = None
     for name, slug in PRODUCT_SLUG_KEYWORDS.items():
@@ -822,12 +897,12 @@ def _detail_text_demographics_mismatch(detail, cat):
     if not expected:
         return False
     text = " ".join(clean(str(detail.get(k) or "")).casefold()
-                    for k in ("title_full", "name", "description"))
+                    for k in ("title_full", "name"))
     return _text_demographics_mismatch(text, expected)
 
 
 def _text_demographics_mismatch(text, expected):
-    child = re.search(r"дет|девоч|мальчик|мальчиков|школьн|новорожден|подростк", text)
+    child = re.search(r"\b(?:детск\w*|дети|детей|девоч\w*|мальчик\w*|мальчиков\w*|школьн\w*|новорожден\w*|подростк\w*)\b", text)
     female = re.search(r"женск|женский|женская|женские|женщин", text)
     male = re.search(r"мужск|мужской|мужская|мужские|мужчин", text)
     if "дет" in expected:
@@ -858,7 +933,7 @@ def _matches_demographics(detail, cat):
         return True, False
     observed = _observed_attribute(detail, {"Пол"})
     if not observed:
-        return False, True
+        return True, True
     value = observed.casefold()
     male = "муж" in value
     female = "жен" in value
@@ -893,7 +968,9 @@ def _matches_product_type(detail, cat):
         return True, None
     observed = _observed_product_type(detail)
     if not observed:
-        return False, None
+        expected = _normalize_product_type(expected)
+        text = " ".join(clean(str(detail.get(k) or "")).casefold() for k in ("title_full", "name"))
+        return bool(expected and expected in text), None
     expected = _normalize_product_type(expected)
     observed_types = {
         _normalize_product_type(value)
@@ -936,8 +1013,11 @@ def run_job(fetcher, job, args):
     exclude = {str(s) for s in (job.get("excludeSkus") or [])}
     top_n = int(job.get("topN") or 5)
     pages = int(job.get("scanPages") or 5)
+    max_detail_attempts = int(job.get("maxDetailAttempts") or max(top_n * 4, top_n))
     if top_n < 1 or pages < 1:
         raise ValueError("topN 和 scanPages 必须大于 0")
+    if max_detail_attempts < 1:
+        raise ValueError("maxDetailAttempts 必须大于 0")
     result = {
         "requestId": job.get("requestId", ""),
         "capturedAt": now,
@@ -958,79 +1038,55 @@ def run_job(fetcher, job, args):
             "competitors": [],
             "warnings": ([warn] if warn else []),
         }
-        # 扫描列表池
         pool = {}
         seen = set()
-        for page in range(1, pages + 1):
-            url = _category_page_url(path, page)
-            if path.startswith("/search/"):
-                url = ("https://www.ozon.ru" + path) if page <= 1 else (
-                    "https://www.ozon.ru" + path + "&page=" + str(page))
-            print(f"[job-scan] {url}", file=sys.stderr)
-            try:
-                html_text = fetcher.get(url)
-            except Exception as e:
-                cat_res["warnings"].append(f"page{page} 扫描失败: {str(e)[:100]}")
-                break
-            cards = parse_cards(html_text)
-            if not cards:
-                break
-            for c in cards:
-                if c["product_id"] in seen:
-                    continue
-                seen.add(c["product_id"])
-                pool[c["product_id"]] = c
-            time.sleep(args.interval)
-        cat_res["scannedCount"] = len(pool)
-        # 排除自家 SKU
-        pool = {k: v for k, v in pool.items() if k not in exclude}
-        cat_res["eligibleCount"] = len(pool)
+        processed = set()
+        seen_variants = set()
+        detail_attempts = 0
 
-        # 排序（评价数 + 评分）
-        ranked = []
-        for pid, c in pool.items():
+        def try_add_competitor(c):
+            nonlocal detail_attempts
+            if len(cat_res["competitors"]) >= top_n:
+                return True
+            if detail_attempts >= max_detail_attempts:
+                return True
+            pid = c["product_id"]
+            if pid in processed or pid in exclude:
+                return False
+            processed.add(pid)
+            detail_attempts += 1
             rev = _to_num(c.get("reviews")) or 0.0
             rat = _to_num(c.get("rating")) or 0.0
-            ranked.append((c, rev, rat))
-        ranked.sort(
-            key=lambda x: (_card_title_matches_product_type(x[0], cat), x[1], x[2]),
-            reverse=True,
-        )
-        # 抓取详情并组装 competitor
-        seen_variants = set()
-        for c, rev, rat in ranked:
-            if len(cat_res["competitors"]) >= top_n:
-                break
             detail = {}
             try:
-                dh = fetcher.get(detail_url(c["product_id"]),
-                                 referer="https://www.ozon.ru" + c["url"])
+                dh = fetcher.get(detail_url(pid), referer="https://www.ozon.ru" + c["url"])
                 detail = parse_detail(dh)
                 sh = extract_sh(dh)
                 if sh:
-                    full = fetch_full_characteristics(fetcher, c["product_id"], sh)
+                    full = fetch_full_characteristics(fetcher, pid, sh)
                     if full:
                         detail["attributes"] = full
                 time.sleep(args.interval)
             except Exception as e:
-                print(f"[warn] 详情失败 id={c['product_id']}: {str(e)[:100]}", file=sys.stderr)
-                cat_res["warnings"].append(f"id={c['product_id']} 详情抓取失败")
-                continue
+                print(f"[warn] 详情失败 id={pid}: {str(e)[:100]}", file=sys.stderr)
+                cat_res["warnings"].append(f"id={pid} 详情抓取失败")
+                return detail_attempts >= max_detail_attempts
             if _invalid_competitor_evidence(detail):
                 cat_res["filteredInvalidEvidenceCount"] += 1
-                continue
+                return detail_attempts >= max_detail_attempts
             if _detail_text_demographics_mismatch(detail, cat):
                 cat_res["filteredDemographicCount"] += 1
-                continue
+                return detail_attempts >= max_detail_attempts
             matches, _ = _matches_product_type(detail, cat)
             if not matches:
                 cat_res["filteredMismatchedCount"] += 1
-                continue
+                return detail_attempts >= max_detail_attempts
             demographics_match, demographics_missing = _matches_demographics(detail, cat)
+            if demographics_missing:
+                cat_res["missingDemographicCount"] += 1
             if not demographics_match:
-                counter = "missingDemographicCount" if demographics_missing else "filteredDemographicCount"
-                cat_res[counter] += 1
-                continue
+                cat_res["filteredDemographicCount"] += 1
+                return detail_attempts >= max_detail_attempts
             hot = bool(c.get("labels") and any(
                 any(token in label.casefold() for token in ("хит", "бестселлер"))
                 for label in c["labels"]
@@ -1039,13 +1095,13 @@ def run_job(fetcher, job, args):
             variant_key = _variant_key(c, detail, review_count)
             if variant_key is not None and variant_key in seen_variants:
                 cat_res["deduplicatedVariantCount"] += 1
-                continue
+                return detail_attempts >= max_detail_attempts
             if variant_key is not None:
                 seen_variants.add(variant_key)
             comp = {
                 "publicRank": len(cat_res["competitors"]) + 1,
-                "sku": c["product_id"],
-                "url": f"https://www.ozon.ru/product/{c['product_id']}/",
+                "sku": pid,
+                "url": f"https://www.ozon.ru/product/{pid}/",
                 "title": detail.get("title_full") or c.get("title"),
                 "description": detail.get("description"),
                 "descriptionCategoryId": cat.get("descriptionCategoryId"),
@@ -1060,10 +1116,56 @@ def run_job(fetcher, job, args):
                 "popularityProxy": hot or review_count >= 10000,
                 "sellerName": detail.get("seller"),
                 "brand": detail.get("brand") or None,
-                "imageUrls": detail.get("image_urls") or [],
+                "imageUrls": _selected_product_images(detail.get("image_urls") or []),
                 "attributes": detail.get("attributes") or {},
             }
             cat_res["competitors"].append(comp)
+            return len(cat_res["competitors"]) >= top_n
+
+        for source_path in _candidate_paths(path, cat):
+            for page in range(1, pages + 1):
+                if len(cat_res["competitors"]) >= top_n or detail_attempts >= max_detail_attempts:
+                    break
+                url = _category_page_url(source_path, page)
+                if source_path.startswith("/search/"):
+                    url = ("https://www.ozon.ru" + source_path) if page <= 1 else (
+                        "https://www.ozon.ru" + source_path + "&page=" + str(page))
+                print(f"[job-scan] {url}", file=sys.stderr)
+                try:
+                    html_text = fetcher.get(url)
+                except Exception as e:
+                    cat_res["warnings"].append(f"page{page} 扫描失败: {str(e)[:100]}")
+                    break
+                cards = parse_cards(html_text)
+                if not cards:
+                    break
+                for c in cards:
+                    if c["product_id"] in seen:
+                        continue
+                    seen.add(c["product_id"])
+                    pool[c["product_id"]] = c
+                    cat_res["scannedCount"] += 1
+                    if c["product_id"] not in exclude:
+                        cat_res["eligibleCount"] += 1
+                candidates = [
+                    c for c in pool.values()
+                    if c["product_id"] not in processed and c["product_id"] not in exclude
+                ]
+                candidates.sort(
+                    key=lambda x: (
+                        _card_title_matches_product_type(x, cat),
+                        _to_num(x.get("reviews")) or 0.0,
+                        _to_num(x.get("rating")) or 0.0,
+                    ),
+                    reverse=True,
+                )
+                for c in candidates:
+                    if try_add_competitor(c):
+                        break
+                time.sleep(args.interval)
+        cat_res["detailAttemptCount"] = detail_attempts
+        if detail_attempts >= max_detail_attempts and len(cat_res["competitors"]) < top_n:
+            cat_res["warnings"].append(f"详情尝试达到上限 {max_detail_attempts}，已停止该类目")
         result["categories"].append(cat_res)
     return result
 
@@ -1090,6 +1192,8 @@ def main():
     ap.add_argument("--jar", default=None, help="Netscape cookie jar 路径（与 --tsv 二选一）")
     ap.add_argument("--proxy", default=DEFAULT_PROXY, help="代理地址")
     ap.add_argument("--interval", type=float, default=REQUEST_INTERVAL, help="请求间隔秒数")
+    ap.add_argument("--timeout", type=float, default=HTTP_TIMEOUT,
+                    help=f"单个 HTTP 请求超时秒数（默认 {HTTP_TIMEOUT}，超时后跳过当前入口）")
     ap.add_argument("--job", default=None,
                     help="Job 模式：传入契约 JSON 文件路径（含 requestId/topN/scanPages/categories/excludeSkus），"
                          "输出按契约返回榜单 JSON（打印到 stdout，亦可用 --out 存文件）")
@@ -1109,7 +1213,7 @@ def main():
             ap.error("请提供 --tsv（导出的 cookie 表格）或 --jar（Netscape cookie 文件）")
         jar = cand
 
-    fetcher = Fetcher(jar, proxy=args.proxy)
+    fetcher = Fetcher(jar, proxy=args.proxy, timeout=args.timeout)
     print(f"[info] cookie: {jar}\n[info] proxy: {args.proxy}", file=sys.stderr)
 
     if args.job:

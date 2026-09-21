@@ -200,15 +200,19 @@ function competitorsPerCategoryFromPrompt(prompt: string) {
 }
 
 function offerIdFromPrompt(prompt: string) {
-  return prompt.match(/(?:offerId|offer_id|offer id)\s*[:：]?\s*([A-Za-z0-9_-]+)/i)?.[1] ?? null;
+  return (
+    prompt.match(/(?:offerId|offer_id|offer id)\s*[:：]?\s*([A-Za-z0-9._-]+)/i)?.[1] ??
+    prompt.match(/\b([A-Z]\d{6,}[A-Za-z0-9._-]*-[A-Za-z0-9._-]+)\b/)?.[1] ??
+    null
+  );
 }
 
 function requiredToolFromPrompt(prompt: string, offerId: string | null, competitorsPerCategory: number | null) {
+  if (/(?:店铺|经营|运营).{0,8}(?:诊断|体检)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)|店铺分析/i.test(prompt)) {
+    return "diagnose_ozon_store";
+  }
   if (/(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt)) {
     return competitorsPerCategory ? "analyze_ozon_competitors" : null;
-  }
-  if (/(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)/i.test(prompt)) {
-    return "diagnose_ozon_store";
   }
   if (/(?:活动|促销).{0,8}(?:规则|流程|sop|价格|计算)|(?:报名规则|报名流程|计算方法|活动价)/i.test(prompt)) {
     return "compile_promotion_policy";

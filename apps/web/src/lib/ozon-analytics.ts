@@ -85,6 +85,11 @@ function assertOzonClientId(clientId: string) {
   }
 }
 
+function optionalStoreId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && !["null", "undefined"].includes(trimmed.toLowerCase()) ? trimmed : null;
+}
+
 export function formatOzonSyncError(error: unknown): OzonSyncErrorView {
   if (error instanceof OzonApiError) {
     if (error.status === 400 && /Client-Id/i.test(error.message)) {
@@ -183,13 +188,14 @@ export async function getOzonAnalyticsView(params: {
   tenantId: string;
   storeId?: string | null;
 }): Promise<OzonAnalyticsView> {
+  const requestedStoreId = optionalStoreId(params.storeId);
   const stores = await prisma.store.findMany({
     where: { tenantId: params.tenantId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     select: { id: true, name: true, isDefault: true },
   });
-  const store = params.storeId
-    ? stores.find((item) => item.id === params.storeId) ?? null
+  const store = requestedStoreId
+    ? stores.find((item) => item.id === requestedStoreId) ?? null
     : stores[0] ?? null;
 
   const [snapshot, products, collected, productPool, drafts, compiledDrafts, submittedRuns] = await Promise.all([
@@ -266,10 +272,11 @@ export async function syncOzonAnalytics(params: {
   userId?: string;
   storeId?: string | null;
 }) {
+  const requestedStoreId = optionalStoreId(params.storeId);
   const store = await prisma.store.findFirst({
     where: {
       tenantId: params.tenantId,
-      ...(params.storeId ? { id: params.storeId } : {}),
+      ...(requestedStoreId ? { id: requestedStoreId } : {}),
     },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
   });

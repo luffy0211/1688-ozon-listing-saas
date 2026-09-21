@@ -4,6 +4,7 @@ const OFFER_ID_PATTERNS = [
   /(?:货号|商品编号|自家商品)\s*(?:是|为|:|=|：)?\s*([A-Za-z0-9._-]{2,80})/i,
   /\boffer[_\s-]*id\s*[:=：]?\s*([A-Za-z0-9._-]{2,80})/i,
   /\bsku\s*[:=：]?\s*([A-Za-z0-9._-]{2,80})/i,
+  /\b([A-Z]\d{6,}[A-Za-z0-9._-]*-[A-Za-z0-9._-]+)\b/,
 ];
 
 function cleanUrl(value: string) {

@@ -191,7 +191,7 @@ export function parseOzonCrawlerOutput(
         ? [`已过滤 ${result.filteredDemographicCount} 个性别或年龄不匹配的商品`]
         : []),
       ...(result?.missingDemographicCount
-        ? [`有 ${result.missingDemographicCount} 个商品缺少性别属性，已按严格匹配规则排除`]
+        ? [`有 ${result.missingDemographicCount} 个商品缺少性别属性，已按标题和类目保留，建议人工复核`]
         : []),
       ...(result?.deduplicatedVariantCount
         ? [`已合并 ${result.deduplicatedVariantCount} 个重复商品变体`]

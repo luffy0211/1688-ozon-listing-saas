@@ -19,6 +19,7 @@ const consumeTenantCredits = vi.hoisted(() => vi.fn());
 const refundTenantCredits = vi.hoisted(() => vi.fn());
 const ozonClientMock = vi.hoisted(() => ({
   getProductInfoList: vi.fn(),
+  getProductInfoAttributes: vi.fn(),
   getProductImportInfo: vi.fn(),
   importProducts: vi.fn(),
 }));
@@ -65,6 +66,11 @@ beforeEach(() => {
     ozonApiKey: "plain-key",
   });
   ozonClientMock.getProductInfoList.mockResolvedValue([{ id: 1 }]);
+  ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
+    offer_id: "SKU-1",
+    name: "Новое название",
+    description: "Описание из аннотации",
+  }]);
   ozonClientMock.importProducts.mockResolvedValue({ task_id: 123 });
   ozonClientMock.getProductImportInfo.mockResolvedValue({
     items: [{ offer_id: "SKU-1", status: "imported", errors: [] }],
@@ -175,6 +181,7 @@ describe("executeApprovedAgentAction", () => {
     expect(ozonClientMock.getProductInfoList).toHaveBeenCalledWith({ offerIds: ["SKU-1"] });
     expect(ozonClientMock.importProducts).toHaveBeenCalled();
     expect(ozonClientMock.getProductImportInfo).toHaveBeenCalledWith(123);
+    expect(ozonClientMock.getProductInfoAttributes).toHaveBeenCalledWith({ offerIds: ["SKU-1"] });
     expect(consumeTenantCredits).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       feature: "ozon_action_execute",

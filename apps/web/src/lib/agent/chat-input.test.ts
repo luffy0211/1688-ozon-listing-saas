@@ -19,6 +19,7 @@ describe("agent chat input parsing", () => {
     expect(extractOfferId("自家商品 XYZ789 对比这个竞品")).toBe("XYZ789");
     expect(extractOfferId("自家商品是 XYZ789 对比这个竞品")).toBe("XYZ789");
     expect(extractOfferId("货号：SKU.2026.08")).toBe("SKU.2026.08");
+    expect(extractOfferId("针对 F926082212s-0A-XXL 生成具体标题和描述优化草案")).toBe("F926082212s-0A-XXL");
   });
 
   it("returns null when there is no own product identifier", () => {

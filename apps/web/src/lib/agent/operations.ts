@@ -416,8 +416,9 @@ export function attachCompetitorCategoryLabels(
 }
 
 async function resolveStore(tenantId: string, storeId?: string | null) {
+  const requestedStoreId = textField(storeId);
   const store = await prisma.store.findFirst({
-    where: { tenantId, ...(storeId ? { id: storeId } : {}) },
+    where: { tenantId, ...(requestedStoreId && !["null", "undefined"].includes(requestedStoreId.toLowerCase()) ? { id: requestedStoreId } : {}) },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     select: { id: true, name: true, ozonClientId: true, ozonApiKey: true },
   });
