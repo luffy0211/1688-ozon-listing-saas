@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim AS base
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 curl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 
 FROM base AS deps
@@ -22,4 +22,4 @@ COPY . .
 RUN pnpm db:generate
 RUN pnpm --filter @saas/web build
 EXPOSE 3000
-CMD ["sh", "-c", "pnpm db:push && pnpm --filter @saas/web start"]
+CMD ["pnpm", "--filter", "@saas/web", "start"]
