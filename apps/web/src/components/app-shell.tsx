@@ -35,7 +35,11 @@ const adminNavItems = [
 ];
 
 export function visibleNavItemsForRole(role: string) {
-  return role === "admin" ? [...customerNavItems, ...adminNavItems] : customerNavItems;
+  return canSeePlatformControls(role) ? [...customerNavItems, ...adminNavItems] : customerNavItems;
+}
+
+export function canSeePlatformControls(role: string) {
+  return role === "admin";
 }
 
 export function AppShell({
@@ -47,6 +51,7 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const isAgentPage = pathname.startsWith("/agent/");
+  const showPlatformControls = canSeePlatformControls(user.role);
 
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,#dff7ff_0%,#f6f8ff_48%,#eeeafd_100%)] p-0 text-[#14213d] lg:p-3">
@@ -146,7 +151,7 @@ export function AppShell({
                 )}
               </div>
               <div className="flex min-w-0 items-center gap-2">
-                <CreditBalanceBadge />
+                {showPlatformControls ? <CreditBalanceBadge /> : null}
                 {isAgentPage ? (
                   <>
                     <span className="hidden rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-2.5 py-1 text-xs font-semibold text-[#168864] sm:inline-flex">改动需确认</span>
