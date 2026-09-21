@@ -28,6 +28,7 @@ const competitorSchema = z.object({
   rating: z.number().nullable().optional(),
   reviewCount: z.number().int().nullable().optional(),
   sellerName: z.string().nullable().optional(),
+  imageUrls: z.array(z.string().url()).optional(),
   attributes: z.record(z.string(), z.string()),
 });
 
@@ -157,7 +158,7 @@ function publicProduct(value: z.infer<typeof competitorSchema>): OzonPublicProdu
     rating: value.rating ?? null,
     reviewCount: value.reviewCount ?? null,
     sellerName: value.sellerName ?? null,
-    imageUrls: [],
+    imageUrls: value.imageUrls ?? [],
     attributes: value.attributes,
     description: value.description ?? null,
     reviews: [],

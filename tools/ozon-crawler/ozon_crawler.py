@@ -17,12 +17,14 @@ import datetime
 import html as ihtml
 import json
 import os
+import shutil
 import re
 import subprocess
 import sys
 import tempfile
 import time
 import uuid
+from urllib.parse import urlparse
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -47,6 +49,13 @@ APP_MANIFEST = ("frontend-ozon-ru:1771dc82a6bfe50e7c88d9e6e72b72e7614ba9c5,"
                 "fav-render-api:7ad5ba7db85180341ee858eea27b4c0467858022,"
                 "reviews-render-api:b8cca00f991a1a5d15b24f752d514af18e56d813")
 PDP_BLOCK_CONTAINER = "pdpPage2column"   # 详情页第 2 屏分块，内含 webCharacteristics 全量特性
+
+
+def curl_bin():
+    configured = os.environ.get("OZON_CURL_BIN")
+    if configured:
+        return configured
+    return shutil.which("curl.exe") or shutil.which("curl") or "curl.exe"
 
 
 # --------------------------------------------------------------------------
@@ -102,7 +111,7 @@ class Fetcher:
 
     def _raw_get(self, url, referer):
         out = os.path.join(tempfile.gettempdir(), "ozon_fetch_out.html")
-        cmd = ["curl.exe", "--proxy", self.proxy, "-sS", "--compressed", "-L",
+        cmd = [curl_bin(), "-sS", "--compressed", "-L",
                "--max-redirs", "8", "--max-time", str(HTTP_TIMEOUT),
                "-b", self.cookie_file, "-c", self._cookie_discard,
                "-H", f"User-Agent: {self.ua}",
@@ -112,6 +121,8 @@ class Fetcher:
                "-H", f"Referer: {referer}",
                "-w", "\n__OZON_STATUS__:%{http_code}",
                "-o", out, url]
+        if self.proxy:
+            cmd[1:1] = ["--proxy", self.proxy]
         p = subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         m = re.search(r"__OZON_STATUS__:(\d+)", p.stdout or "")
@@ -124,7 +135,7 @@ class Fetcher:
     def json_api(self, url, extra_headers=None, referer="https://www.ozon.ru/"):
         """调用 entrypoint/composer 的 JSON 接口（带 dweb_client 客户端头），返回响应文本"""
         out = os.path.join(tempfile.gettempdir(), "ozon_json_out.txt")
-        cmd = ["curl.exe", "--proxy", self.proxy, "-sS", "--compressed", "-L",
+        cmd = [curl_bin(), "-sS", "--compressed", "-L",
                "--max-redirs", "8", "--max-time", str(HTTP_TIMEOUT),
                "-b", self.cookie_file, "-c", self._cookie_discard,
                "-H", f"User-Agent: {self.ua}",
@@ -138,6 +149,8 @@ class Fetcher:
                "-H", f"Referer: {referer}",
                "-w", "\n__OZON_STATUS__:%{http_code}",
                "-o", out, url]
+        if self.proxy:
+            cmd[1:1] = ["--proxy", self.proxy]
         for h in extra_headers or []:
             cmd += ["-H", h]
         p = subprocess.run(cmd, capture_output=True, text=True,
@@ -157,6 +170,35 @@ def clean(s):
     s = ihtml.unescape(s or "")
     s = s.replace("\ufeff", "").replace("\u200b", "").replace("\u2009", " ")
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _image_urls(*values):
+    found = []
+
+    def add(value):
+        if not isinstance(value, str):
+            return
+        value = ihtml.unescape(value).replace("\\u002F", "/").replace("\\/", "/")
+        if not re.match(r"^https://", value, re.I):
+            return
+        if not re.search(r"\.(?:avif|jpe?g|png|webp)(?:\?|$)", value, re.I):
+            return
+        if value not in found:
+            found.append(value)
+
+    for value in values:
+        if isinstance(value, list):
+            for item in value:
+                add(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                if isinstance(item, (list, dict)):
+                    found.extend(url for url in _image_urls(item) if url not in found)
+                else:
+                    add(item)
+        else:
+            add(value)
+    return found[:30]
 
 
 def parse_cards(html_text):
@@ -216,6 +258,7 @@ def parse_detail(html_text):
                 d["sku"] = ld.get("sku")
                 d["description"] = ld.get("description")
                 d["brand"] = ld.get("brand")
+                d["image_urls"] = _image_urls(ld.get("image"))
                 ar = ld.get("aggregateRating") or {}
                 d["rating"] = ar.get("ratingValue")
                 d["review_count"] = ar.get("reviewCount")
@@ -251,6 +294,9 @@ def parse_detail(html_text):
     ar = re.search(r"Артикул:\s*(\d+)", html_text)
     if ar:
         d.setdefault("sku", ar.group(1))
+    html_images = _image_urls(*re.findall(r'https:\\?/\\?/[^"\')<>\s]+', html_text))
+    if html_images:
+        d["image_urls"] = _image_urls(d.get("image_urls") or [], html_images)
     return d
 
 
@@ -516,7 +562,18 @@ PRECISE_CATEGORY_PATHS = {
 }
 
 
+def _ozon_path(value):
+    value = str(value or "").strip()
+    if value.startswith("http://") or value.startswith("https://"):
+        parsed = urlparse(value)
+        if not parsed.netloc.endswith("ozon.ru"):
+            return "/" + value
+        return parsed.path + (("?" + parsed.query) if parsed.query else "")
+    return value if value.startswith("/") else "/" + value
+
+
 def _category_page_url(path, page):
+    path = _ozon_path(path)
     sep = "&" if "?" in path else "?"
     if page <= 1:
         return "https://www.ozon.ru" + path + sep + GLOBAL_PARAM
@@ -671,8 +728,7 @@ def resolve_category_url(fetcher, cat):
     """把契约类目对象解析成可扫描的网页分类路径。返回 (path, warning)"""
     # 1) 调用方可选提供的直链（内部约定，契约外的可选字段）
     if cat.get("ozonCategoryUrl"):
-        u = cat["ozonCategoryUrl"]
-        return (u if u.startswith("/") else "/" + u, None)
+        return (_with_rating_sort(_ozon_path(cat["ozonCategoryUrl"])), None)
     if cat.get("ozonQuery") and not any(
         cat.get(key) for key in ("gender", "ageGroup", "productType", "categoryNameRu")
     ):
@@ -810,9 +866,9 @@ def _matches_demographics(detail, cat):
     if "дет" in expected:
         gender_matches = child
     elif "жен" in expected:
-        gender_matches = female and not male and not child
+        gender_matches = female and not child
     else:
-        gender_matches = male and not female and not child
+        gender_matches = male and not child
     if not gender_matches:
         return False, False
     age = _observed_attribute(detail, {"Возрастная группа", "Возраст"})
@@ -847,10 +903,12 @@ def _matches_product_type(detail, cat):
 
 
 def _invalid_competitor_evidence(detail):
+    title = clean(str(detail.get("title_full") or detail.get("name") or ""))
+    if re.match(r"^(Характеристики|Отзывы|Вопросы|Каталог)(?:\s|$)", title, re.I):
+        return True
     attrs = detail.get("attributes") or {}
     text = "\n".join([
-        clean(str(detail.get("title_full") or "")),
-        clean(str(detail.get("name") or "")),
+        title,
         clean(str(detail.get("description") or "")),
         *[f"{k}\n{v}" for k, v in attrs.items()],
     ])
@@ -860,7 +918,14 @@ def _invalid_competitor_evidence(detail):
         (name, value) for name, value in attrs.items()
         if clean(str(name)) and clean(str(value)) and not re.match(r"^image\s*\d+$", clean(str(name)), re.I)
     ]
-    return not real_attrs and not clean(str(detail.get("description") or ""))
+    return not any([
+        real_attrs,
+        clean(str(detail.get("description") or "")),
+        detail.get("image_urls"),
+        detail.get("price"),
+        detail.get("rating"),
+        detail.get("review_count"),
+    ])
 
 
 def run_job(fetcher, job, args):
@@ -936,12 +1001,6 @@ def run_job(fetcher, job, args):
         for c, rev, rat in ranked:
             if len(cat_res["competitors"]) >= top_n:
                 break
-            if _card_title_product_type_mismatch(c, cat):
-                cat_res["filteredMismatchedCount"] += 1
-                continue
-            if _card_title_demographics_mismatch(c, cat):
-                cat_res["filteredDemographicCount"] += 1
-                continue
             detail = {}
             try:
                 dh = fetcher.get(detail_url(c["product_id"]),
@@ -1001,6 +1060,7 @@ def run_job(fetcher, job, args):
                 "popularityProxy": hot or review_count >= 10000,
                 "sellerName": detail.get("seller"),
                 "brand": detail.get("brand") or None,
+                "imageUrls": detail.get("image_urls") or [],
                 "attributes": detail.get("attributes") or {},
             }
             cat_res["competitors"].append(comp)

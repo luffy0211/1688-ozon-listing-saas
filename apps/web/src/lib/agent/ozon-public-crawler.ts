@@ -82,6 +82,7 @@ function genderFromText(value: string | null | undefined) {
 }
 
 const INVALID_EVIDENCE_RE = /нет соединения|выключите vpn|инцидент|обновить страницу|captcha|access denied|challenge|antibot|warning\s+похоже/i;
+const INVALID_PRODUCT_TITLE_RE = /^(Характеристики|Отзывы|Вопросы|Каталог)(?:\s|$)/i;
 const PSEUDO_ATTRIBUTE_RE = /^image\s*\d+$/i;
 
 function normalizedType(value: string) {
@@ -132,6 +133,7 @@ function genderValueMatches(observed: string, expectedGender: string) {
 }
 
 export function isUsableCompetitorEvidence(product: OzonPublicProduct, target?: OzonCompetitorTarget | null) {
+  if (INVALID_PRODUCT_TITLE_RE.test(product.title.trim())) return false;
   const allText = [
     product.title,
     product.description ?? "",

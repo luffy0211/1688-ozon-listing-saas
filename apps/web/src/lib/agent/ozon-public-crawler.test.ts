@@ -236,6 +236,21 @@ describe("Ozon public category crawler", () => {
 
     expect(isUsableCompetitorEvidence({
       ...product,
+      title: "Характеристики Поло Polo Ralph Lauren одежда мужская 1 шт",
+      attributes: { Тип: "Поло", Пол: "Мужской" },
+    }, {
+      offerId: "own",
+      title: "Мужское поло",
+      publicSku: "own-sku",
+      quantity: 0,
+      revenueRub: 0,
+      categoryNameRu: "Поло",
+      gender: "Мужской",
+      ageGroup: "Взрослые",
+    })).toBe(false);
+
+    expect(isUsableCompetitorEvidence({
+      ...product,
       title: "Рубашка Gloria Jeans для мальчиков подростков",
       attributes: { Тип: "Рубашка", Пол: "Мужской" },
     }, {

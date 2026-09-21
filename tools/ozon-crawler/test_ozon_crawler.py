@@ -30,6 +30,27 @@ class JobFetcher:
 
 
 class OzonCrawlerJobTests(unittest.TestCase):
+    def test_parse_detail_extracts_json_ld_images(self):
+        detail = ozon_crawler.parse_detail("""
+        <html><head>
+        <script type="application/ld+json">
+        {
+          "@type": "Product",
+          "name": "Поло мужское",
+          "sku": "123",
+          "description": "Поло на каждый день",
+          "image": ["https://cdn.test/polo-1.jpg", "https://cdn.test/polo-2.webp"],
+          "aggregateRating": {"ratingValue": "4.9", "reviewCount": "100"},
+          "offers": {"price": "1499", "priceCurrency": "RUB"}
+        }
+        </script>
+        </head><body></body></html>
+        """)
+
+        self.assertEqual("Поло мужское", detail["name"])
+        self.assertEqual(["https://cdn.test/polo-1.jpg", "https://cdn.test/polo-2.webp"], detail["image_urls"])
+        self.assertEqual("1499", detail["price"])
+
     def test_category_fallback_does_not_crash(self):
         path, warning = ozon_crawler.resolve_category_url(
             EmptyFetcher(),
@@ -143,7 +164,7 @@ class OzonCrawlerJobTests(unittest.TestCase):
         self.assertEqual(1, parse_detail.call_count)
         self.assertEqual(0, category["filteredMismatchedCount"])
 
-    def test_job_skips_obvious_card_product_type_mismatches_before_detail(self):
+    def test_job_fetches_detail_before_rejecting_product_type_mismatch(self):
         cards = [
             {
                 "product_id": "100",
@@ -166,7 +187,11 @@ class OzonCrawlerJobTests(unittest.TestCase):
         with (
             mock.patch.object(ozon_crawler, "resolve_category_url", return_value=("/category/polo/", None)),
             mock.patch.object(ozon_crawler, "parse_cards", return_value=cards),
-            mock.patch.object(ozon_crawler, "parse_detail") as parse_detail,
+            mock.patch.object(
+                ozon_crawler,
+                "parse_detail",
+                return_value={"attributes": {"Тип": "Футболка", "Пол": "Мужской"}},
+            ) as parse_detail,
             mock.patch.object(ozon_crawler, "extract_sh", return_value=None),
         ):
             result = ozon_crawler.run_job(JobFetcher(), job, args)
@@ -174,7 +199,7 @@ class OzonCrawlerJobTests(unittest.TestCase):
         category = result["categories"][0]
         self.assertEqual([], category["competitors"])
         self.assertEqual(1, category["filteredMismatchedCount"])
-        parse_detail.assert_not_called()
+        self.assertEqual(1, parse_detail.call_count)
 
     def test_job_rejects_gender_mismatch_and_deduplicates_variants(self):
         cards = [
@@ -385,7 +410,11 @@ class OzonCrawlerJobTests(unittest.TestCase):
             mock.patch.object(
                 ozon_crawler,
                 "parse_detail",
-                return_value={"attributes": {"Тип": "Поло", "Пол": "Мужской"}},
+                side_effect=[
+                    {"attributes": {"Тип": "Поло", "Пол": "Девочки"}},
+                    {"attributes": {"Тип": "Поло", "Пол": "Женский"}},
+                    {"attributes": {"Тип": "Поло", "Пол": "Мужской"}},
+                ],
             ) as parse_detail,
             mock.patch.object(ozon_crawler, "extract_sh", return_value=None),
         ):
@@ -394,7 +423,7 @@ class OzonCrawlerJobTests(unittest.TestCase):
         category = result["categories"][0]
         self.assertEqual(["300"], [item["sku"] for item in category["competitors"]])
         self.assertEqual(2, category["filteredDemographicCount"])
-        self.assertEqual(1, parse_detail.call_count)
+        self.assertEqual(3, parse_detail.call_count)
 
     def test_job_skips_child_detail_title_for_menswear(self):
         cards = [
@@ -454,6 +483,51 @@ class OzonCrawlerJobTests(unittest.TestCase):
         self.assertEqual(["200"], [item["sku"] for item in category["competitors"]])
         self.assertEqual(1, category["filteredDemographicCount"])
 
+    def test_job_keeps_unisex_products_for_menswear_after_detail_fetch(self):
+        cards = [
+            {
+                "product_id": "100",
+                "url": "/product/unisex-polo-100/",
+                "title": "Поло для мужчин и женщин",
+                "price": "1200",
+                "rating": "5.0",
+                "reviews": "20000",
+                "labels": [],
+            },
+        ]
+        job = {
+            "requestId": "test",
+            "topN": 1,
+            "scanPages": 1,
+            "categories": [{
+                "categoryKey": "1:2",
+                "productType": "Поло",
+                "gender": "Мужской",
+                "ageGroup": "Взрослые",
+            }],
+        }
+        args = SimpleNamespace(interval=0)
+
+        with (
+            mock.patch.object(ozon_crawler, "resolve_category_url", return_value=("/category/polo/", None)),
+            mock.patch.object(ozon_crawler, "parse_cards", return_value=cards),
+            mock.patch.object(
+                ozon_crawler,
+                "parse_detail",
+                return_value={
+                    "title_full": "Поло для мужчин и женщин",
+                    "description": "Универсальное поло для взрослых.",
+                    "attributes": {"Тип": "Поло", "Пол": "Мужчины и женщины"},
+                },
+            ),
+            mock.patch.object(ozon_crawler, "extract_sh", return_value=None),
+        ):
+            result = ozon_crawler.run_job(JobFetcher(), job, args)
+
+        category = result["categories"][0]
+        self.assertEqual(["100"], [item["sku"] for item in category["competitors"]])
+        self.assertEqual(0, category["filteredDemographicCount"])
+
     def test_job_skips_ozon_error_page_details(self):
         cards = [
             {
@@ -511,6 +585,67 @@ class OzonCrawlerJobTests(unittest.TestCase):
 
         category = result["categories"][0]
         self.assertEqual(["200"], [item["sku"] for item in category["competitors"]])
+        self.assertEqual(1, category["filteredInvalidEvidenceCount"])
+
+    def test_job_skips_characteristics_index_pages(self):
+        cards = [
+            {
+                "product_id": "100",
+                "url": "/product/polo-100/",
+                "title": "Мужское поло",
+                "price": "1200",
+                "rating": "5.0",
+                "reviews": "20000",
+                "labels": [],
+            },
+            {
+                "product_id": "200",
+                "url": "/product/polo-200/",
+                "title": "Мужское поло",
+                "price": "1100",
+                "rating": "4.9",
+                "reviews": "10000",
+                "labels": [],
+            },
+        ]
+
+        def detail(page):
+            if "/100/" in page:
+                return {
+                    "title_full": "Характеристики Поло Polo Ralph Lauren одежда мужская 1 шт",
+                    "attributes": {"Тип": "Поло", "Пол": "Мужской"},
+                }
+            return {
+                "title_full": "Поло мужское хлопковое",
+                "description": "Мужское поло на каждый день.",
+                "image_urls": ["https://cdn.test/polo.jpg"],
+                "attributes": {"Тип": "Поло", "Пол": "Мужской"},
+            }
+
+        job = {
+            "requestId": "test",
+            "topN": 1,
+            "scanPages": 1,
+            "categories": [{
+                "categoryKey": "1:2",
+                "productType": "Поло",
+                "gender": "Мужской",
+                "ageGroup": "Взрослые",
+            }],
+        }
+        args = SimpleNamespace(interval=0)
+
+        with (
+            mock.patch.object(ozon_crawler, "resolve_category_url", return_value=("/category/polo/", None)),
+            mock.patch.object(ozon_crawler, "parse_cards", return_value=cards),
+            mock.patch.object(ozon_crawler, "parse_detail", side_effect=detail),
+            mock.patch.object(ozon_crawler, "extract_sh", return_value=None),
+        ):
+            result = ozon_crawler.run_job(JobFetcher(), job, args)
+
+        category = result["categories"][0]
+        self.assertEqual(["200"], [item["sku"] for item in category["competitors"]])
+        self.assertEqual(["https://cdn.test/polo.jpg"], category["competitors"][0]["imageUrls"])
         self.assertEqual(1, category["filteredInvalidEvidenceCount"])
 
     def test_job_cli_writes_only_json_to_stdout(self):
