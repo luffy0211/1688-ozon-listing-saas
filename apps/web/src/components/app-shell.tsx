@@ -8,7 +8,6 @@ import {
   Bot,
   ChevronDown,
   ClipboardList,
-  GitBranch,
   LayoutDashboard,
   PackageSearch,
   Settings,
@@ -29,17 +28,12 @@ const customerNavItems = [
   { href: "/agent/actions", label: "待审批", icon: ShieldCheck },
 ];
 
-const adminNavItems = [
-  { href: "/admin", label: "平台后台", icon: Settings },
-  { href: "/workflow", label: "自动化工作流", icon: GitBranch },
-];
-
-export function visibleNavItemsForRole(role: string) {
-  return canSeePlatformControls(role) ? [...customerNavItems, ...adminNavItems] : customerNavItems;
+export function visibleNavItemsForRole(_role: string) {
+  return customerNavItems;
 }
 
-export function canSeePlatformControls(role: string) {
-  return role === "admin";
+export function canSeePlatformControls(_role: string) {
+  return false;
 }
 
 export function AppShell({

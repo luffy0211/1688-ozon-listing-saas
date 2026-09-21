@@ -18,10 +18,10 @@ describe("app shell navigation", () => {
     expect(canSeePlatformControls("operator")).toBe(false);
   });
 
-  it("keeps platform management entries for admins", () => {
+  it("keeps admins out of the customer navigation surface", () => {
     const labels = visibleNavItemsForRole("admin").map((item) => item.label);
 
-    expect(labels).toContain("平台后台");
-    expect(canSeePlatformControls("admin")).toBe(true);
+    expect(labels).not.toContain("平台后台");
+    expect(canSeePlatformControls("admin")).toBe(false);
   });
 });

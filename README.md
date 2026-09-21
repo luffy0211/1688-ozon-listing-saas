@@ -57,7 +57,8 @@ docker compose up --build
 
 本地 seed 默认账号：
 
-- 管理员：`admin@example.com`
+- 客户账号：`admin@example.com`
+- 平台管理员：`platform-admin@example.com`
 - 密码：`Admin123456`
 - 注册邀请码：`dev-invite`
 
