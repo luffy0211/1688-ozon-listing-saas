@@ -1,6 +1,7 @@
-FROM node:22-bookworm-slim AS base
+ARG WEB_BASE_IMAGE=node:22-bookworm-slim
+FROM ${WEB_BASE_IMAGE} AS base
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 curl && rm -rf /var/lib/apt/lists/*
+RUN if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1 || ! command -v openssl >/dev/null 2>&1; then apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates python3 curl && rm -rf /var/lib/apt/lists/*; fi
 RUN corepack enable
 
 FROM base AS deps

@@ -46,6 +46,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        WEB_BASE_IMAGE: ${WEB_BASE_IMAGE:-node:22-bookworm-slim}
     environment:
       DATABASE_URL: postgresql://saas:saas@postgres:5432/listing?schema=public
       REDIS_URL: redis://redis:6379
