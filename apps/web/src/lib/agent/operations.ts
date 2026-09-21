@@ -25,6 +25,7 @@ import {
   ozonCrawlerConfigured,
 } from "./ozon-crawler-process";
 import { searchOzonIndexedCompetitors, uniqueUsableIndexedCompetitors } from "./ozon-search-index";
+import { analyzeProductImagesWithVision } from "./image-vision";
 
 type FinanceLike = Pick<
   OzonFinanceTransaction,
@@ -582,6 +583,133 @@ export function countUniqueCompetitors(reports: unknown[]) {
   })).size;
 }
 
+function words(value: string | null | undefined) {
+  return String(value ?? "")
+    .toLocaleLowerCase("ru-RU")
+    .match(/[\p{L}\p{N}#]+/gu)
+    ?.filter((word) => word.length >= 4 && !/^\d+$/.test(word)) ?? [];
+}
+
+function topTerms(values: string[], limit = 10) {
+  const counts = new Map<string, number>();
+  values.flatMap(words).forEach((word) => counts.set(word, (counts.get(word) ?? 0) + 1));
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([term, count]) => ({ term, count }));
+}
+
+function medianNullable(values: Array<number | null>) {
+  const sorted = values.filter((value): value is number => value !== null).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+}
+
+function descriptionSummary(value: string | null | undefined) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 180) : null;
+}
+
+export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
+  const samples = reports.flatMap((report) => {
+    const item = record(report);
+    const target = record(item.target);
+    const ownProduct = cachedPublicProduct(item.ownProduct);
+    const competitors = Array.isArray(item.competitors)
+      ? item.competitors.map(cachedPublicProduct).filter((product): product is OzonPublicProduct => Boolean(product))
+      : [];
+    if (!competitors.length) return [];
+    const category = record(item.category);
+    const titleTerms = topTerms(competitors.map((product) => product.title), 8);
+    const descriptionTerms = topTerms(competitors.map((product) => product.description ?? ""), 8);
+    return [{
+      offerId: textField(target.offerId) ?? ownProduct?.sku ?? null,
+      categoryName: textField(category.name) ?? textField(target.categoryNameRu) ?? textField(target.title),
+      own: ownProduct ? {
+        title: ownProduct.title,
+        imageUrl: ownProduct.imageUrls[0] ?? null,
+        imageCount: ownProduct.imageUrls.length,
+        priceRub: ownProduct.priceRub,
+        rating: ownProduct.rating,
+        reviewCount: ownProduct.reviewCount,
+        description: descriptionSummary(ownProduct.description),
+      } : {
+        title: textField(target.title),
+        imageUrl: null,
+        imageCount: 0,
+        priceRub: null,
+        rating: null,
+        reviewCount: null,
+        description: null,
+      },
+      competitors: competitors.slice(0, 6).map((product) => ({
+        sku: product.sku,
+        url: product.url,
+        title: product.title,
+        imageUrl: product.imageUrls[0] ?? null,
+        imageCount: product.imageUrls.length,
+        priceRub: product.priceRub,
+        rating: product.rating,
+        reviewCount: product.reviewCount,
+        categoryPosition: product.categoryPosition ?? null,
+        description: descriptionSummary(product.description),
+      })),
+      comparison: {
+        title: {
+          ownLength: ownProduct?.title.length ?? textField(target.title)?.length ?? null,
+          competitorMedianLength: medianNullable(competitors.map((product) => product.title.length)),
+          frequentTerms: titleTerms,
+        },
+        mainImage: {
+          ownImageCount: ownProduct?.imageUrls.length ?? 0,
+          competitorMedianImageCount: medianNullable(competitors.map((product) => product.imageUrls.length)),
+        },
+        price: {
+          ownRub: ownProduct?.priceRub ?? null,
+          competitorMedianRub: medianNullable(competitors.map((product) => product.priceRub)),
+        },
+        heat: {
+          ownRating: ownProduct?.rating ?? null,
+          ownReviewCount: ownProduct?.reviewCount ?? null,
+          competitorMedianRating: medianNullable(competitors.map((product) => product.rating)),
+          competitorMedianReviewCount: medianNullable(competitors.map((product) => product.reviewCount)),
+          note: "Ozon 未返回真实销量；这里用评分、评价数和搜索位置作为热度代理。",
+        },
+        themes: {
+          titleTerms,
+          descriptionTerms,
+        },
+        description: {
+          ownAvailable: Boolean(ownProduct?.description),
+          competitorAvailableCount: competitors.filter((product) => product.description).length,
+          samples: competitors.flatMap((product) =>
+            product.description ? [{ sku: product.sku, text: descriptionSummary(product.description) }] : [],
+          ).slice(0, 3),
+        },
+      },
+    }];
+  });
+
+  const first = samples[0];
+  const vision = first
+    ? await analyzeProductImagesWithVision([
+        { label: `自家 ${first.offerId ?? ""}`.trim(), imageUrl: first.own.imageUrl },
+        ...first.competitors.slice(0, 3).map((item, index) => ({
+          label: `竞品${index + 1}`,
+          imageUrl: item.imageUrl,
+        })),
+      ])
+    : { enabled: false, model: "", analyses: [], warning: "没有可分析竞品图片。" };
+
+  return {
+    kind: "competitor_content_diagnosis",
+    heatProxyNotice: "Ozon 未返回真实销量；系统使用评分、评价数和搜索位置作为热度代理。",
+    samples,
+    vision,
+  };
+}
+
 export function buildCompetitorBatchProposal(params: {
   storeId: string;
   reportIds: string[];
@@ -918,7 +1046,12 @@ export async function analyzeOzonCompetitors(params: {
   let crawled: OzonCategoryCompetitorResult[] = [];
   const defaultEvidenceSource = ozonCrawlerConfigured() ? "ozon_http_crawler" : "ozon_search_index";
   const sourceByCategory = new Map<string, "ozon_http_crawler" | "ozon_search_index">();
-  if (pending.length && params.refreshEvidence) {
+  const shouldCollectMissingEvidence = pending.length && (
+    params.refreshEvidence ||
+    ozonCrawlerConfigured() ||
+    Boolean(env.tavilyApiKey)
+  );
+  if (shouldCollectMissingEvidence) {
     const ownSkus = new Set(
       summary.products.map((item) => item.publicSku).filter((sku): sku is string => Boolean(sku)),
     );
@@ -973,7 +1106,7 @@ export async function analyzeOzonCompetitors(params: {
       }
     }
   } else if (pending.length) {
-    warnings.push(`${pending.length} 个类目没有历史竞品证据；请明确要求“刷新竞品”后重试。`);
+    warnings.push(`${pending.length} 个类目没有历史竞品证据，且没有配置 Ozon 采集器或 Tavily。`);
   }
 
   for (const result of crawled) {
@@ -1079,6 +1212,7 @@ export async function analyzeOzonCompetitors(params: {
     capturedAt: now,
     minimumCompetitors: params.competitorsPerCategory,
   });
+  const contentDiagnosis = await buildCompetitorContentDiagnosis(reports);
 
   const reportSources = new Set(reports.map((report) => String(record(report).source)));
   const source = reportSources.has("ozon_http_crawler") && reportSources.has("ozon_search_index")
@@ -1095,6 +1229,7 @@ export async function analyzeOzonCompetitors(params: {
     capturedAt: now.toISOString(),
     reports,
     categoryPlaybooks: playbooks.playbookReports,
+    contentDiagnosis,
     productRecommendations: playbooks.productRecommendations,
     analyzedProductCount: playbooks.productRecommendations.length,
     evidenceQuality: summarizeCompetitorEvidence({

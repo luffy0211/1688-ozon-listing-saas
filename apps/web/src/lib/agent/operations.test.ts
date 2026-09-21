@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachCompetitorCategoryLabels,
   buildCompetitorBatchProposal,
+  buildCompetitorContentDiagnosis,
   buildStoreDiagnosis,
   cachedCompetitorReport,
   countUniqueCompetitors,
@@ -206,6 +207,52 @@ describe("Ozon operations helpers", () => {
         actionAttributes: null,
       }],
     })).toBeNull();
+  });
+
+  it("builds content-focused competitor diagnosis for visible comparison fields", async () => {
+    const product = (sku: string, overrides: Record<string, unknown> = {}) => ({
+      sku,
+      url: `https://www.ozon.ru/product/${sku}/`,
+      title: `Мужское поло хлопковое ${sku}`,
+      priceRub: 1200,
+      oldPriceRub: null,
+      rating: 4.8,
+      reviewCount: 32,
+      sellerName: "seller",
+      imageUrls: [`https://cdn.example.com/${sku}.jpg`],
+      attributes: {},
+      description: "Легкое поло из хлопка для города и офиса",
+      reviews: [],
+      ...overrides,
+    });
+
+    const diagnosis = await buildCompetitorContentDiagnosis([{
+      target: { offerId: "offer-1", title: "Поло", categoryNameRu: "Поло" },
+      category: { name: "Поло" },
+      ownProduct: product("own", { priceRub: 999, reviewCount: 2 }),
+      competitors: [
+        product("c1", { priceRub: 1290, reviewCount: 40 }),
+        product("c2", { priceRub: 1490, reviewCount: 60 }),
+        product("c3", { priceRub: 1690, reviewCount: 80 }),
+      ],
+    }]);
+
+    expect(diagnosis).toMatchObject({
+      kind: "competitor_content_diagnosis",
+      heatProxyNotice: expect.stringContaining("真实销量"),
+      samples: [
+        expect.objectContaining({
+          offerId: "offer-1",
+          comparison: expect.objectContaining({
+            price: { ownRub: 999, competitorMedianRub: 1490 },
+            heat: expect.objectContaining({ ownReviewCount: 2, competitorMedianReviewCount: 60 }),
+            themes: expect.objectContaining({ titleTerms: expect.any(Array) }),
+            description: expect.objectContaining({ ownAvailable: true, competitorAvailableCount: 3 }),
+          }),
+        }),
+      ],
+    });
+    expect(diagnosis.vision.warning).toContain("视觉分析未启用");
   });
 
   it("does not reuse incomplete competitor reports", () => {

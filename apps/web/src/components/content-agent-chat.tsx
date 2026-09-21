@@ -391,9 +391,13 @@ function ActionBubble({
   onCommand,
 }: {
   action: ContentAgentActionView;
-  onCommand: (actionId: string, command: "confirm-execute" | "reject" | "execute") => void;
+  onCommand: (actionId: string, command: "confirm-execute" | "reject" | "execute", payload?: unknown) => void;
 }) {
   const suggestions = suggestionsFromPayload(action.payload);
+  const [editableSuggestions, setEditableSuggestions] = useState(() => suggestions.map((suggestion) => ({
+    ...asRecord(suggestion),
+    suggestedRu: String(asRecord(suggestion).suggestedRu ?? ""),
+  })));
   const payload = asRecord(action.payload);
   const attributeChanges = attributeChangesFromPayload(action.payload);
   const isCompetitorBatch = action.type === "BULK_PRODUCT_UPDATE" && payload.source === "competitor_attribute_playbook";
@@ -408,6 +412,14 @@ function ActionBubble({
     : [];
   const priceRuleLabel = promotionPriceRuleLabel(payload.priceRule);
   const scopeLabel = promotionScopeLabel(payload.scope);
+  const canEditContentDraft = action.type === "CONTENT_DRAFT" && action.status === "PENDING_APPROVAL";
+
+  useEffect(() => {
+    setEditableSuggestions(suggestions.map((suggestion) => ({
+      ...asRecord(suggestion),
+      suggestedRu: String(asRecord(suggestion).suggestedRu ?? ""),
+    })));
+  }, [action.id, action.updatedAt]);
 
   return (
     <section className="mt-3 rounded-xl border border-[#dfe8f4] bg-[#f8fbff] p-3">
@@ -481,9 +493,9 @@ function ActionBubble({
         </div>
       ) : null}
 
-      {suggestions.length ? (
+      {editableSuggestions.length ? (
         <div className="mt-3 space-y-2">
-          {suggestions.map((suggestion, index) => {
+          {editableSuggestions.map((suggestion, index) => {
             const item = asRecord(suggestion);
             return (
               <div key={index} className="border-l-4 border-[#18a7a0] bg-[#effcf9] p-3 text-sm">
@@ -492,12 +504,28 @@ function ActionBubble({
                   <Badge tone="gray">{String(item.sourceTag ?? "建议")}</Badge>
                 </div>
                 <div className="text-gray-700">{String(item.reasonZh ?? "")}</div>
-                <div className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-gray-950">
-                  {String(item.suggestedRu ?? "")}
-                </div>
+                {canEditContentDraft ? (
+                  <textarea
+                    value={String(item.suggestedRu ?? "")}
+                    onChange={(event) => {
+                      const next = event.target.value;
+                      setEditableSuggestions((current) => current.map((entry, entryIndex) =>
+                        entryIndex === index ? { ...entry, suggestedRu: next } : entry,
+                      ));
+                    }}
+                    className="mt-2 min-h-24 w-full rounded-lg border border-[#bfe7e2] bg-white p-2 text-sm text-gray-950 outline-none focus:border-[#18a7a0] focus:ring-2 focus:ring-[#dff7f4]"
+                  />
+                ) : (
+                  <div className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap break-words text-gray-950">
+                    {String(item.suggestedRu ?? "")}
+                  </div>
+                )}
               </div>
             );
           })}
+          {canEditContentDraft ? (
+            <div className="text-xs text-gray-500">确认执行会使用你当前编辑后的标题/描述；关键词建议仅保存展示，不直接写入 Ozon。</div>
+          ) : null}
         </div>
       ) : null}
 
@@ -558,7 +586,7 @@ function ActionBubble({
             ) {
               return;
             }
-            onCommand(action.id, "confirm-execute");
+            onCommand(action.id, "confirm-execute", canEditContentDraft ? { suggestions: editableSuggestions } : undefined);
           }}
           title="确认并执行"
         >
@@ -849,9 +877,9 @@ export function ContentAgentChat({
     void sendPrompt(prompt);
   }
 
-  async function updateAction(actionId: string, command: "confirm-execute" | "reject" | "execute") {
+  async function updateAction(actionId: string, command: "confirm-execute" | "reject" | "execute", payload: unknown = {}) {
     try {
-      const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`);
+      const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
       setMessages((current) => replaceAction(current, data.action));
     } catch (err) {
       setMessages((current) => [

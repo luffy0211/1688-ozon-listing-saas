@@ -26,6 +26,10 @@ export const env = {
   openaiAgentMock: process.env.OPENAI_AGENT_MOCK !== "false",
   openaiAgentTraceSensitiveData:
     process.env.OPENAI_AGENT_TRACE_SENSITIVE_DATA === "true",
+  visionEnabled: process.env.VISION_ENABLED === "true",
+  visionApiKey: process.env.VISION_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
+  visionBaseUrl: process.env.VISION_BASE_URL ?? process.env.OPENAI_BASE_URL ?? "",
+  visionModel: process.env.VISION_MODEL ?? "deepseek-flash",
   agentMinMarginRate: Number(process.env.AGENT_MIN_MARGIN_RATE ?? "0.25"),
   agentMinProfitRub: Number(process.env.AGENT_MIN_PROFIT_RUB ?? "100"),
   agentCompetitorCacheHours: Number(
