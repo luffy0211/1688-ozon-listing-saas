@@ -10,6 +10,7 @@ import {
   fallbackContentDraftSuggestion,
   normalizeOzonProductContent,
   optionalStoreId,
+  productContentForDraft,
   requiredOzonToolForPrompt,
   shouldRunCompetitorAnalysisForDiagnosis,
   shouldRefreshCompetitorEvidence,
@@ -124,6 +125,30 @@ describe("normalizeOzonProductContent", () => {
     expect(product.offerId).toBe("MISSING-1");
     expect(product.productId).toBeNull();
     expect(product.stock).toBe(0);
+  });
+
+  it("keeps earlier reads available when drafting after another product read", () => {
+    const first = normalizeOzonProductContent({
+      store: { id: "store_1", name: "Default Ozon Store" },
+      offerId: "SKU-A",
+      capturedAt: "2026-08-31T00:00:00.000Z",
+      info: { product_id: 1, offer_id: "SKU-A", name: "Первый товар" },
+      stocks: [],
+    });
+    const second = normalizeOzonProductContent({
+      store: { id: "store_1", name: "Default Ozon Store" },
+      offerId: "SKU-B",
+      capturedAt: "2026-08-31T00:01:00.000Z",
+      info: { product_id: 2, offer_id: "SKU-B", name: "Второй товар" },
+      stocks: [],
+    });
+
+    const readProducts = new Map([
+      [first.offerId, first],
+      [second.offerId, second],
+    ]);
+
+    expect(productContentForDraft(readProducts, "SKU-A")).toBe(first);
   });
 });
 
