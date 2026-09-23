@@ -264,6 +264,27 @@ function attributeValueById(attributes: unknown, id: number) {
   return attribute ? attributeTextValue(attribute) : null;
 }
 
+const OZON_DESCRIPTION_ATTRIBUTE_ID = 4191;
+
+function withDescriptionAttribute(attributes: unknown[], description: string): OzonAttribute[] {
+  let found = false;
+  const next = attributes.map((attribute) => {
+    const item = asRecord(attribute);
+    if (numberField(item.id) !== OZON_DESCRIPTION_ATTRIBUTE_ID) {
+      return attribute as OzonAttribute;
+    }
+    found = true;
+    return {
+      ...item,
+      id: OZON_DESCRIPTION_ATTRIBUTE_ID,
+      values: [{ value: description }],
+    } as OzonAttribute;
+  });
+  return found
+    ? next
+    : [...next, { id: OZON_DESCRIPTION_ATTRIBUTE_ID, values: [{ value: description }] }];
+}
+
 function supportedContentDraftFields(payload: Record<string, unknown>) {
   return ["title", "description"].filter((field) => contentSuggestionValue(payload, field));
 }
@@ -283,7 +304,7 @@ export function contentDraftImportPayload(action: {
     contentSuggestionValue(payload, "title") ??
     stringField(product.name) ??
     stringField(rawInfo.name);
-  const attributes = Array.isArray(rawInfo.attributes)
+  const baseAttributes = Array.isArray(rawInfo.attributes)
     ? rawInfo.attributes
     : Array.isArray(product.attributes)
       ? product.attributes
@@ -292,7 +313,10 @@ export function contentDraftImportPayload(action: {
     contentSuggestionValue(payload, "description") ??
     stringField(product.description) ??
     stringField(rawInfo.description) ??
-    attributeValueById(attributes, 4191);
+    attributeValueById(baseAttributes, OZON_DESCRIPTION_ATTRIBUTE_ID);
+  const attributes = baseAttributes && description
+    ? withDescriptionAttribute(baseAttributes, description)
+    : baseAttributes;
   const offerId =
     stringField(product.offerId) ??
     stringField(rawInfo.offer_id) ??
@@ -597,11 +621,22 @@ async function assertContentDraftApplied(params: {
   for (let attempt = 0; attempt < 20; attempt++) {
     const [info] = await params.client.getProductInfoAttributes({ offerIds: [offerId] });
     const actualTitle = stringField(info?.name);
-    const actualDescription = stringField(info?.description);
+    const directDescription = stringField(info?.description);
+    const annotationDescription = attributeValueById(
+      asRecord(info).attributes,
+      OZON_DESCRIPTION_ATTRIBUTE_ID,
+    );
+    const actualDescription = directDescription ?? annotationDescription;
     const titleApplied = !expectedTitle || actualTitle === expectedTitle;
     const descriptionApplied = !expectedDescription || actualDescription === expectedDescription;
     if (titleApplied && descriptionApplied) {
-      return { offerId, titleApplied, descriptionApplied, attempt };
+      return {
+        offerId,
+        titleApplied,
+        descriptionApplied,
+        descriptionSource: directDescription ? "description" : annotationDescription ? "attribute_4191" : null,
+        attempt,
+      };
     }
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }

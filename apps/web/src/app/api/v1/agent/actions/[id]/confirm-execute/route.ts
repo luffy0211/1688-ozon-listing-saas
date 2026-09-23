@@ -34,11 +34,15 @@ async function applyContentDraftEdits(params: {
     where: {
       id: params.actionId,
       tenantId: params.tenantId,
-      type: AgentActionType.CONTENT_DRAFT,
-      status: AgentActionStatus.PENDING_APPROVAL,
     },
   });
   if (!action) return null;
+  if (
+    action.type !== AgentActionType.CONTENT_DRAFT ||
+    action.status !== AgentActionStatus.PENDING_APPROVAL
+  ) {
+    return action;
+  }
   const payload = asRecord(action.payloadJson);
   const current = Array.isArray(payload.suggestions)
     ? payload.suggestions.map(asRecord)
@@ -78,6 +82,12 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       suggestions,
     });
     if (!updated) return notFound("Agent action not found");
+    if (
+      updated.type !== AgentActionType.CONTENT_DRAFT ||
+      updated.status !== AgentActionStatus.PENDING_APPROVAL
+    ) {
+      return ok({ action: serializeAgentAction(updated) });
+    }
   }
 
   const approved = await approveAgentAction({

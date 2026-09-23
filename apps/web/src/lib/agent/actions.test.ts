@@ -128,6 +128,42 @@ describe("executeApprovedAgentAction", () => {
     expect(request.items[0]?.currency_code).toBe("CNY");
   });
 
+  it("writes confirmed description drafts into the Ozon annotation attribute", () => {
+    const { request, changedFields } = contentDraftImportPayload({
+      offerId: "SKU-1",
+      payloadJson: {
+        suggestions: [
+          { field: "description", suggestedRu: "Новое описание товара" },
+        ],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Название",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            currency_code: "CNY",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [
+              { id: 4191, values: [{ value: "Старое описание" }] },
+            ],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+
+    const annotation = request.items[0]?.attributes.find((attribute) => attribute.id === 4191);
+    expect(changedFields).toEqual(["description"]);
+    expect(request.items[0]?.description).toBe("Новое описание товара");
+    expect(annotation?.values).toEqual([{ value: "Новое описание товара" }]);
+  });
+
   it("verifies content drafts with offerId only when productId is also present", async () => {
     process.env.ENABLE_REAL_OZON_SUBMIT = "true";
     prisma.agentAction.findFirst.mockResolvedValue({
@@ -190,6 +226,72 @@ describe("executeApprovedAgentAction", () => {
       referenceId: "content-1",
       idempotencyKey: "agent-action-execute:content-1",
     });
+    expect(refundTenantCredits).not.toHaveBeenCalled();
+  });
+
+  it("treats Ozon annotation attribute 4191 as an applied description draft", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "content-description",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: "5853386614",
+      type: "CONTENT_DRAFT",
+      status: "APPROVED",
+      guardrailJson: {},
+      payloadJson: {
+        suggestions: [{
+          field: "description",
+          suggestedRu: "Новое описание товара",
+        }],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Название",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            currency_code: "CNY",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [{ id: 4191, values: [{ value: "Старое описание" }] }],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+    ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
+      offer_id: "SKU-1",
+      name: "Название",
+      description: null,
+      attributes: [{ id: 4191, values: [{ value: "Новое описание товара" }] }],
+    }]);
+    prisma.agentAction.update.mockResolvedValue({
+      id: "content-description",
+      type: "CONTENT_DRAFT",
+      status: "EXECUTED",
+    });
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "content-description",
+    });
+
+    expect(result?.status).toBe("EXECUTED");
+    expect(ozonClientMock.importProducts).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({
+        description: "Новое описание товара",
+        attributes: expect.arrayContaining([
+          { id: 4191, values: [{ value: "Новое описание товара" }] },
+        ]),
+      })],
+    }));
     expect(refundTenantCredits).not.toHaveBeenCalled();
   });
 

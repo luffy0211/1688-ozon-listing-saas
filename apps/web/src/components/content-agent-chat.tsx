@@ -259,6 +259,37 @@ function actionPayloadSummary(action: ContentAgentActionView) {
   return parts.slice(0, 6).join(" · ");
 }
 
+function actionExecutionSummary(action: ContentAgentActionView) {
+  const execution = asRecord(asRecord(action.guardrail).execution);
+  if (execution.kind !== "CONTENT_DRAFT") return "";
+  const verification = asRecord(execution.verification);
+  const changedFields = Array.isArray(execution.changedFields)
+    ? execution.changedFields.map(String)
+    : [];
+  const parts = [];
+  if (changedFields.includes("title") && verification.titleApplied) {
+    parts.push("标题已写入");
+  }
+  if (changedFields.includes("description") && verification.descriptionApplied) {
+    parts.push(
+      verification.descriptionSource === "attribute_4191"
+        ? "描述已写入 Ozon 描述属性"
+        : "描述已写入",
+    );
+  }
+  return parts.join(" · ");
+}
+
+function friendlyActionError(error: string | null) {
+  if (!error) return "";
+  const messages: Record<string, string> = {
+    content_draft_not_reflected_after_import: "Ozon 已接收任务，但内容同步超时，请稍后刷新商品内容。",
+    execution_in_progress: "任务正在执行，请稍后刷新状态。",
+    real_ozon_submit_disabled: "真实 Ozon 写入开关未开启，当前不能执行。",
+  };
+  return messages[error] ?? error;
+}
+
 function formatTime(value?: string | null) {
   if (!value) return null;
   const date = new Date(value);
@@ -399,6 +430,8 @@ function ActionBubble({
     suggestedRu: String(asRecord(suggestion).suggestedRu ?? ""),
   })));
   const payload = asRecord(action.payload);
+  const executionSummary = actionExecutionSummary(action);
+  const actionError = friendlyActionError(action.error);
   const attributeChanges = attributeChangesFromPayload(action.payload);
   const isCompetitorBatch = action.type === "BULK_PRODUCT_UPDATE" && payload.source === "competitor_attribute_playbook";
   const ruleConditions = Array.isArray(asRecord(payload.rule).all)
@@ -433,7 +466,12 @@ function ActionBubble({
       {actionPayloadSummary(action) ? (
         <div className="mt-2 text-xs text-gray-500">{actionPayloadSummary(action)}</div>
       ) : null}
-      {action.error ? <div className="mt-2 text-xs text-red-600">{action.error}</div> : null}
+      {executionSummary ? (
+        <div className="mt-2 rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+          {executionSummary}
+        </div>
+      ) : null}
+      {actionError ? <div className="mt-2 text-xs text-red-600">{actionError}</div> : null}
 
       {ruleConditions.length ? (
         <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
@@ -879,6 +917,20 @@ export function ContentAgentChat({
 
   async function updateAction(actionId: string, command: "confirm-execute" | "reject" | "execute", payload: unknown = {}) {
     try {
+      if (command === "confirm-execute") {
+        const latest = await getJson(`/api/v1/agent/actions/${actionId}`);
+        if (latest.action?.status !== "PENDING_APPROVAL") {
+          setMessages((current) => [
+            ...replaceAction(current, latest.action),
+            {
+              id: `assistant-action-stale-${Date.now()}`,
+              role: "assistant",
+              content: "这个任务已经处理过，我已刷新当前状态。",
+            },
+          ]);
+          return;
+        }
+      }
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
       setMessages((current) => replaceAction(current, data.action));
     } catch (err) {
