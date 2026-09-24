@@ -76,7 +76,12 @@ function recordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : [];
 }
 
-export function assertOzonMutationSucceeded(value: unknown) {
+type OzonMutationIdentity = { offerId?: string | null; productId?: string | number | null };
+
+export function assertOzonMutationSucceeded(
+  value: unknown,
+  expected: OzonMutationIdentity[] = [],
+) {
   const root = asRecord(value);
   const result = asRecord(root.result);
   const rawItems = Array.isArray(root.result)
@@ -100,12 +105,32 @@ export function assertOzonMutationSucceeded(value: unknown) {
     const kind = updatedCount > 0 ? "ozon_mutation_partial" : "ozon_mutation_rejected";
     throw new Error(`${kind}:${JSON.stringify(rejected).slice(0, 1500)}`);
   }
+  const missing = expected.filter((identity) => !items.some((item) => {
+    const offerId = stringField(item.offer_id ?? item.offerId);
+    const productId = stringField(item.product_id ?? item.productId);
+    return (
+      (identity.offerId != null && offerId === String(identity.offerId)) ||
+      (identity.productId != null && productId === String(identity.productId))
+    );
+  }));
+  if (missing.length) {
+    throw new Error(`ozon_mutation_incomplete:${JSON.stringify(missing).slice(0, 1500)}`);
+  }
   return { updatedCount, rejectedCount: 0 };
+}
+
+function assertOzonMutationNotRejected(value: unknown, expected: OzonMutationIdentity[]) {
+  try {
+    return assertOzonMutationSucceeded(value, expected);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("ozon_mutation_unknown:")) return null;
+    throw error;
+  }
 }
 
 export function isUncertainOzonWriteError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/ozon_mutation_(?:rejected|partial)|ozon_import_task_failed|trusted_.*guardrail_failed/i.test(message)) {
+  if (/ozon_mutation_(?:rejected|partial|incomplete)|ozon_import_task_failed|trusted_.*guardrail_failed/i.test(message)) {
     return false;
   }
   return /timeout|timed out|socket hang up|econnreset|econnaborted|network|fetch failed|aborted/i.test(message);
@@ -893,6 +918,36 @@ async function markActionPendingVerification(params: {
   });
 }
 
+async function markActionPartial(params: {
+  tenantId: string;
+  userId: string;
+  action: { id: string; type: AgentActionType; guardrailJson: unknown };
+  execution: Record<string, unknown>;
+}) {
+  const updated = await prisma.agentAction.update({
+    where: { id: params.action.id },
+    data: {
+      status: AgentActionStatus.BLOCKED,
+      error: "partial_execution",
+      guardrailJson: {
+        ...asRecord(params.action.guardrailJson),
+        execution: params.execution,
+      } as never,
+    },
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action: "agent.action.partial",
+      entityType: "agent_action",
+      entityId: params.action.id,
+      metaJson: { type: params.action.type, execution: params.execution } as never,
+    },
+  });
+  return updated;
+}
+
 async function executePublishDraftAction(params: {
   tenantId: string;
   userId: string;
@@ -1104,6 +1159,7 @@ async function executePriceAction(params: {
       },
     ],
   });
+  assertOzonMutationNotRejected(response.raw, [{ offerId }]);
   const verification = await verifyPriceApplied({
     client,
     offerId,
@@ -1154,7 +1210,7 @@ async function executeStockAction(params: {
       },
     ],
   });
-  const businessResult = assertOzonMutationSucceeded(response.raw);
+  const businessResult = assertOzonMutationSucceeded(response.raw, [{ offerId, productId }]);
   const verification = await verifyStockApplied({
     client,
     offerId,
@@ -1203,7 +1259,7 @@ async function executeImagesAction(params: {
     ...(images360.length ? { images360 } : {}),
     ...(colorImage ? { color_image: colorImage } : {}),
   });
-  const businessResult = assertOzonMutationSucceeded(response.raw);
+  const businessResult = assertOzonMutationSucceeded(response.raw, [{ productId }]);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -1244,7 +1300,7 @@ async function executeAttributesAction(params: {
       },
     ],
   });
-  const businessResult = assertOzonMutationSucceeded(response.raw);
+  const businessResult = assertOzonMutationSucceeded(response.raw, [{ offerId, productId }]);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -1312,7 +1368,7 @@ async function executeDeleteAction(params: {
       },
     ],
   });
-  const businessResult = assertOzonMutationSucceeded(response.raw);
+  const businessResult = assertOzonMutationSucceeded(response.raw, [{ offerId, productId }]);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -1342,13 +1398,20 @@ async function executeBulkProductUpdateAction(params: {
 
   const store = await resolveActionStore(action);
   const client = ozonClientForStore(store);
-  const results: Array<{ index: number; type: string | null; status: "executed" | "failed"; error?: string }> = [];
+  const results: Array<{
+    index: number;
+    type: string | null;
+    offerId: string | null;
+    productId: number | null;
+    status: "executed" | "failed" | "pending_verification";
+    error?: string;
+  }> = [];
 
   for (const [index, item] of items.entries()) {
     const type = stringField(item.type ?? item.actionType);
+    const offerId = stringField(item.offerId ?? item.offer_id);
+    const productId = numberField(item.productId ?? item.product_id);
     try {
-      const offerId = stringField(item.offerId ?? item.offer_id);
-      const productId = numberField(item.productId ?? item.product_id);
       await verifyCurrentProduct({ client, offerId, productId });
 
       if (type === "UPDATE_STOCK") {
@@ -1359,27 +1422,27 @@ async function executeBulkProductUpdateAction(params: {
         const response = await client.updateStocks({
           stocks: [{ ...(offerId ? { offer_id: offerId } : {}), ...(productId ? { product_id: productId } : {}), stock, warehouse_id: warehouseId }],
         });
-        assertOzonMutationSucceeded(response.raw);
+        assertOzonMutationSucceeded(response.raw, [{ offerId, productId }]);
         await verifyStockApplied({ client, offerId, productId, warehouseId, stock });
       } else if (type === "UPDATE_IMAGES") {
         if (!productId) throw new Error("missing_product_id");
         const images = stringArray(item.images);
         if (!images.length) throw new Error("missing_images");
         const response = await client.importPictures({ product_id: productId, images });
-        assertOzonMutationSucceeded(response.raw);
+        assertOzonMutationSucceeded(response.raw, [{ productId }]);
       } else if (type === "UPDATE_ATTRIBUTES") {
         const attributes = attributesFromPayload(item.attributes);
         if (!attributes) throw new Error("missing_attributes");
         const response = await client.updateAttributes({
           items: [{ ...(offerId ? { offer_id: offerId } : {}), ...(productId ? { product_id: productId } : {}), attributes }],
         });
-        assertOzonMutationSucceeded(response.raw);
+        assertOzonMutationSucceeded(response.raw, [{ offerId, productId }]);
       } else if (type === "DELETE_PRODUCT") {
         if (!offerId && !productId) throw new Error("missing_offer_id_or_product_id");
         const response = await client.deleteProducts({
           products: [{ ...(offerId ? { offer_id: offerId } : {}), ...(productId ? { product_id: productId } : {}) }],
         });
-        assertOzonMutationSucceeded(response.raw);
+        assertOzonMutationSucceeded(response.raw, [{ offerId, productId }]);
       } else if (type === "UPDATE_PRICE") {
         const price = numberField(item.proposedPriceRub ?? item.price);
         if (!offerId) throw new Error("missing_offer_id");
@@ -1393,39 +1456,58 @@ async function executeBulkProductUpdateAction(params: {
         if (!trustedGuardrail.allowed) {
           throw new Error(`trusted_price_guardrail_failed:${trustedGuardrail.reason}`);
         }
-        await client.importPrices({
+        const response = await client.importPrices({
           prices: [{ offer_id: offerId, price: String(price), old_price: stringField(item.oldPriceRub) ?? "0", currency_code: "RUB" }],
         });
+        assertOzonMutationNotRejected(response.raw, [{ offerId }]);
+        await verifyPriceApplied({ client, offerId, price });
       } else {
         throw new Error("unsupported_bulk_item_type");
       }
-      results.push({ index, type, status: "executed" });
+      results.push({ index, type, offerId, productId, status: "executed" });
     } catch (error) {
       results.push({
         index,
         type,
-        status: "failed",
+        offerId,
+        productId,
+        status: error instanceof ActionVerificationPendingError ? "pending_verification" : "failed",
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   const failed = results.filter((item) => item.status === "failed");
+  const pending = results.filter((item) => item.status === "pending_verification");
   if (failed.length === results.length) {
     throw new Error("bulk_all_items_failed");
+  }
+
+  const execution = {
+    kind: "BULK_PRODUCT_UPDATE",
+    total: results.length,
+    executed: results.length - failed.length - pending.length,
+    failed: failed.length,
+    pending: pending.length,
+    results,
+  };
+  if (pending.length) {
+    return markActionPendingVerification({ action, execution });
+  }
+  if (failed.length) {
+    return markActionPartial({
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action,
+      execution,
+    });
   }
 
   return markActionExecuted({
     tenantId: params.tenantId,
     userId: params.userId,
     action,
-    execution: {
-      kind: "BULK_PRODUCT_UPDATE",
-      total: results.length,
-      executed: results.length - failed.length,
-      failed: failed.length,
-      results,
-    },
+    execution,
   });
 }
 
@@ -1444,7 +1526,7 @@ async function executeArchiveAction(params: {
     action.type === "ARCHIVE_PRODUCT"
       ? await client.archiveProducts({ product_id: [productId] })
       : await client.unarchiveProducts({ product_id: [productId] });
-  const businessResult = assertOzonMutationSucceeded(response.raw);
+  const businessResult = assertOzonMutationSucceeded(response.raw, [{ productId }]);
 
   return markActionExecuted({
     tenantId: params.tenantId,

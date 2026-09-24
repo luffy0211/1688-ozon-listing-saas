@@ -309,7 +309,10 @@ function actionExecutionSummary(action: ContentAgentActionView) {
   if (execution.kind === "BULK_PRODUCT_UPDATE") {
     const executed = Number(execution.executed ?? 0);
     const failed = Number(execution.failed ?? 0);
-    return failed > 0 ? `${executed} 项成功，${failed} 项失败` : `${executed} 项已执行`;
+    const pending = Number(execution.pending ?? 0);
+    return [executed ? `${executed} 项成功` : "", failed ? `${failed} 项失败` : "", pending ? `${pending} 项待核实` : ""]
+      .filter(Boolean)
+      .join("，");
   }
   if (execution.kind !== "CONTENT_DRAFT") return "";
   const verification = asRecord(execution.verification);
@@ -339,6 +342,7 @@ function friendlyActionError(error: string | null) {
     content_draft_not_reflected_after_import: "Ozon 已接收任务，但内容同步超时，请稍后刷新商品内容。",
     execution_in_progress: "任务正在执行，请稍后刷新状态。",
     result_pending_verification: "Ozon 已接收任务，结果仍在同步中，请不要重复提交。",
+    partial_execution: "部分商品已执行，失败项未写入；请查看明细后单独处理。",
     real_ozon_submit_disabled: "真实 Ozon 写入开关未开启，当前不能执行。",
   };
   return messages[error] ?? error;
