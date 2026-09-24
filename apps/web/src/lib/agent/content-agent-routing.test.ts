@@ -20,6 +20,12 @@ describe("content agent task routing", () => {
     expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBeNull();
   });
 
+  it("does not require diagnosis findings when diagnosis only selects content draft targets", () => {
+    expect(requiredOzonToolsForPrompt("内容草案", null)).toEqual([
+      "diagnose_ozon_store",
+    ]);
+  });
+
   it("still requires competitor evidence for an explicit competitor request", () => {
     expect(requiredOzonToolsForPrompt("每个类目分析 3 个竞品", null)).toEqual([
       "analyze_ozon_competitors",

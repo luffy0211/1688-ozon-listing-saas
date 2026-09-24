@@ -841,7 +841,9 @@ export function requiredOzonToolsForPrompt(prompt: string, offerId: string | nul
   }
   const primary = requiredOzonToolForPrompt(prompt, offerId);
   return primary === "diagnose_ozon_store"
-    ? [primary, "record_diagnosis_findings"]
+    ? storeDiagnosisIntent(prompt)
+      ? [primary, "record_diagnosis_findings"]
+      : [primary]
     : primary ? [primary] : [];
 }
 
