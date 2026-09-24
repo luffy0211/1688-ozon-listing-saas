@@ -1,19 +1,31 @@
 import { describe, expect, it } from "vitest";
 import {
   attributeChangesFromPayload,
+  actionNeedsPolling,
   initialContentAgentSessionId,
   mapPersistedChatMessage,
+  recoverableAgentRun,
   sessionsAfterArchive,
+  shouldApplyArchivedSessionResponse,
   shouldShowCommandDeck,
 } from "./content-agent-chat";
 import {
   contentDraftStatusLabel,
+  displayedDraftSuggestions,
   draftSuggestionGroups,
   initialSelectedDraftIds,
   validateDraftSuggestions,
 } from "./content-agent-drafts";
 
 describe("content agent action preview", () => {
+  it("keeps polling queued actions until execution reaches a stable state", () => {
+    expect(actionNeedsPolling({ status: "APPROVED" })).toBe(true);
+    expect(actionNeedsPolling({ status: "BLOCKED", executionPhase: "executing" })).toBe(true);
+    expect(actionNeedsPolling({ status: "BLOCKED", executionPhase: "verification_pending" })).toBe(true);
+    expect(actionNeedsPolling({ status: "BLOCKED", executionPhase: "manual_required" })).toBe(false);
+    expect(actionNeedsPolling({ status: "EXECUTED" })).toBe(false);
+  });
+
   it("returns every attribute change needed for approval", () => {
     expect(attributeChangesFromPayload({
       recommendations: [
@@ -114,6 +126,39 @@ describe("content agent draft review", () => {
       { field: "title", suggestedRu: "标题二" },
     ])).toBe("标题重复提交");
   });
+
+  it("never presents an unsubmitted local edit as executed content", () => {
+    expect(displayedDraftSuggestions({
+      status: "EXECUTED",
+      updatedAt: "v2",
+      payload: { suggestions: [{ field: "title", suggestedRu: "实际执行标题" }] },
+    }, [{ field: "title", suggestedRu: "另一标签页未提交标题" }], "v1")).toEqual({
+      suggestions: [{ field: "title", suggestedRu: "实际执行标题" }],
+      discardedLocalEdit: true,
+    });
+  });
+
+  it("keeps local edits while the draft still awaits approval", () => {
+    expect(displayedDraftSuggestions({
+      status: "PENDING_APPROVAL",
+      updatedAt: "v1",
+      payload: { suggestions: [{ field: "title", suggestedRu: "服务端标题" }] },
+    }, [{ field: "title", suggestedRu: "本页编辑标题" }], "v1")).toEqual({
+      suggestions: [{ field: "title", suggestedRu: "本页编辑标题" }],
+      discardedLocalEdit: false,
+    });
+  });
+
+  it("stops presenting edits based on an older pending draft version", () => {
+    expect(displayedDraftSuggestions({
+      status: "PENDING_APPROVAL",
+      updatedAt: "v2",
+      payload: { suggestions: [{ field: "title", suggestedRu: "服务端新版本" }] },
+    }, [{ field: "title", suggestedRu: "本页旧编辑" }], "v1")).toEqual({
+      suggestions: [{ field: "title", suggestedRu: "服务端新版本" }],
+      discardedLocalEdit: true,
+    });
+  });
 });
 
 describe("content agent command deck", () => {
@@ -158,5 +203,27 @@ describe("content agent command deck", () => {
       sessions: [{ id: "next", title: "下一个", status: "OPEN", updatedAt: "2026-09-23T10:00:00.000Z" }],
       selectedSessionId: "next",
     });
+  });
+
+  it("does not let a late archive response switch a newer selection", () => {
+    expect(shouldApplyArchivedSessionResponse("archived", "other")).toBe(false);
+    expect(shouldApplyArchivedSessionResponse("archived", "archived")).toBe(true);
+  });
+
+  it("recognizes a persisted running task after history reload", () => {
+    expect(recoverableAgentRun({
+      activeRun: {
+        runId: "run-1",
+        status: "running",
+        plan: [],
+        executionTrace: [{ id: "step", status: "running" }],
+      },
+    })).toMatchObject({
+      runId: "run-1",
+      status: "running",
+      plan: [],
+      executionTrace: [{ id: "step", status: "running" }],
+    });
+    expect(recoverableAgentRun({ activeRun: { status: "running" } })).toBeNull();
   });
 });

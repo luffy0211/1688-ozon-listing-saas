@@ -37,7 +37,7 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function suggestionsFromAction(action: DraftAction): DraftSuggestion[] {
+function suggestionsFromAction(action: Pick<DraftAction, "payload">): DraftSuggestion[] {
   const suggestions = asRecord(action.payload).suggestions;
   if (!Array.isArray(suggestions)) return [];
   return suggestions.flatMap((value) => {
@@ -47,6 +47,22 @@ function suggestionsFromAction(action: DraftAction): DraftSuggestion[] {
     if (!field) return [];
     return [{ ...item, field, suggestedRu } as DraftSuggestion];
   });
+}
+
+export function displayedDraftSuggestions(
+  action: Pick<DraftAction, "status" | "payload" | "updatedAt">,
+  localSuggestions?: DraftSuggestion[],
+  localVersion?: string,
+) {
+  const savedSuggestions = suggestionsFromAction(action);
+  const useLocal = action.status === "PENDING_APPROVAL"
+    && Boolean(localSuggestions)
+    && localVersion === action.updatedAt;
+  return {
+    suggestions: useLocal ? localSuggestions! : savedSuggestions,
+    discardedLocalEdit: !useLocal && Boolean(localSuggestions)
+      && JSON.stringify(localSuggestions) !== JSON.stringify(savedSuggestions),
+  };
 }
 
 export function initialSelectedDraftIds(
@@ -133,6 +149,9 @@ export function ContentDraftGroup({
   const [edits, setEdits] = useState<Record<string, DraftSuggestion[]>>(() =>
     Object.fromEntries(actions.map((action) => [action.id, suggestionsFromAction(action)])),
   );
+  const [editVersions, setEditVersions] = useState<Record<string, string>>(() =>
+    Object.fromEntries(actions.map((action) => [action.id, action.updatedAt])),
+  );
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
@@ -145,14 +164,17 @@ export function ContentDraftGroup({
   );
   const allPendingSelected = pendingIds.length > 0 && pendingIds.every((id) => selectedIds.has(id));
 
-  function setSuggestion(actionId: string, index: number, suggestedRu: string) {
+  function setSuggestion(action: DraftAction, index: number, suggestedRu: string) {
     setEdits((current) => ({
       ...current,
-      [actionId]: (current[actionId] ?? []).map((item, itemIndex) =>
+      [action.id]: (editVersions[action.id] === action.updatedAt
+        ? current[action.id] ?? []
+        : suggestionsFromAction(action)).map((item, itemIndex) =>
         itemIndex === index ? { ...item, suggestedRu } : item,
       ),
     }));
-    setErrors((current) => ({ ...current, [actionId]: "" }));
+    setEditVersions((current) => ({ ...current, [action.id]: action.updatedAt }));
+    setErrors((current) => ({ ...current, [action.id]: "" }));
   }
 
   function toggleSelected(actionId: string) {
@@ -164,8 +186,16 @@ export function ContentDraftGroup({
     });
   }
 
+  function effectiveSuggestions(action: DraftAction) {
+    return displayedDraftSuggestions(
+      action,
+      edits[action.id],
+      editVersions[action.id],
+    ).suggestions;
+  }
+
   async function runAction(action: DraftAction) {
-    const actionEdits = edits[action.id] ?? suggestionsFromAction(action);
+    const actionEdits = effectiveSuggestions(action);
     if (action.status === "PENDING_APPROVAL") {
       const validationError = validateDraftSuggestions(actionEdits);
       if (validationError) {
@@ -233,7 +263,7 @@ export function ContentDraftGroup({
   async function runBatch() {
     if (!selectedPending.length) return;
     const validationErrors = selectedPending.flatMap((action) => {
-      const error = validateDraftSuggestions(edits[action.id] ?? suggestionsFromAction(action));
+      const error = validateDraftSuggestions(effectiveSuggestions(action));
       return error ? [{ id: action.id, error }] : [];
     });
     if (validationErrors.length) {
@@ -254,7 +284,8 @@ export function ContentDraftGroup({
     setBatchProgress(null);
   }
 
-  const activeSuggestions = edits[activeAction.id] ?? suggestionsFromAction(activeAction);
+  const displayed = displayedDraftSuggestions(activeAction, edits[activeAction.id], editVersions[activeAction.id]);
+  const activeSuggestions = displayed.suggestions;
   const activeGroups = draftSuggestionGroups(activeSuggestions);
   const isActiveBusy = busyIds.has(activeAction.id);
   const canEdit = activeAction.status === "PENDING_APPROVAL" && !isActiveBusy;
@@ -376,7 +407,7 @@ export function ContentDraftGroup({
                         <textarea
                           id={inputId}
                           value={item.suggestedRu}
-                          onChange={(event) => setSuggestion(activeAction.id, originalIndex, event.target.value)}
+                          onChange={(event) => setSuggestion(activeAction, originalIndex, event.target.value)}
                           aria-invalid={!item.suggestedRu.trim()}
                           className="min-h-28 w-full resize-y border-0 bg-transparent p-0 text-sm leading-6 text-gray-950 outline-none"
                         />
@@ -405,6 +436,11 @@ export function ContentDraftGroup({
           ) : null}
 
           {validationError ? <div role="alert" className="mt-3 text-sm font-medium text-red-600">{validationError}</div> : null}
+          {displayed.discardedLocalEdit ? (
+            <div role="status" className="mt-3 text-sm font-medium text-amber-700">
+              草案已在其他页面处理，本页修改未提交。当前显示服务端实际内容。
+            </div>
+          ) : null}
           {activeAction.error ? <div role="alert" className="mt-3 text-sm font-medium text-red-600">{activeAction.error}</div> : null}
 
           <div className="mt-4 flex flex-wrap gap-2 border-t border-[#e3ebf5] pt-3">
