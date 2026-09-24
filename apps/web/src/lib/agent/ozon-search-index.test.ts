@@ -27,6 +27,10 @@ const indexedProduct = {
 Мужское поло прямого кроя из хлопкового пике.
 Отзывы
 `,
+  images: [
+    { url: "https://ir.ozone.ru/s3/multimedia-1-l/12834468309.jpg" },
+    { url: "https://example.com/not-an-ozon-image.jpg" },
+  ],
 };
 
 const target = (offerId: string, publicSku: string) => ({
@@ -39,6 +43,7 @@ const target = (offerId: string, publicSku: string) => ({
   typeId: 93337,
   categoryNameRu: "Поло",
   categoryPathRu: ["Одежда", "Мужская одежда", "Поло"],
+  imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
 });
 
 describe("Ozon search index", () => {
@@ -65,6 +70,7 @@ describe("Ozon search index", () => {
         "Стиль": "Повседневный",
       },
       description: "Мужское поло прямого кроя из хлопкового пике.",
+      imageUrls: ["https://ir.ozone.ru/s3/multimedia-1-l/12834468309.jpg"],
       categoryPosition: 1,
     }));
     expect(parseIndexedOzonProduct({ ...indexedProduct, url: "https://example.com/product/1/" }, 1)).toBeNull();
@@ -149,9 +155,11 @@ describe("Ozon search index", () => {
       query: expect.stringContaining("Поло"),
       include_domains: ["ozon.ru"],
       include_raw_content: "text",
+      include_images: true,
       max_results: 10,
     });
     expect(result?.competitors.map((item) => item.sku)).toEqual(["1607177448"]);
+    expect(result?.ownProduct?.imageUrls).toEqual(["https://ir.ozone.ru/s3/multimedia-own.jpg"]);
     expect(result?.category?.name).toBe("Поло");
   });
 

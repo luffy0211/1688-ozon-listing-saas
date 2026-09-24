@@ -9,6 +9,7 @@ const target = {
   offerId: "own-offer",
   title: "Мужское поло",
   publicSku: "999",
+  imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
   quantity: 3,
   revenueRub: 1200,
   descriptionCategoryId: 200000933,
@@ -145,6 +146,7 @@ describe("Ozon crawler process adapter", () => {
     expect(result).toMatchObject({
       target,
       category: { name: "Поло", path: target.categoryPathRu },
+      ownProduct: { imageUrls: ["https://ir.ozone.ru/s3/multimedia-own.jpg"] },
       competitors: [{
         sku: "123",
         title: "Поло из хлопка",

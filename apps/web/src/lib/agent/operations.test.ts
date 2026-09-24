@@ -483,6 +483,25 @@ describe("Ozon operations helpers", () => {
     ]);
   });
 
+  it("keeps the own-product image in competitor targets", () => {
+    expect(selectCompetitorTargets(summary({
+      products: [{
+        offerId: "own",
+        name: "Own product",
+        publicSku: "100",
+        imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
+        visible: true,
+        archived: false,
+        stock: 5,
+        descriptionCategoryId: 17027904,
+        typeId: 93337,
+      }],
+    }) as never)[0]).toMatchObject({
+      offerId: "own",
+      imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
+    });
+  });
+
   it("keeps one representative for every selling category", () => {
     const products = Array.from({ length: 6 }, (_, index) => ({
       offerId: `offer-${index}`,
