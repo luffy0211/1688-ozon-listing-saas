@@ -44,7 +44,10 @@ import {
   inventoryTaskContextForStore,
   inventoryTaskContextForPrompt,
   inventoryTaskContextFromToolCalls,
+  inventoryWarehouseIdsFromToolCalls,
   inventoryTargetFromPrompt,
+  nextInventoryTaskContext,
+  validateInventoryMutationActions,
 } from "./inventory-task";
 import {
   clearAgentRunProgressLater,
@@ -326,17 +329,22 @@ const attributeSchema = z.object({
 });
 const payloadItemSchema = z.object({
   type: productMutationActionTypeSchema.nullable(),
-  offerId: z.string().nullable(),
-  productId: z.string().nullable(),
+  offerId: z.string().nullable().optional(),
+  offer_id: z.string().nullable().optional(),
+  productId: z.string().nullable().optional(),
+  product_id: z.string().nullable().optional(),
   proposedPriceRub: z.number().nullable(),
   stock: z.number().nullable(),
-  warehouseId: z.number().nullable(),
+  warehouseId: z.number().nullable().optional(),
+  warehouse_id: z.number().nullable().optional(),
   images: z.array(z.string()).nullable(),
   attributes: z.array(attributeSchema).nullable(),
 });
 const productMutationPayloadSchema = z.object({
-  offerId: z.string().nullable(),
-  productId: z.string().nullable(),
+  offerId: z.string().nullable().optional(),
+  offer_id: z.string().nullable().optional(),
+  productId: z.string().nullable().optional(),
+  product_id: z.string().nullable().optional(),
   currentPriceRub: z.number().nullable(),
   proposedPriceRub: z.number().nullable(),
   oldPriceRub: z.string().nullable(),
@@ -346,7 +354,8 @@ const productMutationPayloadSchema = z.object({
   cnyToRub: z.number().nullable(),
   commissionRate: z.number().nullable(),
   stock: z.number().nullable(),
-  warehouseId: z.number().nullable(),
+  warehouseId: z.number().nullable().optional(),
+  warehouse_id: z.number().nullable().optional(),
   quantSize: z.number().nullable(),
   images: z.array(z.string()).nullable(),
   images360: z.array(z.string()).nullable(),
@@ -782,10 +791,30 @@ function storeDiagnosisIntent(prompt: string) {
   return /(?:店铺|经营|运营).{0,8}(?:诊断|体检)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)|店铺分析/i.test(prompt);
 }
 
+function nonExecutingMutationPrompt(prompt: string) {
+  const text = prompt.trim();
+  if (/^(?:不要|别|先别|无需|不需要|解释|说明)/.test(text)) return true;
+  const explicitExecution = /(?:生成|创建)(?:草案|确认项)|帮我(?:执行|操作)|确认后执行/.test(text);
+  return !explicitExecution && (
+    /^(?:如何|怎么|为什么|是否|能不能)/.test(text)
+    || /(?:是什么意思|有什么区别|会怎样|有什么影响|风险|注意什么|注意事项|只(?:想)?(?:了解|看看)|告诉我原因)/.test(text)
+  );
+}
+
 function inventoryMutationIntent(prompt: string) {
   const target = inventoryTargetFromPrompt(prompt);
   if (!target || target.mode === "ambiguous") return false;
+  if (nonExecutingMutationPrompt(prompt)) return false;
   return /库存|补货|补到|每款|这(?:三个|几个|些)/i.test(prompt);
+}
+
+function explicitDestructiveMutation(prompt: string, action: "delete" | "archive") {
+  const text = prompt.trim();
+  if (nonExecutingMutationPrompt(text)) return false;
+  const verb = action === "delete" ? "删除" : "(?:归档|下架)";
+  return new RegExp(`^(?:${verb})|^(?:请|帮我|我要|立即|把|将).{0,40}${verb}`, "i").test(text)
+    || (/(?:生成|创建)(?:草案|确认项)|帮我(?:执行|操作)|确认后执行/.test(text)
+      && new RegExp(verb, "i").test(text));
 }
 
 export function shouldRunCompetitorAnalysisForDiagnosis(prompt: string) {
@@ -851,15 +880,25 @@ export function requiredOzonToolsForPrompt(prompt: string, offerId: string | nul
 export function allowedProductMutationTypesForPrompt(prompt: string) {
   const allowed: string[] = [];
   if (/(?:改|调整|设置|设为|更新).{0,8}(?:价格|售价)|(?:价格|售价).{0,8}(?:改|调整|设置)/i.test(prompt)) allowed.push("UPDATE_PRICE");
-  if (/(?:补到|增加|追加|补\s*\d+|改|调整|设置).{0,8}库存|库存.{0,8}(?:补|增加|改|调整|设置)/i.test(prompt)) allowed.push("UPDATE_STOCK");
+  if (inventoryMutationIntent(prompt)) allowed.push("UPDATE_STOCK");
   if (/(?:更换|更新|修改|调整).{0,8}(?:图片|主图)/i.test(prompt)) allowed.push("UPDATE_IMAGES");
   if (/(?:更新|修改|补充|调整).{0,8}属性/i.test(prompt)) allowed.push("UPDATE_ATTRIBUTES");
   if (/(?:更新|修改|调整|切换).{0,8}类目/i.test(prompt)) allowed.push("UPDATE_CATEGORY");
-  if (/(?:^|[，。；]\s*)(?:请|把|将|帮我|我要|删除).{0,30}删除/i.test(prompt) || /^删除/i.test(prompt)) allowed.push("DELETE_PRODUCT");
-  if (/(?:^|[，。；]\s*)(?:请|把|将|帮我|我要|归档|下架).{0,30}(?:归档|下架)/i.test(prompt)) allowed.push("ARCHIVE_PRODUCT");
+  if (explicitDestructiveMutation(prompt, "delete")) allowed.push("DELETE_PRODUCT");
+  if (explicitDestructiveMutation(prompt, "archive")) allowed.push("ARCHIVE_PRODUCT");
   if (/(?:恢复上架|取消归档)/i.test(prompt)) allowed.push("UNARCHIVE_PRODUCT");
   if (/(?:批量|这些|这几个|这三个)/i.test(prompt) && allowed.length) allowed.push("BULK_PRODUCT_UPDATE");
   return [...new Set(allowed)];
+}
+
+export function allowedProductMutationTypesForTask(prompt: string, taskContext: unknown) {
+  const allowed = allowedProductMutationTypesForPrompt(prompt);
+  const selectedProducts = rawRecord(taskContext).selectedProducts;
+  return allowed.includes("UPDATE_STOCK")
+    && Array.isArray(selectedProducts)
+    && selectedProducts.length > 1
+    ? [...new Set([...allowed, "BULK_PRODUCT_UPDATE"])]
+    : allowed;
 }
 
 function shouldRequireContentDraft(prompt: string, offerId: string | null) {
@@ -1993,7 +2032,9 @@ export async function runOzonContentAgent(params: {
         actions: z.array(productMutationActionSchema).min(1).max(20),
       }),
       execute: async ({ actions }) => {
-        const allowedTypes = new Set(allowedProductMutationTypesForPrompt(prompt));
+        const currentInventoryContext = inventoryTaskContextFromToolCalls(toolCalls);
+        const inventoryContext = nextInventoryTaskContext(previousTaskContext, currentInventoryContext, prompt);
+        const allowedTypes = new Set(allowedProductMutationTypesForTask(prompt, inventoryContext));
         for (const action of actions) {
           if (!allowedTypes.has(action.type)) {
             throw new Error(`action_scope_not_authorized:${action.type}`);
@@ -2004,21 +2045,16 @@ export async function runOzonContentAgent(params: {
             if (unauthorized) throw new Error(`action_scope_not_authorized:${unauthorized}`);
           }
         }
-        const stockActions = actions.filter((action) => action.type === "UPDATE_STOCK");
-        const inventoryTarget = inventoryTargetFromPrompt(prompt);
-        if (stockActions.length && inventoryTarget?.mode === "ambiguous") {
-          throw new Error("库存目标不明确：请先询问用户是增加库存还是补到目标总库存。");
-        }
-        if (
-          stockActions.length &&
-          inventoryTarget?.mode === "set_total" &&
-          stockActions.some((action) => action.payload?.stock !== inventoryTarget.value)
-        ) {
-          throw new Error("库存草案与用户确认的目标总库存不一致。");
-        }
-        if (stockActions.some((action) => !action.payload?.warehouseId)) {
-          throw new Error("库存草案缺少已读取并确认的仓库。");
-        }
+        validateInventoryMutationActions({
+          actions,
+          target: inventoryTargetFromPrompt(prompt),
+          taskContext: inventoryContext,
+          warehouseIds: inventoryWarehouseIdsFromToolCalls(toolCalls),
+          explicitOfferId: offerId,
+          requireAllContextProducts: /(?:这三个|这几个|这些|每款|全部)/.test(prompt)
+            || (!offerId && Array.isArray(rawRecord(inventoryContext).selectedProducts)
+              && (rawRecord(inventoryContext).selectedProducts as unknown[]).length > 1),
+        });
         const store = latestProductContent
           ? { id: latestProductContent.storeId }
           : await resolveStore(params.tenantId, params.storeId);
@@ -2033,8 +2069,10 @@ export async function runOzonContentAgent(params: {
             rationale: action.rationale,
             riskLevel: (action.riskLevel ?? AgentRiskLevel.MEDIUM) as AgentRiskLevel,
             storeId: store.id,
-            offerId: action.offerId ?? latestProductContent?.offerId ?? null,
-            productId: action.productId ?? latestProductContent?.productId ?? null,
+            offerId: action.offerId ?? action.payload?.offerId ?? action.payload?.offer_id
+              ?? latestProductContent?.offerId ?? null,
+            productId: action.productId ?? action.payload?.productId ?? action.payload?.product_id
+              ?? latestProductContent?.productId ?? null,
             payload: {
               agentVersion: "ozon_content_v1",
               ...(action.payload ?? {}),
@@ -2088,13 +2126,20 @@ export async function runOzonContentAgent(params: {
       orderBy: { startedAt: "desc" },
       select: { toolCallsJson: true },
     });
+    const rawPreviousTaskContext = rawRecord(previousRun?.toolCallsJson).taskContext;
+    const contextStoreId = params.storeId ?? (rawPreviousTaskContext
+      ? (await resolveStore(params.tenantId, params.storeId)).id
+      : null);
     const previousTaskContext = inventoryTaskContextForPrompt(
       inventoryTaskContextForStore(
-        rawRecord(previousRun?.toolCallsJson).taskContext,
-        params.storeId,
+        rawPreviousTaskContext,
+        contextStoreId,
       ),
       prompt,
     );
+    const activeTaskContext = inventoryTargetFromPrompt(prompt) || /(?:库存|补货|只处理第|第\s*[一二三四五六七八九十\d]+\s*款)/.test(prompt)
+      ? previousTaskContext
+      : null;
     const competitorMemoryContext = await loadCompetitorMemoryContext(params.tenantId);
     const planContext = [
       "本次任务必须按以下计划执行；涉及真实店铺、竞品、商品、活动和 Ozon 写操作时，必须调用对应工具，不允许猜测。",
@@ -2106,7 +2151,7 @@ export async function runOzonContentAgent(params: {
       preloadedContext = [
         planContext,
         competitorMemoryContext,
-        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        activeTaskContext ? `上一轮任务上下文：${JSON.stringify(activeTaskContext)}` : "",
         "店铺诊断已经由后端真实工具完成。请直接总结自家数据，并按需读取具体商品、创建待确认草案，不要再次调用诊断工具。没有实际竞品证据时不要输出竞品结论。",
         JSON.stringify({
           store: diagnosis.store,
@@ -2128,7 +2173,7 @@ export async function runOzonContentAgent(params: {
       preloadedContext = [
         planContext,
         competitorMemoryContext,
-        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        activeTaskContext ? `上一轮任务上下文：${JSON.stringify(activeTaskContext)}` : "",
         "同类竞品分析已经由后端真实工具完成。请直接输出业务对比和建议，不要再次调用竞品工具。",
         JSON.stringify(competitors),
       ].filter(Boolean).join("\n");
@@ -2137,7 +2182,7 @@ export async function runOzonContentAgent(params: {
       preloadedContext = [
         planContext,
         competitorMemoryContext,
-        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        activeTaskContext ? `上一轮任务上下文：${JSON.stringify(activeTaskContext)}` : "",
         `店铺：${snapshot.store?.name ?? "未选择"}`,
         `商品数：${snapshot.latestSnapshot?.productCount ?? "未知"}`,
         `可见商品数：${snapshot.latestSnapshot?.visibleProductCount ?? "未知"}`,
@@ -2157,7 +2202,7 @@ export async function runOzonContentAgent(params: {
       preloadedContext = [
         planContext,
         competitorMemoryContext,
-        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        activeTaskContext ? `上一轮任务上下文：${JSON.stringify(activeTaskContext)}` : "",
         `商品 offerId：${product.offerId}`,
         `商品名称：${product.name ?? "未知"}`,
         `商品状态：${product.status ?? "未知"}`,
@@ -2170,7 +2215,7 @@ export async function runOzonContentAgent(params: {
       preloadedContext = [
         planContext,
         competitorMemoryContext,
-        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        activeTaskContext ? `上一轮任务上下文：${JSON.stringify(activeTaskContext)}` : "",
       ].filter(Boolean).join("\n");
     }
 
@@ -2417,7 +2462,11 @@ export async function runOzonContentAgent(params: {
         requiredToolName,
         requiredToolNames,
         blockedMissingTool,
-        taskContext: inventoryTaskContextFromToolCalls(toolCalls),
+        taskContext: nextInventoryTaskContext(
+          previousTaskContext,
+          inventoryTaskContextFromToolCalls(toolCalls),
+          prompt,
+        ),
         diagnosis: {
           evidence: diagnosisEvidence,
           findings: diagnosisFindings,

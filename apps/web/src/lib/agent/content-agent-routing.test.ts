@@ -4,6 +4,7 @@ import {
   competitorsPerCategoryFromPrompt,
   requiredOzonToolsForPrompt,
   allowedProductMutationTypesForPrompt,
+  allowedProductMutationTypesForTask,
   shouldRunCompetitorAnalysisForDiagnosis,
 } from "./content-agent";
 
@@ -38,6 +39,14 @@ describe("content agent task routing", () => {
       "get_ozon_store_snapshot",
       "list_ozon_warehouses",
     ]);
+    expect(allowedProductMutationTypesForPrompt("这三个每款补到20")).toEqual([
+      "UPDATE_STOCK",
+      "BULK_PRODUCT_UPDATE",
+    ]);
+    expect(allowedProductMutationTypesForPrompt("这三个每款补20")).toEqual([]);
+    expect(allowedProductMutationTypesForTask("补到20", {
+      selectedProducts: [{ offerId: "A" }, { offerId: "B" }, { offerId: "C" }],
+    })).toEqual(["UPDATE_STOCK", "BULK_PRODUCT_UPDATE"]);
   });
 
   it("does not authorize destructive actions from diagnostic product text", () => {
@@ -47,5 +56,15 @@ describe("content agent task routing", () => {
     expect(allowedProductMutationTypesForPrompt("删除 offerId SKU-1，先给我确认")).toContain(
       "DELETE_PRODUCT",
     );
+    expect(allowedProductMutationTypesForPrompt("下架 SKU-1")).toContain("ARCHIVE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("归档 SKU-1")).toContain("ARCHIVE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("不要下架 SKU-1")).not.toContain("ARCHIVE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("解释怎么删除 SKU-1")).not.toContain("DELETE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("删除商品是什么意思")).not.toContain("DELETE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("删除前需要注意什么")).not.toContain("DELETE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("为什么这个商品会被下架")).not.toContain("ARCHIVE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("删除 SKU-1 会怎样")).not.toContain("DELETE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("下架 SKU-1 有什么影响")).not.toContain("ARCHIVE_PRODUCT");
+    expect(allowedProductMutationTypesForPrompt("怎么把 SKU-1 下架，先生成确认项")).toContain("ARCHIVE_PRODUCT");
   });
 });
