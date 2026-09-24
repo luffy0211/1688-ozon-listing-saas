@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     const email: string | undefined = body?.email?.trim().toLowerCase();
     const password: string | undefined = body?.password;
+    const adminOnly = body?.adminOnly === true;
 
     if (!email || !password) {
       return fail("validation_error", "缺少邮箱或密码");
@@ -18,6 +19,9 @@ export async function POST(req: NextRequest) {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !verifyPassword(password, user.passwordHash)) {
       return fail("invalid_credentials", "邮箱或密码错误", [], 401);
+    }
+    if (adminOnly && user.role !== "admin") {
+      return fail("admin_required", "此账号不是管理者账号", [], 403);
     }
 
     const token = await signSession({

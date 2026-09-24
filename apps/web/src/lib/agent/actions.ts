@@ -11,6 +11,7 @@ import {
   OzonClient,
   type ImportProductsRequest,
   type OzonAttribute,
+  type OzonProductInfoItem,
   type OzonProductPayload,
 } from "@saas/ozon";
 import { env } from "@/lib/env";
@@ -73,6 +74,41 @@ function stringArray(value: unknown): string[] {
 
 function recordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(asRecord).filter((item) => Object.keys(item).length > 0) : [];
+}
+
+export function assertOzonMutationSucceeded(value: unknown) {
+  const root = asRecord(value);
+  const result = asRecord(root.result);
+  const rawItems = Array.isArray(root.result)
+    ? root.result
+    : Array.isArray(result.items)
+      ? result.items
+      : Array.isArray(root.items)
+        ? root.items
+        : [];
+  const items = rawItems.map(asRecord);
+  if (!items.length) {
+    throw new Error(`ozon_mutation_unknown:${JSON.stringify(root).slice(0, 1500)}`);
+  }
+  const rejected = items.filter((item) => {
+    const status = stringField(item.status)?.toLowerCase();
+    const errors = Array.isArray(item.errors) ? item.errors.filter(Boolean) : [];
+    return item.updated === false || errors.length > 0 || status === "failed" || status === "error";
+  });
+  const updatedCount = items.filter((item) => item.updated === true).length;
+  if (rejected.length) {
+    const kind = updatedCount > 0 ? "ozon_mutation_partial" : "ozon_mutation_rejected";
+    throw new Error(`${kind}:${JSON.stringify(rejected).slice(0, 1500)}`);
+  }
+  return { updatedCount, rejectedCount: 0 };
+}
+
+export function isUncertainOzonWriteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/ozon_mutation_(?:rejected|partial)|ozon_import_task_failed|trusted_.*guardrail_failed/i.test(message)) {
+    return false;
+  }
+  return /timeout|timed out|socket hang up|econnreset|econnaborted|network|fetch failed|aborted/i.test(message);
 }
 
 function productIdFrom(action: { productId: string | null; payloadJson: unknown }) {
@@ -264,35 +300,83 @@ function attributeValueById(attributes: unknown, id: number) {
   return attribute ? attributeTextValue(attribute) : null;
 }
 
+const OZON_DESCRIPTION_ATTRIBUTE_ID = 4191;
+
+function withDescriptionAttribute(attributes: unknown[], description: string): OzonAttribute[] {
+  let found = false;
+  const next = attributes.map((attribute) => {
+    const item = asRecord(attribute);
+    if (numberField(item.id) !== OZON_DESCRIPTION_ATTRIBUTE_ID) {
+      return attribute as OzonAttribute;
+    }
+    found = true;
+    return {
+      ...item,
+      id: OZON_DESCRIPTION_ATTRIBUTE_ID,
+      values: [{ value: description }],
+    } as OzonAttribute;
+  });
+  return found
+    ? next
+    : [...next, { id: OZON_DESCRIPTION_ATTRIBUTE_ID, values: [{ value: description }] }];
+}
+
 function supportedContentDraftFields(payload: Record<string, unknown>) {
   return ["title", "description"].filter((field) => contentSuggestionValue(payload, field));
+}
+
+export function contentDraftFieldConflicts(
+  action: { offerId: string | null; payloadJson: unknown },
+  latestProduct: OzonProductInfoItem,
+) {
+  const payload = asRecord(action.payloadJson);
+  const suggestions = recordArray(payload.suggestions);
+  return suggestions.flatMap((suggestion) => {
+    const field = stringField(suggestion.field);
+    const previous = stringField(suggestion.current);
+    if (!previous || !field) return [];
+    const latest = field === "title"
+      ? stringField(latestProduct.name)
+      : field === "description"
+        ? stringField(latestProduct.description) ??
+          attributeValueById(latestProduct.attributes, OZON_DESCRIPTION_ATTRIBUTE_ID)
+        : null;
+    return latest !== null && latest !== previous ? [field] : [];
+  });
 }
 
 export function contentDraftImportPayload(action: {
   offerId: string | null;
   payloadJson: unknown;
-}): { request: ImportProductsRequest; changedFields: string[] } {
+}, latestProduct?: OzonProductInfoItem | null): { request: ImportProductsRequest; changedFields: string[] } {
   const payload = asRecord(action.payloadJson);
   const changedFields = supportedContentDraftFields(payload);
   if (!changedFields.length) {
     throw new Error("content_draft_no_supported_write_fields");
   }
   const product = asRecord(payload.product);
-  const rawInfo = asRecord(product.rawInfo);
+  const storedRawInfo = asRecord(product.rawInfo);
+  const latest = asRecord(latestProduct);
+  const rawInfo = Object.keys(latest).length
+    ? { ...storedRawInfo, ...latest }
+    : storedRawInfo;
   const name =
     contentSuggestionValue(payload, "title") ??
-    stringField(product.name) ??
-    stringField(rawInfo.name);
-  const attributes = Array.isArray(rawInfo.attributes)
+    stringField(rawInfo.name) ??
+    stringField(product.name);
+  const baseAttributes = Array.isArray(rawInfo.attributes)
     ? rawInfo.attributes
     : Array.isArray(product.attributes)
       ? product.attributes
       : null;
   const description =
     contentSuggestionValue(payload, "description") ??
-    stringField(product.description) ??
     stringField(rawInfo.description) ??
-    attributeValueById(attributes, 4191);
+    stringField(product.description) ??
+    attributeValueById(baseAttributes, OZON_DESCRIPTION_ATTRIBUTE_ID);
+  const attributes = baseAttributes && description
+    ? withDescriptionAttribute(baseAttributes, description)
+    : baseAttributes;
   const offerId =
     stringField(product.offerId) ??
     stringField(rawInfo.offer_id) ??
@@ -308,9 +392,14 @@ export function contentDraftImportPayload(action: {
     stringField(rawInfo.old_price) ??
     stringField(product.oldPriceRub) ??
     price;
-  const images = stringArray(product.images).length
-    ? stringArray(product.images)
-    : stringArray(rawInfo.images);
+  const currencyCode =
+    stringField(rawInfo.currency_code) ??
+    stringField(rawInfo.currencyCode) ??
+    stringField(product.currency_code) ??
+    stringField(product.currencyCode);
+  const images = stringArray(rawInfo.images).length
+    ? stringArray(rawInfo.images)
+    : stringArray(product.images);
   const weight = numberField(rawInfo.weight);
   const width = numberField(rawInfo.width);
   const height = numberField(rawInfo.height);
@@ -323,6 +412,7 @@ export function contentDraftImportPayload(action: {
     !descriptionCategoryId ? "description_category_id" : "",
     !typeId ? "type_id" : "",
     !price ? "price" : "",
+    !currencyCode ? "currency_code" : "",
     !images.length ? "images" : "",
     !attributes ? "attributes" : "",
     !weight ? "weight" : "",
@@ -348,7 +438,7 @@ export function contentDraftImportPayload(action: {
           price: price!,
           old_price: oldPrice!,
           vat: stringField(rawInfo.vat) ?? "0",
-          currency_code: "RUB",
+          currency_code: currencyCode!,
           images,
           attributes: attributes as OzonProductPayload["attributes"],
           weight: weight!,
@@ -543,6 +633,192 @@ async function verifyCurrentProduct(params: {
   return product;
 }
 
+function importTaskErrorMessage(error: Record<string, unknown>) {
+  return [
+    stringField(error.code) ?? "unknown",
+    stringField(error.message) ?? stringField(error.description) ?? "unknown_error",
+  ].join(":");
+}
+
+async function assertImportTaskSucceeded(params: {
+  client: OzonClient;
+  taskId: number | string;
+  offerId?: string | null;
+}) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const info = await params.client.getProductImportInfo(params.taskId);
+    const item =
+      info.items.find((candidate) => candidate.offer_id === params.offerId) ??
+      info.items[0];
+    if (item) {
+      const errors = (item.errors ?? [])
+        .map(asRecord)
+        .filter((error) => (stringField(error.level) ?? "error").toLowerCase() === "error");
+      const firstError = errors[0];
+      if (firstError) {
+        throw new Error(`ozon_import_task_failed:${importTaskErrorMessage(firstError)}`);
+      }
+      return info;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  throw new Error(`ozon_import_task_not_ready:${params.taskId}`);
+}
+
+async function assertContentDraftApplied(params: {
+  client: OzonClient;
+  request: ImportProductsRequest;
+  changedFields: string[];
+}) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const application = await readContentDraftApplication(params);
+    if (application && !application.missingFields.length) {
+      return { ...application, attempt };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+
+  throw new Error("content_draft_not_reflected_after_import");
+}
+
+async function readContentDraftApplication(params: {
+  client: OzonClient;
+  request: ImportProductsRequest;
+  changedFields: string[];
+}) {
+  const item = params.request.items[0];
+  const offerId = item?.offer_id;
+  if (!offerId) return null;
+  const expectedTitle = params.changedFields.includes("title") ? stringField(item.name) : null;
+  const expectedDescription = params.changedFields.includes("description")
+    ? stringField(item.description)
+    : null;
+  const [info] = await params.client.getProductInfoAttributes({ offerIds: [offerId] });
+  const actualTitle = stringField(info?.name);
+  const directDescription = stringField(info?.description);
+  const annotationDescription = attributeValueById(
+    asRecord(info).attributes,
+    OZON_DESCRIPTION_ATTRIBUTE_ID,
+  );
+  const actualDescription = directDescription ?? annotationDescription;
+  const titleApplied = !expectedTitle || actualTitle === expectedTitle;
+  const descriptionApplied = !expectedDescription || actualDescription === expectedDescription;
+  const missingFields = [
+    expectedTitle && !titleApplied ? "title" : "",
+    expectedDescription && !descriptionApplied ? "description" : "",
+  ].filter(Boolean);
+  const appliedFields = params.changedFields.filter((field) => !missingFields.includes(field));
+  return {
+    offerId,
+    titleApplied,
+    descriptionApplied,
+    appliedFields,
+    missingFields,
+    descriptionSource: directDescription ? "description" : annotationDescription ? "attribute_4191" : null,
+  };
+}
+
+async function recoverContentDraftAfterError(params: {
+  client: OzonClient;
+  action: { id: string; type: AgentActionType; guardrailJson: unknown };
+  request: ImportProductsRequest;
+  changedFields: string[];
+  error: unknown;
+  importInfo?: unknown;
+  response?: { task_id?: number | string | null };
+  tenantId: string;
+  userId: string;
+}) {
+  const application = await readContentDraftApplication(params).catch(() => null);
+  const execution = {
+    kind: "CONTENT_DRAFT",
+    recovery: "readback_after_error",
+    changedFields: params.changedFields,
+    appliedFields: application?.appliedFields ?? [],
+    missingFields: application?.missingFields ?? params.changedFields,
+    ozonTaskId: params.response?.task_id == null ? null : String(params.response.task_id),
+    importInfo: params.importInfo ?? null,
+    verification: application,
+    error: params.error instanceof Error ? params.error.message : String(params.error),
+  };
+  if (!application?.appliedFields.length) {
+    if (isUncertainOzonWriteError(params.error)) {
+      throw new ActionVerificationPendingError(execution);
+    }
+    return null;
+  }
+  if (!application.missingFields.length) {
+    return markActionExecuted({
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action: params.action,
+      execution,
+    });
+  }
+  throw new ActionVerificationPendingError(execution);
+}
+
+class ActionVerificationPendingError extends Error {
+  constructor(readonly execution: Record<string, unknown>) {
+    super("result_pending_verification");
+  }
+}
+
+async function verifyStockApplied(params: {
+  client: OzonClient;
+  offerId: string | null;
+  productId: number | null;
+  warehouseId: number;
+  stock: number;
+}) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const items = await params.client.getProductStocks({
+      ...(params.offerId ? { offerIds: [params.offerId] } : {}),
+      ...(params.productId ? { productIds: [String(params.productId)] } : {}),
+      limit: 100,
+    });
+    const product = items.find((item) =>
+      params.offerId
+        ? item.offer_id === params.offerId
+        : String(item.product_id ?? "") === String(params.productId ?? ""),
+    );
+    const warehouseStock = product?.stocks?.find((item) =>
+      item.warehouse_id === params.warehouseId || item.warehouse_ids?.includes(params.warehouseId),
+    );
+    if (warehouseStock?.present === params.stock) {
+      return { attempt, warehouseId: params.warehouseId, stock: warehouseStock.present };
+    }
+    if (attempt < 7) await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new ActionVerificationPendingError({
+    kind: "UPDATE_STOCK",
+    phase: "verification_pending",
+    offerId: params.offerId,
+    productId: params.productId,
+    warehouseId: params.warehouseId,
+    stock: params.stock,
+  });
+}
+
+async function verifyPriceApplied(params: {
+  client: OzonClient;
+  offerId: string;
+  price: number;
+}) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const [product] = await params.client.getProductInfoList({ offerIds: [params.offerId] });
+    const actual = numberField(product?.price ?? product?.marketing_price);
+    if (actual === params.price) return { attempt, offerId: params.offerId, price: actual };
+    if (attempt < 7) await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new ActionVerificationPendingError({
+    kind: "UPDATE_PRICE",
+    phase: "verification_pending",
+    offerId: params.offerId,
+    price: params.price,
+  });
+}
+
 async function markActionExecuted(params: {
   tenantId: string;
   userId: string;
@@ -598,6 +874,23 @@ async function markActionFailed(params: {
     },
   });
   return updated;
+}
+
+async function markActionPendingVerification(params: {
+  action: { id: string; guardrailJson: unknown };
+  execution: Record<string, unknown>;
+}) {
+  return prisma.agentAction.update({
+    where: { id: params.action.id },
+    data: {
+      status: AgentActionStatus.BLOCKED,
+      error: "result_pending_verification",
+      guardrailJson: {
+        ...asRecord(params.action.guardrailJson),
+        execution: params.execution,
+      } as never,
+    },
+  });
 }
 
 async function executePublishDraftAction(params: {
@@ -685,15 +978,82 @@ async function executeContentDraftAction(params: {
 }) {
   const action = params.action!;
   const store = await resolveActionStore(action);
-  const { request, changedFields } = contentDraftImportPayload(action);
-  const requestHash = computeRequestHash(store.id, request);
   const client = ozonClientForStore(store);
-  await verifyCurrentProduct({
-    client,
-    offerId: offerIdFrom(action) ?? request.items[0]?.offer_id,
-    productId: productIdFrom(action),
-  });
-  const response = await client.importProducts(request);
+  const offerId = offerIdFrom(action);
+  const productId = productIdFrom(action);
+  const requestByIdentity = offerId
+    ? { offerIds: [offerId] }
+    : productId
+      ? { productIds: [String(productId)] }
+      : null;
+  if (!requestByIdentity) throw new Error("missing_offer_id_or_product_id");
+  const [infoItems, attributeItems] = await Promise.all([
+    client.getProductInfoList(requestByIdentity),
+    client.getProductInfoAttributes(requestByIdentity),
+  ]);
+  const info = infoItems[0] ?? null;
+  const attributes = attributeItems[0] ?? null;
+  if (!info && !attributes) throw new Error("product_not_found_before_execution");
+  const latestProduct: OzonProductInfoItem = {
+    ...(attributes ?? {}),
+    ...(info ?? {}),
+    ...((attributes?.attributes ?? info?.attributes) === undefined
+      ? {}
+      : { attributes: attributes?.attributes ?? info?.attributes }),
+    ...((attributes?.description ?? info?.description) === undefined
+      ? {}
+      : { description: attributes?.description ?? info?.description }),
+    ...((attributes?.description_category_id ?? info?.description_category_id) === undefined
+      ? {}
+      : { description_category_id: attributes?.description_category_id ?? info?.description_category_id }),
+    ...((attributes?.type_id ?? info?.type_id) === undefined
+      ? {}
+      : { type_id: attributes?.type_id ?? info?.type_id }),
+    ...((attributes?.weight ?? info?.weight) === undefined
+      ? {}
+      : { weight: attributes?.weight ?? info?.weight }),
+    ...((attributes?.width ?? info?.width) === undefined
+      ? {}
+      : { width: attributes?.width ?? info?.width }),
+    ...((attributes?.height ?? info?.height) === undefined
+      ? {}
+      : { height: attributes?.height ?? info?.height }),
+    ...((attributes?.depth ?? info?.depth) === undefined
+      ? {}
+      : { depth: attributes?.depth ?? info?.depth }),
+  };
+  const conflicts = contentDraftFieldConflicts(action, latestProduct);
+  if (conflicts.length) {
+    throw new Error(`content_draft_stale_target_fields:${conflicts.join(",")}`);
+  }
+  const { request, changedFields } = contentDraftImportPayload(action, latestProduct);
+  const requestHash = computeRequestHash(store.id, request);
+  let response: { task_id?: number | string | null } | undefined;
+  let importInfo: unknown;
+  let verification: unknown;
+  try {
+    response = await client.importProducts(request);
+    importInfo = await assertImportTaskSucceeded({
+      client,
+      taskId: response.task_id!,
+      offerId: request.items[0]?.offer_id,
+    });
+    verification = await assertContentDraftApplied({ client, request, changedFields });
+  } catch (error) {
+    const recovered = await recoverContentDraftAfterError({
+      client,
+      action,
+      request,
+      changedFields,
+      error,
+      importInfo,
+      response,
+      tenantId: params.tenantId,
+      userId: params.userId,
+    });
+    if (recovered) return recovered;
+    throw error;
+  }
   return markActionExecuted({
     tenantId: params.tenantId,
     userId: params.userId,
@@ -703,6 +1063,8 @@ async function executeContentDraftAction(params: {
       ozonTaskId: String(response.task_id),
       requestHash,
       changedFields,
+      importInfo,
+      verification,
     },
   });
 }
@@ -742,6 +1104,11 @@ async function executePriceAction(params: {
       },
     ],
   });
+  const verification = await verifyPriceApplied({
+    client,
+    offerId,
+    price: proposedPriceRub,
+  });
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -752,6 +1119,7 @@ async function executePriceAction(params: {
       offerId,
       price: proposedPriceRub,
       ozonTaskId: response.task_id == null ? null : String(response.task_id),
+      verification,
       response: response.raw,
     },
   });
@@ -786,6 +1154,14 @@ async function executeStockAction(params: {
       },
     ],
   });
+  const businessResult = assertOzonMutationSucceeded(response.raw);
+  const verification = await verifyStockApplied({
+    client,
+    offerId,
+    productId,
+    warehouseId,
+    stock,
+  });
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -797,6 +1173,8 @@ async function executeStockAction(params: {
       productId,
       warehouseId,
       stock,
+      businessResult,
+      verification,
       response: response.raw,
     },
   });
@@ -825,6 +1203,7 @@ async function executeImagesAction(params: {
     ...(images360.length ? { images360 } : {}),
     ...(colorImage ? { color_image: colorImage } : {}),
   });
+  const businessResult = assertOzonMutationSucceeded(response.raw);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -834,6 +1213,7 @@ async function executeImagesAction(params: {
       kind: "UPDATE_IMAGES",
       productId,
       imageCount: images.length,
+      businessResult,
       response: response.raw,
     },
   });
@@ -864,6 +1244,7 @@ async function executeAttributesAction(params: {
       },
     ],
   });
+  const businessResult = assertOzonMutationSucceeded(response.raw);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -874,6 +1255,7 @@ async function executeAttributesAction(params: {
       offerId,
       productId,
       attributeCount: attributes.length,
+      businessResult,
       response: response.raw,
     },
   });
@@ -930,6 +1312,7 @@ async function executeDeleteAction(params: {
       },
     ],
   });
+  const businessResult = assertOzonMutationSucceeded(response.raw);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -939,6 +1322,7 @@ async function executeDeleteAction(params: {
       kind: "DELETE_PRODUCT",
       offerId,
       productId,
+      businessResult,
       response: response.raw,
     },
   });
@@ -972,25 +1356,30 @@ async function executeBulkProductUpdateAction(params: {
         const warehouseId = numberField(item.warehouseId ?? item.warehouse_id);
         if (stock == null || stock < 0) throw new Error("missing_or_invalid_stock");
         if (!warehouseId) throw new Error("missing_warehouse_id");
-        await client.updateStocks({
+        const response = await client.updateStocks({
           stocks: [{ ...(offerId ? { offer_id: offerId } : {}), ...(productId ? { product_id: productId } : {}), stock, warehouse_id: warehouseId }],
         });
+        assertOzonMutationSucceeded(response.raw);
+        await verifyStockApplied({ client, offerId, productId, warehouseId, stock });
       } else if (type === "UPDATE_IMAGES") {
         if (!productId) throw new Error("missing_product_id");
         const images = stringArray(item.images);
         if (!images.length) throw new Error("missing_images");
-        await client.importPictures({ product_id: productId, images });
+        const response = await client.importPictures({ product_id: productId, images });
+        assertOzonMutationSucceeded(response.raw);
       } else if (type === "UPDATE_ATTRIBUTES") {
         const attributes = attributesFromPayload(item.attributes);
         if (!attributes) throw new Error("missing_attributes");
-        await client.updateAttributes({
+        const response = await client.updateAttributes({
           items: [{ ...(offerId ? { offer_id: offerId } : {}), ...(productId ? { product_id: productId } : {}), attributes }],
         });
+        assertOzonMutationSucceeded(response.raw);
       } else if (type === "DELETE_PRODUCT") {
         if (!offerId && !productId) throw new Error("missing_offer_id_or_product_id");
-        await client.deleteProducts({
+        const response = await client.deleteProducts({
           products: [{ ...(offerId ? { offer_id: offerId } : {}), ...(productId ? { product_id: productId } : {}) }],
         });
+        assertOzonMutationSucceeded(response.raw);
       } else if (type === "UPDATE_PRICE") {
         const price = numberField(item.proposedPriceRub ?? item.price);
         if (!offerId) throw new Error("missing_offer_id");
@@ -1055,6 +1444,7 @@ async function executeArchiveAction(params: {
     action.type === "ARCHIVE_PRODUCT"
       ? await client.archiveProducts({ product_id: [productId] })
       : await client.unarchiveProducts({ product_id: [productId] });
+  const businessResult = assertOzonMutationSucceeded(response.raw);
 
   return markActionExecuted({
     tenantId: params.tenantId,
@@ -1063,6 +1453,7 @@ async function executeArchiveAction(params: {
     execution: {
       kind: action.type,
       productId,
+      businessResult,
       response: response.raw,
     },
   });
@@ -1236,6 +1627,9 @@ export async function executeApprovedAgentAction(params: {
       error: "unsupported_action_execution",
     });
   } catch (error) {
+    if (error instanceof ActionVerificationPendingError) {
+      return markActionPendingVerification({ action, execution: error.execution });
+    }
     if (charged) {
       await refundTenantCredits({
         tenantId: params.tenantId,

@@ -209,7 +209,9 @@ async function runMockAgent(params: {
     refreshOzonData: params.refreshOzonData,
   });
   const lowStock = snapshot.products
-    .filter((product) => product.visible && !product.archived && product.stock <= 5)
+    .filter((product) =>
+      product.visible && !product.archived && product.stock !== null && product.stock <= 5,
+    )
     .slice(0, 5);
   const draft = snapshot.compiledDrafts[0];
 

@@ -33,6 +33,12 @@ describe("preferredProductImageUrl", () => {
     ).toBe("/api/v1/image-proxy?url=https%3A%2F%2Fcbu01.alicdn.com%2Fimg%2Fibank%2Fmain.jpg");
   });
 
+  it("proxies Ozon CDN images for browser display", () => {
+    expect(displayProductImageUrl("https://ir.ozone.ru/s3/multimedia-1-l/12834468309.jpg")).toBe(
+      "/api/v1/image-proxy?url=https%3A%2F%2Fir.ozone.ru%2Fs3%2Fmultimedia-1-l%2F12834468309.jpg",
+    );
+  });
+
   it("keeps non-alicdn image urls unchanged", () => {
     expect(displayProductImageUrl("https://img.test/main.jpg")).toBe("https://img.test/main.jpg");
   });

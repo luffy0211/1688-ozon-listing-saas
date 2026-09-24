@@ -9,6 +9,7 @@ const target = {
   offerId: "own-offer",
   title: "Мужское поло",
   publicSku: "999",
+  imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
   quantity: 3,
   revenueRub: 1200,
   descriptionCategoryId: 200000933,
@@ -136,6 +137,10 @@ describe("Ozon crawler process adapter", () => {
           hotBadge: false,
           popularityProxy: true,
           sellerName: "Seller",
+          imageUrls: [
+            "https://ir.ozone.ru/s3/polo.jpg",
+            "https://cdn.test/not-ozon.jpg",
+          ],
           attributes: { "Тип": "Поло", "Материал": "Хлопок" },
         }],
       }],
@@ -144,17 +149,19 @@ describe("Ozon crawler process adapter", () => {
     expect(result).toMatchObject({
       target,
       category: { name: "Поло", path: target.categoryPathRu },
+      ownProduct: { imageUrls: ["https://ir.ozone.ru/s3/multimedia-own.jpg"] },
       competitors: [{
         sku: "123",
         title: "Поло из хлопка",
         priceRub: 1499,
+        imageUrls: ["https://ir.ozone.ru/s3/polo.jpg"],
         attributes: { "Тип": "Поло", "Материал": "Хлопок" },
         reviews: [],
       }],
       warnings: [
         "已过滤 2 个详情类型不匹配的商品",
         "已过滤 1 个性别或年龄不匹配的商品",
-        "有 4 个商品缺少性别属性，已按严格匹配规则排除",
+        "有 4 个商品缺少性别属性，已按标题和类目保留，建议人工复核",
         "已合并 3 个重复商品变体",
       ],
     });

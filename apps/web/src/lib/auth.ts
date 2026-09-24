@@ -65,16 +65,16 @@ export async function getSession(): Promise<SessionPayload | null> {
 }
 
 /** 受保护页面：未登录重定向到 /login。 */
-export async function requireUser(): Promise<SessionPayload> {
+export async function requireUser(loginPath = "/login"): Promise<SessionPayload> {
   const session = await getSession();
-  if (!session) redirect("/login");
+  if (!session) redirect(loginPath);
   return session;
 }
 
 /** 管理员页面：非 admin 重定向到 /dashboard。 */
-export async function requireAdmin(): Promise<SessionPayload> {
-  const session = await requireUser();
-  if (session.role !== "admin") redirect("/dashboard");
+export async function requireAdmin(loginPath = "/login"): Promise<SessionPayload> {
+  const session = await requireUser(loginPath);
+  if (session.role !== "admin") redirect(loginPath === "/login" ? "/dashboard" : loginPath);
   return session;
 }
 

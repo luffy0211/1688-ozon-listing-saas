@@ -11,6 +11,8 @@ import {
   inferOzonCategoryName,
   inferOzonGender,
   isUsableCompetitorEvidence,
+  ownOzonProduct,
+  ozonCdnImageUrl,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -28,6 +30,7 @@ const competitorSchema = z.object({
   rating: z.number().nullable().optional(),
   reviewCount: z.number().int().nullable().optional(),
   sellerName: z.string().nullable().optional(),
+  imageUrls: z.array(z.string().url()).optional(),
   attributes: z.record(z.string(), z.string()),
 });
 
@@ -86,24 +89,6 @@ function preciseOzonCategoryUrl(productType: string, gender: string | null) {
   ]).get(key);
 }
 
-function ownProduct(target: OzonCompetitorTarget): OzonPublicProduct {
-  const sku = target.publicSku ?? target.offerId;
-  return {
-    sku,
-    url: target.publicSku ? `https://www.ozon.ru/product/${target.publicSku}/` : "",
-    title: target.title,
-    priceRub: null,
-    oldPriceRub: null,
-    rating: null,
-    reviewCount: null,
-    sellerName: null,
-    imageUrls: [],
-    attributes: {},
-    description: null,
-    reviews: [],
-  };
-}
-
 export function buildOzonCrawlerJob(params: {
   requestId: string;
   targets: OzonCompetitorTarget[];
@@ -157,7 +142,7 @@ function publicProduct(value: z.infer<typeof competitorSchema>): OzonPublicProdu
     rating: value.rating ?? null,
     reviewCount: value.reviewCount ?? null,
     sellerName: value.sellerName ?? null,
-    imageUrls: [],
+    imageUrls: (value.imageUrls ?? []).flatMap((item) => ozonCdnImageUrl(item) ?? []),
     attributes: value.attributes,
     description: value.description ?? null,
     reviews: [],
@@ -174,7 +159,7 @@ export function parseOzonCrawlerOutput(
   return targets.map((target) => {
     const key = categoryKey(target);
     const result = key ? byCategory.get(key) : null;
-    const own = ownProduct(target);
+    const own = ownOzonProduct(target);
     const parsedCompetitors = (result?.competitors ?? []).map(publicProduct);
     const competitors = parsedCompetitors.filter((product) => isUsableCompetitorEvidence(product, target));
     const invalidEvidenceCount = parsedCompetitors.length - competitors.length;
@@ -190,7 +175,7 @@ export function parseOzonCrawlerOutput(
         ? [`已过滤 ${result.filteredDemographicCount} 个性别或年龄不匹配的商品`]
         : []),
       ...(result?.missingDemographicCount
-        ? [`有 ${result.missingDemographicCount} 个商品缺少性别属性，已按严格匹配规则排除`]
+        ? [`有 ${result.missingDemographicCount} 个商品缺少性别属性，已按标题和类目保留，建议人工复核`]
         : []),
       ...(result?.deduplicatedVariantCount
         ? [`已合并 ${result.deduplicatedVariantCount} 个重复商品变体`]

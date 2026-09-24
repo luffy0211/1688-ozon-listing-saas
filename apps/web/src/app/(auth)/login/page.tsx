@@ -63,7 +63,8 @@ export default function LoginPage() {
         return;
       }
       persistLogin();
-      window.location.assign("/products");
+      const json = await res.json().catch(() => null);
+      window.location.assign(json?.data?.user?.role === "admin" ? "/admin" : "/agent/content");
     } catch {
       setError("登录失败，请确认后端和数据库服务已经启动");
       setLoading(false);

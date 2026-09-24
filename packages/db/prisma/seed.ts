@@ -11,9 +11,15 @@ function hashPassword(password: string): string {
 
 async function main() {
   const tenantName = process.env.SEED_TENANT_NAME ?? "本地演示租户";
-  const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "Admin123456";
+  const customerEmail = process.env.SEED_USER_EMAIL ?? process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
+  const customerPassword = process.env.SEED_USER_PASSWORD ?? process.env.SEED_ADMIN_PASSWORD ?? "Admin123456";
+  const platformAdminEmail = process.env.SEED_PLATFORM_ADMIN_EMAIL ?? "platform-admin@example.com";
+  const platformAdminPassword = process.env.SEED_PLATFORM_ADMIN_PASSWORD ?? "Admin123456";
   const inviteCode = process.env.INITIAL_INVITE_CODE ?? "dev-invite";
+
+  if (customerEmail === platformAdminEmail) {
+    throw new Error("SEED_USER_EMAIL and SEED_PLATFORM_ADMIN_EMAIL must be different");
+  }
 
   const tenant = await prisma.tenant.upsert({
     where: { id: "local-demo-tenant" },
@@ -22,12 +28,32 @@ async function main() {
   });
 
   await prisma.user.upsert({
-    where: { email: adminEmail },
-    update: {},
+    where: { email: customerEmail },
+    update: {
+      name: "本地客户",
+      role: "owner",
+      tenantId: tenant.id,
+    },
     create: {
-      email: adminEmail,
-      passwordHash: hashPassword(adminPassword),
-      name: "本地管理员",
+      email: customerEmail,
+      passwordHash: hashPassword(customerPassword),
+      name: "本地客户",
+      role: "owner",
+      tenantId: tenant.id,
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { email: platformAdminEmail },
+    update: {
+      name: "平台管理员",
+      role: "admin",
+      tenantId: tenant.id,
+    },
+    create: {
+      email: platformAdminEmail,
+      passwordHash: hashPassword(platformAdminPassword),
+      name: "平台管理员",
       role: "admin",
       tenantId: tenant.id,
     },
@@ -65,7 +91,7 @@ async function main() {
     },
   });
 
-  console.log(`Seed complete: admin=${adminEmail}, invite=${inviteCode}`);
+  console.log(`Seed complete: user=${customerEmail}, platformAdmin=${platformAdminEmail}, invite=${inviteCode}`);
 }
 
 main()

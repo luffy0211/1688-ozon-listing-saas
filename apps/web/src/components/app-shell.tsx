@@ -7,11 +7,11 @@ import {
   BarChart3,
   Bot,
   ChevronDown,
-  Coins,
-  GitBranch,
+  ClipboardList,
   LayoutDashboard,
   PackageSearch,
   Settings,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import type { SessionPayload } from "@/lib/auth";
@@ -19,14 +19,22 @@ import { CreditBalanceBadge } from "./credit-balance-badge";
 import { LogoutButton } from "./logout-button";
 import { Badge, cn } from "./ui";
 
-const navItems = [
-  { href: "/dashboard", label: "上架工作台", icon: LayoutDashboard },
-  { href: "/workflow", label: "自动化工作流", icon: GitBranch },
-  { href: "/analytics", label: "BI 看板", icon: BarChart3 },
+const customerNavItems = [
   { href: "/agent/content", label: "运营 Agent", icon: Bot },
-  { href: "/admin/credits", label: "积分管理", icon: Coins, adminOnly: true },
-  { href: "/settings", label: "设置", icon: Settings },
+  { href: "/dashboard", label: "上架工作台", icon: LayoutDashboard },
+  { href: "/quality", label: "商品体检", icon: ShieldCheck },
+  { href: "/analytics", label: "BI 看板", icon: BarChart3 },
+  { href: "/tasks", label: "任务中心", icon: ClipboardList },
+  { href: "/agent/actions", label: "待审批", icon: ShieldCheck },
 ];
+
+export function visibleNavItemsForRole(_role: string) {
+  return customerNavItems;
+}
+
+export function canSeePlatformControls(_role: string) {
+  return false;
+}
 
 export function AppShell({
   user,
@@ -37,6 +45,7 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const isAgentPage = pathname.startsWith("/agent/");
+  const showPlatformControls = canSeePlatformControls(user.role);
 
   return (
     <div className="min-h-screen bg-[linear-gradient(135deg,#dff7ff_0%,#f6f8ff_48%,#eeeafd_100%)] p-0 text-[#14213d] lg:p-3">
@@ -63,7 +72,7 @@ export function AppShell({
 
         <nav className="flex-1 space-y-1 px-3 py-5">
           <div className="mb-2 px-3 text-[11px] font-semibold text-[#9aa6ba]">工作空间</div>
-          {navItems.filter((item) => !item.adminOnly || user.role === "admin").map((item) => {
+          {visibleNavItemsForRole(user.role).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
@@ -136,7 +145,7 @@ export function AppShell({
                 )}
               </div>
               <div className="flex min-w-0 items-center gap-2">
-                <CreditBalanceBadge />
+                {showPlatformControls ? <CreditBalanceBadge /> : null}
                 {isAgentPage ? (
                   <>
                     <span className="hidden rounded-full border border-[#cdeee3] bg-[#ebfbf5] px-2.5 py-1 text-xs font-semibold text-[#168864] sm:inline-flex">改动需确认</span>
@@ -162,7 +171,7 @@ export function AppShell({
               </div>
             </div>
             <nav className="scrollbar-none flex gap-1 overflow-x-auto border-t border-[#edf2f8] px-3 py-2 lg:hidden">
-              {navItems.filter((item) => !item.adminOnly || user.role === "admin").map((item) => {
+              {visibleNavItemsForRole(user.role).map((item) => {
                 const Icon = item.icon;
                 const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (

@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   attachCompetitorCategoryLabels,
   buildCompetitorBatchProposal,
+  buildCompetitorContentDiagnosis,
   buildStoreDiagnosis,
+  cachedReportForTarget,
   cachedCompetitorReport,
   countUniqueCompetitors,
   lowContentRatingProducts,
   selectCompetitorDiagnosisTargets,
   selectCompetitorTargets,
+  summarizeCompetitorEvidence,
   summarizeProductRecommendations,
   summarizeFinanceTransactions,
   targetsWithoutCompetitorEvidence,
@@ -57,6 +60,39 @@ describe("Ozon operations helpers", () => {
 
     expect(targetsWithoutCompetitorEvidence(targets as never, results as never))
       .toEqual([targets[1]]);
+  });
+
+  it("summarizes competitor evidence quality and crawler blocking risks", () => {
+    const targets = [
+      { descriptionCategoryId: 10, typeId: 20, offerId: "a", title: "Поло" },
+      { descriptionCategoryId: 10, typeId: 30, offerId: "b", title: "Рубашка" },
+    ];
+
+    const quality = summarizeCompetitorEvidence({
+      requestedPerCategory: 5,
+      targets: targets as never,
+      reports: [{
+        target: targets[0],
+        category: { name: "Поло" },
+        source: "ozon_http_crawler",
+        competitors: [{ sku: "1" }, { sku: "2" }, { sku: "3" }, { sku: "4" }, { sku: "5" }],
+        cached: true,
+      }],
+      warnings: ["a：page1 扫描失败: HTTP 403"],
+    });
+
+    expect(quality).toMatchObject({
+      categoryCount: 2,
+      coveredCategoryCount: 1,
+      sufficientCategoryCount: 1,
+      insufficientCategoryCount: 1,
+      competitorCount: 5,
+      reusedCacheCount: 1,
+      hasCrawlerBlocked: true,
+    });
+    expect(quality.insufficientCategories).toEqual([
+      expect.objectContaining({ categoryName: "Рубашка", competitorCount: 0 }),
+    ]);
   });
 
   it("builds one approval-gated batch from evidence-backed attribute additions", () => {
@@ -174,7 +210,53 @@ describe("Ozon operations helpers", () => {
     })).toBeNull();
   });
 
-  it("does not reuse incomplete competitor reports", () => {
+  it("builds content-focused competitor diagnosis for visible comparison fields", async () => {
+    const product = (sku: string, overrides: Record<string, unknown> = {}) => ({
+      sku,
+      url: `https://www.ozon.ru/product/${sku}/`,
+      title: `Мужское поло хлопковое ${sku}`,
+      priceRub: 1200,
+      oldPriceRub: null,
+      rating: 4.8,
+      reviewCount: 32,
+      sellerName: "seller",
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
+      attributes: {},
+      description: "Легкое поло из хлопка для города и офиса",
+      reviews: [],
+      ...overrides,
+    });
+
+    const diagnosis = await buildCompetitorContentDiagnosis([{
+      target: { offerId: "offer-1", title: "Поло", categoryNameRu: "Поло" },
+      category: { name: "Поло" },
+      ownProduct: product("own", { priceRub: 999, reviewCount: 2 }),
+      competitors: [
+        product("c1", { priceRub: 1290, reviewCount: 40 }),
+        product("c2", { priceRub: 1490, reviewCount: 60 }),
+        product("c3", { priceRub: 1690, reviewCount: 80 }),
+      ],
+    }]);
+
+    expect(diagnosis).toMatchObject({
+      kind: "competitor_content_diagnosis",
+      heatProxyNotice: expect.stringContaining("真实销量"),
+      samples: [
+        expect.objectContaining({
+          offerId: "offer-1",
+          comparison: expect.objectContaining({
+            price: { ownRub: 999, competitorMedianRub: 1490 },
+            heat: expect.objectContaining({ ownReviewCount: 2, competitorMedianReviewCount: 60 }),
+            themes: expect.objectContaining({ titleTerms: expect.any(Array) }),
+            description: expect.objectContaining({ ownAvailable: true, competitorAvailableCount: 3 }),
+          }),
+        }),
+      ],
+    });
+    expect(diagnosis.vision.warning).toContain("视觉分析未启用");
+  });
+
+  it("rejects incomplete reports but reuses valid competitor evidence without images", () => {
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [] })).toBeNull();
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [{}] })).toBeNull();
     expect(cachedCompetitorReport({
@@ -188,6 +270,54 @@ describe("Ozon operations helpers", () => {
       category: { url: "https://www.ozon.ru/category/example-1/" },
       competitors: [{ sku: "1" }],
     })).toBeNull();
+    const imageLessProduct = {
+      sku: "1",
+      url: "https://www.ozon.ru/product/1/",
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes: { Материал: "Хлопок" },
+      description: "Описание",
+      reviews: [],
+    };
+    expect(cachedCompetitorReport({
+      source: "ozon_search_index",
+      detailScope: "category_search_index_attributes_description_v3",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: { ...imageLessProduct, sku: "own" },
+      competitors: [imageLessProduct],
+    })).not.toBeNull();
+  });
+
+  it("rebuilds cached own-product data for the current category target", () => {
+    const report = cachedReportForTarget({
+      target: { offerId: "old", title: "Old product", publicSku: "1" },
+      ownProduct: { sku: "1", title: "Old product", imageUrls: ["https://ir.ozone.ru/s3/old.jpg"] },
+      competitors: [],
+    }, {
+      offerId: "current",
+      title: "Current product",
+      publicSku: "2",
+      imageUrl: "https://ir.ozone.ru/s3/current.jpg",
+      priceRub: 299,
+      quantity: 0,
+      revenueRub: 0,
+    });
+
+    expect(report).toMatchObject({
+      target: { offerId: "current", publicSku: "2" },
+      ownProduct: {
+        sku: "2",
+        title: "Current product",
+        priceRub: 299,
+        imageUrls: ["https://ir.ozone.ru/s3/current.jpg"],
+      },
+      cached: true,
+    });
   });
 
   it("rebuilds content benchmarks from cached competitor details", () => {
@@ -200,7 +330,7 @@ describe("Ozon operations helpers", () => {
       rating: null,
       reviewCount: null,
       sellerName: null,
-      imageUrls: [],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes,
       description: "Хлопковое поло для повседневной носки.",
       reviews: [],
@@ -240,7 +370,7 @@ describe("Ozon operations helpers", () => {
       rating: null,
       reviewCount: null,
       sellerName: null,
-      imageUrls: [],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes: { Материал: "Хлопок" },
       description: null,
       reviews: [],
@@ -294,7 +424,7 @@ describe("Ozon operations helpers", () => {
       rating: null,
       reviewCount: null,
       sellerName: null,
-      imageUrls: [],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes,
       description,
       reviews: [],
@@ -400,6 +530,25 @@ describe("Ozon operations helpers", () => {
         categoryPathRu: [],
       },
     ]);
+  });
+
+  it("keeps the own-product image in competitor targets", () => {
+    expect(selectCompetitorTargets(summary({
+      products: [{
+        offerId: "own",
+        name: "Own product",
+        publicSku: "100",
+        imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
+        visible: true,
+        archived: false,
+        stock: 5,
+        descriptionCategoryId: 17027904,
+        typeId: 93337,
+      }],
+    }) as never)[0]).toMatchObject({
+      offerId: "own",
+      imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
+    });
   });
 
   it("keeps one representative for every selling category", () => {

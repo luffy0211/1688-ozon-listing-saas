@@ -36,6 +36,11 @@ function dataSourcesFromRun(run: { toolCallsJson: unknown } | null | undefined) 
     : [];
 }
 
+function arrayFromRun(run: { toolCallsJson: unknown } | null | undefined, key: string) {
+  const value = asRecord(run?.toolCallsJson)[key];
+  return Array.isArray(value) ? value : [];
+}
+
 export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
   const params = await props.params;
   const requestSession = await sessionFromRequest(req);
@@ -46,6 +51,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     where: {
       id: params.id,
       tenantId: requestSession.tenantId,
+      status: "OPEN",
       OR: [
         {
           messages: {
@@ -95,7 +101,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
             sessionId: params.id,
             id: { in: runIds },
           },
-          select: { id: true, toolCallsJson: true },
+          select: { id: true, input: true, toolCallsJson: true },
         })
       : Promise.resolve([]),
     runIds.length
@@ -134,8 +140,11 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
         id: message.id,
         role: message.role === "USER" ? "user" : "assistant",
         content: message.content,
+        requestPrompt: message.role === "ASSISTANT" ? run?.input : undefined,
         createdAt: message.createdAt.toISOString(),
         dataSources: message.role === "ASSISTANT" ? dataSourcesFromRun(run) : [],
+        plan: message.role === "ASSISTANT" ? arrayFromRun(run, "plan") : [],
+        executionTrace: message.role === "ASSISTANT" ? arrayFromRun(run, "executionTrace") : [],
         actions: runId
           ? (actionsByRunId.get(runId) ?? []).map((action) =>
               serializeContentAgentAction(action),

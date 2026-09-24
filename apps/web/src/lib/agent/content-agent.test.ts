@@ -2,15 +2,21 @@ import { describe, expect, it } from "vitest";
 import {
   competitorsPerCategoryFromPrompt,
   competitorMemoryContextFromReports,
+  categoryExperienceSummary,
   contentAgentModelName,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
+  buildAgentInput,
   fallbackPromotionPolicyFromPrompt,
   fallbackContentDraftSuggestion,
   normalizeOzonProductContent,
   optionalStoreId,
+  productContentForDraft,
   requiredOzonToolForPrompt,
+  requiredOzonToolsForPrompt,
+  shouldRunCompetitorAnalysisForDiagnosis,
   shouldRefreshCompetitorEvidence,
+  shouldCreateFallbackContentDraft,
 } from "./content-agent";
 
 describe("contentAgentModelSettings", () => {
@@ -121,7 +127,31 @@ describe("normalizeOzonProductContent", () => {
     expect(product.found).toBe(false);
     expect(product.offerId).toBe("MISSING-1");
     expect(product.productId).toBeNull();
-    expect(product.stock).toBe(0);
+    expect(product.stock).toBeNull();
+  });
+
+  it("keeps earlier reads available when drafting after another product read", () => {
+    const first = normalizeOzonProductContent({
+      store: { id: "store_1", name: "Default Ozon Store" },
+      offerId: "SKU-A",
+      capturedAt: "2026-08-31T00:00:00.000Z",
+      info: { product_id: 1, offer_id: "SKU-A", name: "Первый товар" },
+      stocks: [],
+    });
+    const second = normalizeOzonProductContent({
+      store: { id: "store_1", name: "Default Ozon Store" },
+      offerId: "SKU-B",
+      capturedAt: "2026-08-31T00:01:00.000Z",
+      info: { product_id: 2, offer_id: "SKU-B", name: "Второй товар" },
+      stocks: [],
+    });
+
+    const readProducts = new Map([
+      [first.offerId, first],
+      [second.offerId, second],
+    ]);
+
+    expect(productContentForDraft(readProducts, "SKU-A")).toBe(first);
   });
 });
 
@@ -138,10 +168,33 @@ describe("content agent tool enforcement helpers", () => {
       name: "Мужское летнее поло с абстрактно-геометрическим принтом, облегающего кроя",
     });
 
+    expect(suggestion).not.toBeNull();
+    if (!suggestion) throw new Error("expected fallback suggestion");
     expect(suggestion.field).toBe("title");
     expect(suggestion.current).toContain("облегающего кроя");
     expect(suggestion.suggestedRu).toContain("облегающий крой");
     expect(suggestion.sourceTag).toBe("自家信息优化");
+  });
+
+  it("does not create a fallback draft when the title would stay unchanged", () => {
+    expect(fallbackContentDraftSuggestion({
+      offerId: "SKU-UNCHANGED",
+      name: "Мужское классическое поло",
+    })).toBeNull();
+  });
+
+  it("builds model context from the newest messages in chronological order", () => {
+    const history = Array.from({ length: 12 }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      content: `message-${index + 1}`,
+    }));
+
+    const input = buildAgentInput("latest-request", history, "store-context");
+
+    expect(input).toContain("message-1");
+    expect(input).toContain("message-8");
+    expect(input).not.toContain("message-9");
+    expect(input.indexOf("message-8")).toBeLessThan(input.indexOf("message-1"));
   });
 
   it("refreshes Tavily evidence only when the user explicitly requests it", () => {
@@ -155,7 +208,7 @@ describe("content agent tool enforcement helpers", () => {
     expect(competitorsPerCategoryFromPrompt("分析五个同类竞品")).toBe(5);
     expect(competitorsPerCategoryFromPrompt("每个类目 7 个")).toBe(7);
     expect(competitorsPerCategoryFromPrompt("5个")).toBe(5);
-    expect(competitorsPerCategoryFromPrompt("分析店铺竞品")).toBeNull();
+    expect(competitorsPerCategoryFromPrompt("分析店铺竞品")).toBe(1);
   });
 
   it("requires a store snapshot for own-store data questions", () => {
@@ -178,6 +231,17 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("给我的店铺做一次完整诊断", null)).toBe(
       "diagnose_ozon_store",
     );
+    expect(shouldRunCompetitorAnalysisForDiagnosis("给我的店铺做一次完整诊断")).toBe(false);
+    expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBeNull();
+    expect(shouldCreateFallbackContentDraft("给我的店铺做一次完整诊断", null)).toBe(false);
+    expect(requiredOzonToolsForPrompt("给我的店铺做一次完整诊断", null)).toEqual([
+      "diagnose_ozon_store",
+      "record_diagnosis_findings",
+    ]);
+  });
+
+  it("uses store diagnosis to pick a product when content optimization has no offerId", () => {
+    expect(requiredOzonToolForPrompt("内容优化", null)).toBe("diagnose_ozon_store");
   });
 
   it("requires competitor evidence for competitor analysis", () => {
@@ -187,7 +251,7 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("根据我的店铺商品做一个竞品分析，分析5个商品数据", null)).toBe(
       "analyze_ozon_competitors",
     );
-    expect(requiredOzonToolForPrompt("分析店铺竞品", null)).toBeNull();
+    expect(requiredOzonToolForPrompt("分析店铺竞品", null)).toBe("analyze_ozon_competitors");
   });
 
   it("reuses saved competitor evidence without forcing a fresh crawl", () => {
@@ -284,5 +348,50 @@ describe("content agent tool enforcement helpers", () => {
       analyzedProductCount: 87,
       competitorCount: 20,
     });
+  });
+
+  it("formats category experience with Chinese translations after Russian text", () => {
+    const summary = categoryExperienceSummary([{
+      kind: "category_attribute_playbook",
+      schemaVersion: 1,
+      categoryKey: "200000933:93194",
+      descriptionCategoryId: 200000933,
+      typeId: 93194,
+      categoryName: "Поло",
+      sampleSize: 5,
+      capturedAt: "2026-09-17T00:00:00.000Z",
+      attributes: [
+        {
+          competitorNameRu: "Сезон",
+          ozonAttributeId: 4495,
+          ozonNameRu: "Сезон",
+          required: false,
+          dictionaryId: 1,
+          coverageCount: 5,
+          coverageRate: 1,
+          mappingStatus: "EXACT",
+          commonValues: [{ value: "На любой сезон", count: 5, rate: 1, dictionaryValueId: 1 }],
+          evidenceUrls: ["https://www.ozon.ru/product/1/"],
+        },
+        {
+          competitorNameRu: "Тип",
+          ozonAttributeId: 8229,
+          ozonNameRu: "Тип",
+          required: true,
+          dictionaryId: 2,
+          coverageCount: 5,
+          coverageRate: 1,
+          mappingStatus: "EXACT",
+          commonValues: [{ value: "Поло", count: 5, rate: 1, dictionaryValueId: 2 }],
+          evidenceUrls: ["https://www.ozon.ru/product/2/"],
+        },
+      ],
+      descriptionPatterns: { availableCount: 0, averageLength: 0, samples: [] },
+    }]);
+
+    expect(summary).toContain("Поло（Polo衫）");
+    expect(summary).toContain("Сезон（季节）");
+    expect(summary).toContain("На любой сезон（四季通用）");
+    expect(summary).toContain("Тип（商品类型）");
   });
 });

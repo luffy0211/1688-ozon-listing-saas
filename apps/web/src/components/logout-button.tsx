@@ -2,10 +2,10 @@
 
 import { LogOut } from "lucide-react";
 
-export function LogoutButton() {
+export function LogoutButton({ redirectTo = "/login" }: { redirectTo?: string }) {
   async function logout() {
     await fetch("/api/v1/auth/logout", { method: "POST" });
-    window.location.href = "/login";
+    window.location.href = redirectTo;
   }
 
   return (

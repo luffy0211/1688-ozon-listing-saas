@@ -160,17 +160,26 @@ function normalizeProducts(
       const base = listed.find((item) => productKey(item) === key);
       const detail = detailByKey.get(key);
       const stockItem = stockByKey.get(key);
-      const stock = (stockItem?.stocks ?? []).reduce((sum, s) => sum + (s.present ?? 0), 0);
-      const reservedStock = (stockItem?.stocks ?? []).reduce((sum, s) => sum + (s.reserved ?? 0), 0);
+      const stock = stockItem
+        ? (stockItem.stocks ?? []).reduce((sum, s) => sum + (s.present ?? 0), 0)
+        : null;
+      const reservedStock = stockItem
+        ? (stockItem.stocks ?? []).reduce((sum, s) => sum + (s.reserved ?? 0), 0)
+        : null;
       const status = detail?.status?.state_name ?? detail?.status?.state ?? detail?.status?.status ?? base?.visibility ?? null;
       const archived = Boolean(detail?.archived ?? base?.archived);
-      const visible = Boolean(detail?.visible ?? base?.visibility === "VISIBLE");
+      const visible = typeof detail?.visible === "boolean"
+        ? detail.visible
+        : typeof base?.visibility === "string"
+          ? base.visibility === "VISIBLE"
+          : null;
 
       return {
         productId: key,
         offerId: detail?.offer_id ?? stockItem?.offer_id ?? base?.offer_id ?? key,
         name: detail?.name ?? null,
         status,
+        platformStatus: detail?.status ?? (base?.visibility ? { visibility: base.visibility } : null),
         visible,
         archived,
         stock,
@@ -184,7 +193,7 @@ function normalizeProducts(
         typeId: detail?.type_id ?? null,
       };
     })
-    .sort((a, b) => a.stock - b.stock);
+    .sort((a, b) => (a.stock ?? Number.POSITIVE_INFINITY) - (b.stock ?? Number.POSITIVE_INFINITY));
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -211,7 +220,7 @@ async function optionalOzonCall<T>(
   try {
     return await call;
   } catch (error) {
-    warnings.push(`${label} 同步失败：${warningMessage(error)}`);
+    warnings.push(`${label}同步失败：${warningMessage(error)}`);
     return fallback;
   }
 }
@@ -225,20 +234,22 @@ export async function getOzonAnalyticsSummary(params: {
   const productList = await params.client.listProducts(1000);
   const productIds = productList.items
     .map((item) => toId(item.product_id))
-    .filter(Boolean)
-    .slice(0, 1000);
-  const offerIds = productList.items
+    .filter(Boolean);
+  const offerIdsWithoutProductId = productList.items
+    .filter((item) => !toId(item.product_id))
     .map((item) => toId(item.offer_id))
-    .filter(Boolean)
-    .slice(0, 1000);
+    .filter(Boolean);
 
-  const detailChunks = productIds.length > 0 ? chunk(productIds, 100) : [];
+  const detailRequests = [
+    ...chunk(productIds, 100).map((ids) => ({ productIds: ids })),
+    ...chunk(offerIdsWithoutProductId, 100).map((ids) => ({ offerIds: ids })),
+  ];
   const details = (
     await Promise.all(
-      detailChunks.map((ids) =>
+      detailRequests.map((request) =>
         optionalOzonCall(
           "商品详情",
-          params.client.getProductInfoList({ productIds: ids }),
+          params.client.getProductInfoList(request),
           [],
           warnings,
         ),
@@ -246,16 +257,17 @@ export async function getOzonAnalyticsSummary(params: {
     )
   ).flat();
 
-  const stocks = await optionalOzonCall(
-    "库存",
-    params.client.getProductStocks({
-      productIds,
-      offerIds,
-      limit: Math.max(productIds.length || offerIds.length, 1),
-    }),
-    [],
-    warnings,
-  );
+  const stockRequests = [
+    ...chunk(productIds, 1000).map((ids) => ({ productIds: ids, limit: ids.length })),
+    ...chunk(offerIdsWithoutProductId, 1000).map((ids) => ({ offerIds: ids, limit: ids.length })),
+  ];
+  const stocks = (
+    await Promise.all(
+      stockRequests.map((request) =>
+        optionalOzonCall("库存", params.client.getProductStocks(request), [], warnings),
+      ),
+    )
+  ).flat();
 
   const [fbsPostings, fboPostings] = await Promise.all([
     optionalOzonCall(
@@ -274,13 +286,21 @@ export async function getOzonAnalyticsSummary(params: {
 
   const products = normalizeProducts(productList.items, details, stocks);
   const orderSummary = summarizeOrders(params.since, params.to, fbsPostings, fboPostings);
+  const visibilityComplete = products.every((product) => product.visible !== null);
+  const stockComplete = products.every((product) => product.stock !== null);
 
   return {
     productCount: productList.total ?? products.length,
-    visibleProductCount: products.filter((p) => p.visible && !p.archived).length,
+    visibleProductCount: visibilityComplete
+      ? products.filter((p) => p.visible && !p.archived).length
+      : null,
     archivedProductCount: products.filter((p) => p.archived).length,
-    totalStock: products.reduce((sum, p) => sum + p.stock, 0),
-    lowStockCount: products.filter((p) => p.stock <= LOW_STOCK_THRESHOLD).length,
+    totalStock: stockComplete
+      ? products.reduce((sum, p) => sum + (p.stock ?? 0), 0)
+      : null,
+    lowStockCount: stockComplete
+      ? products.filter((p) => (p.stock ?? 0) <= LOW_STOCK_THRESHOLD).length
+      : null,
     fbsOrderCount: fbsPostings.length,
     fboOrderCount: fboPostings.length,
     pendingShipmentCount: orderSummary.pendingShipmentCount,

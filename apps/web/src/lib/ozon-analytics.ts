@@ -25,10 +25,10 @@ export type OzonAnalyticsView = {
     periodFrom: string;
     periodTo: string;
     productCount: number;
-    visibleProductCount: number;
+    visibleProductCount: number | null;
     archivedProductCount: number;
-    totalStock: number;
-    lowStockCount: number;
+    totalStock: number | null;
+    lowStockCount: number | null;
     fbsOrderCount: number;
     fboOrderCount: number;
     pendingShipmentCount: number;
@@ -49,10 +49,10 @@ export type OzonAnalyticsView = {
     offerId: string;
     name: string | null;
     status: string | null;
-    visible: boolean;
+    visible: boolean | null;
     archived: boolean;
-    stock: number;
-    reservedStock: number;
+    stock: number | null;
+    reservedStock: number | null;
     priceRub: string | null;
     imageUrl: string | null;
     syncedAt: string;
@@ -83,6 +83,21 @@ function assertOzonClientId(clientId: string) {
   if (!/^[1-9]\d*$/.test(clientId.trim())) {
     throw new Error("invalid_ozon_client_id");
   }
+}
+
+function optionalStoreId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed && !["null", "undefined"].includes(trimmed.toLowerCase()) ? trimmed : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function nullableNumber(value: unknown, fallback: number) {
+  return value === null ? null : typeof value === "number" ? value : fallback;
 }
 
 export function formatOzonSyncError(error: unknown): OzonSyncErrorView {
@@ -183,13 +198,14 @@ export async function getOzonAnalyticsView(params: {
   tenantId: string;
   storeId?: string | null;
 }): Promise<OzonAnalyticsView> {
+  const requestedStoreId = optionalStoreId(params.storeId);
   const stores = await prisma.store.findMany({
     where: { tenantId: params.tenantId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
     select: { id: true, name: true, isDefault: true },
   });
-  const store = params.storeId
-    ? stores.find((item) => item.id === params.storeId) ?? null
+  const store = requestedStoreId
+    ? stores.find((item) => item.id === requestedStoreId) ?? null
     : stores[0] ?? null;
 
   const [snapshot, products, collected, productPool, drafts, compiledDrafts, submittedRuns] = await Promise.all([
@@ -223,10 +239,13 @@ export async function getOzonAnalyticsView(params: {
           periodFrom: snapshot.periodFrom.toISOString(),
           periodTo: snapshot.periodTo.toISOString(),
           productCount: snapshot.productCount,
-          visibleProductCount: snapshot.visibleProductCount,
+          visibleProductCount: nullableNumber(
+            asRecord(snapshot.rawJson).visibleProductCount,
+            snapshot.visibleProductCount,
+          ),
           archivedProductCount: snapshot.archivedProductCount,
-          totalStock: snapshot.totalStock,
-          lowStockCount: snapshot.lowStockCount,
+          totalStock: nullableNumber(asRecord(snapshot.rawJson).totalStock, snapshot.totalStock),
+          lowStockCount: nullableNumber(asRecord(snapshot.rawJson).lowStockCount, snapshot.lowStockCount),
           fbsOrderCount: snapshot.fbsOrderCount,
           fboOrderCount: snapshot.fboOrderCount,
           pendingShipmentCount: snapshot.pendingShipmentCount,
@@ -243,10 +262,10 @@ export async function getOzonAnalyticsView(params: {
       offerId: product.offerId,
       name: product.name,
       status: product.status,
-      visible: product.visible,
+      visible: asRecord(product.rawJson).visible === null ? null : product.visible,
       archived: product.archived,
-      stock: product.stock,
-      reservedStock: product.reservedStock,
+      stock: asRecord(product.rawJson).stock === null ? null : product.stock,
+      reservedStock: asRecord(product.rawJson).reservedStock === null ? null : product.reservedStock,
       priceRub: product.priceRub?.toString() ?? null,
       imageUrl: product.imageUrl,
       syncedAt: product.syncedAt.toISOString(),
@@ -266,10 +285,11 @@ export async function syncOzonAnalytics(params: {
   userId?: string;
   storeId?: string | null;
 }) {
+  const requestedStoreId = optionalStoreId(params.storeId);
   const store = await prisma.store.findFirst({
     where: {
       tenantId: params.tenantId,
-      ...(params.storeId ? { id: params.storeId } : {}),
+      ...(requestedStoreId ? { id: requestedStoreId } : {}),
     },
     orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
   });
@@ -343,10 +363,10 @@ async function saveOzonAnalyticsSnapshot(params: {
             productId: product.productId,
             name: product.name,
             status: product.status,
-            visible: product.visible,
+            ...(product.visible === null ? {} : { visible: product.visible }),
             archived: product.archived,
-            stock: product.stock,
-            reservedStock: product.reservedStock,
+            ...(product.stock === null ? {} : { stock: product.stock }),
+            ...(product.reservedStock === null ? {} : { reservedStock: product.reservedStock }),
             priceRub: product.priceRub == null ? null : new Prisma.Decimal(product.priceRub),
             imageUrl: product.imageUrl,
             rawJson: product as never,
@@ -359,10 +379,10 @@ async function saveOzonAnalyticsSnapshot(params: {
             offerId: product.offerId,
             name: product.name,
             status: product.status,
-            visible: product.visible,
+            visible: product.visible ?? false,
             archived: product.archived,
-            stock: product.stock,
-            reservedStock: product.reservedStock,
+            stock: product.stock ?? 0,
+            reservedStock: product.reservedStock ?? 0,
             priceRub: product.priceRub == null ? null : new Prisma.Decimal(product.priceRub),
             imageUrl: product.imageUrl,
             rawJson: product as never,
@@ -388,10 +408,10 @@ async function saveOzonAnalyticsSnapshot(params: {
       periodFrom: params.periodFrom,
       periodTo: params.periodTo,
       productCount: params.summary.productCount,
-      visibleProductCount: params.summary.visibleProductCount,
+      visibleProductCount: params.summary.visibleProductCount ?? 0,
       archivedProductCount: params.summary.archivedProductCount,
-      totalStock: params.summary.totalStock,
-      lowStockCount: params.summary.lowStockCount,
+      totalStock: params.summary.totalStock ?? 0,
+      lowStockCount: params.summary.lowStockCount ?? 0,
       fbsOrderCount: params.summary.fbsOrderCount,
       fboOrderCount: params.summary.fboOrderCount,
       pendingShipmentCount: params.summary.pendingShipmentCount,

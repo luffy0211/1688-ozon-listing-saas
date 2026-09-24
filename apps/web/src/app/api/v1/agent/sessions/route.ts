@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   if (!session.tenantId) return forbidden();
 
   const sessions = await prisma.agentSession.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, status: "OPEN" },
     orderBy: { updatedAt: "desc" },
     take: 30,
     include: {

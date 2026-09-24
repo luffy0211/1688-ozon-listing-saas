@@ -1,5 +1,4 @@
 import { Coins, History, Users } from "lucide-react";
-import { requireAdmin } from "@/lib/auth";
 import { getAdminCreditOverview } from "@/lib/credits";
 import { AdminCreditAdjuster } from "@/components/admin-credit-adjuster";
 import { Badge, EmptyState, MetricCard, PageHeader, Table } from "@/components/ui";
@@ -17,7 +16,6 @@ function formatDelta(delta: number) {
 }
 
 export default async function AdminCreditsPage() {
-  await requireAdmin();
   const { tenants, transactions } = await getAdminCreditOverview();
   const tenantRows = tenants.map((tenant) => ({
     id: tenant.id,
