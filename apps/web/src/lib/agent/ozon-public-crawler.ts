@@ -31,6 +31,10 @@ export type OzonCompetitorTarget = {
   title: string;
   publicSku: string | null;
   imageUrl?: string | null;
+  imageUrls?: string[];
+  imageReadState?: "available" | "missing" | "read_failed" | "not_read";
+  description?: string | null;
+  descriptionReadState?: "available" | "missing" | "read_failed" | "not_read";
   priceRub?: number | null;
   quantity: number;
   revenueRub: number;
@@ -58,7 +62,10 @@ export function ozonCdnImageUrl(value: unknown): string | null {
 
 export function ownOzonProduct(target: OzonCompetitorTarget): OzonPublicProduct {
   const sku = target.publicSku ?? target.offerId;
-  const imageUrl = ozonCdnImageUrl(target.imageUrl);
+  const imageUrls = [...new Set([
+    ...(target.imageUrls ?? []),
+    ...(target.imageUrl ? [target.imageUrl] : []),
+  ].flatMap((value) => ozonCdnImageUrl(value) ?? []))];
   return {
     sku,
     url: target.publicSku ? `https://www.ozon.ru/product/${target.publicSku}/` : "",
@@ -68,9 +75,9 @@ export function ownOzonProduct(target: OzonCompetitorTarget): OzonPublicProduct 
     rating: null,
     reviewCount: null,
     sellerName: null,
-    imageUrls: imageUrl ? [imageUrl] : [],
+    imageUrls,
     attributes: {},
-    description: null,
+    description: target.description?.trim() || null,
     reviews: [],
   };
 }

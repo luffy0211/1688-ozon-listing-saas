@@ -21,12 +21,17 @@ function formatNumber(value: number) {
 }
 
 function formatRub(value: string | number | null | undefined) {
-  const amount = Number(value ?? 0);
+  if (value == null) return "暂未获取";
+  const amount = Number(value);
   return new Intl.NumberFormat("ru-RU", {
     style: "currency",
     currency: "RUB",
     maximumFractionDigits: 0,
   }).format(Number.isFinite(amount) ? amount : 0);
+}
+
+function metricNumber(value: number | null | undefined) {
+  return value == null ? "暂未获取" : formatNumber(value);
 }
 
 function formatDateTime(value?: string | null) {
@@ -59,6 +64,14 @@ export default async function AnalyticsPage(
   const riskyProducts = view.products.filter((product) =>
     product.stock !== null && product.stock <= 5,
   ).slice(0, 20);
+  const orderCount = snapshot?.fbsOrderCount != null && snapshot.fboOrderCount != null
+    ? snapshot.fbsOrderCount + snapshot.fboOrderCount
+    : null;
+  const orderCoverage = snapshot?.orderDataStatus.state === "partial"
+    ? "订单数据仅覆盖读取成功的渠道"
+    : snapshot?.orderDataStatus.state === "unavailable" || snapshot?.orderDataStatus.state === "unknown"
+      ? "订单数据暂未获取"
+      : "平台回款优先，缺失时使用订单售价";
 
   return (
     <div className="space-y-6">
@@ -107,21 +120,21 @@ export default async function AnalyticsPage(
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard title="Ozon 商品" value={formatNumber(snapshot?.productCount ?? 0)} description={`最后同步：${formatDateTime(snapshot?.syncedAt)}`} icon={<Boxes className="h-4 w-4" />} tone="blue" />
-        <MetricCard title="可售商品" value={formatNumber(snapshot?.visibleProductCount ?? 0)} description={`已归档：${formatNumber(snapshot?.archivedProductCount ?? 0)}`} icon={<CheckCircle2 className="h-4 w-4" />} tone="green" />
-        <MetricCard title="总库存" value={formatNumber(snapshot?.totalStock ?? 0)} description={`低库存：${formatNumber(snapshot?.lowStockCount ?? 0)}`} icon={<Warehouse className="h-4 w-4" />} tone={(snapshot?.lowStockCount ?? 0) > 0 ? "amber" : "gray"} />
-        <MetricCard title="近 7 天销售额" value={formatRub(snapshot?.grossRevenueRub)} description={`${formatNumber((snapshot?.fbsOrderCount ?? 0) + (snapshot?.fboOrderCount ?? 0))} 个订单`} icon={<CircleDollarSign className="h-4 w-4" />} tone="violet" />
+        <MetricCard title="可售商品" value={metricNumber(snapshot?.visibleProductCount)} description={`已归档：${formatNumber(snapshot?.archivedProductCount ?? 0)}`} icon={<CheckCircle2 className="h-4 w-4" />} tone="green" />
+        <MetricCard title="总库存" value={metricNumber(snapshot?.totalStock)} description={`低库存：${metricNumber(snapshot?.lowStockCount)}`} icon={<Warehouse className="h-4 w-4" />} tone={(snapshot?.lowStockCount ?? 0) > 0 ? "amber" : "gray"} />
+        <MetricCard title="近 7 天订单金额" value={formatRub(snapshot?.grossRevenueRub)} description={orderCount === null ? orderCoverage : `${formatNumber(orderCount)} 个订单 · ${orderCoverage}`} icon={<CircleDollarSign className="h-4 w-4" />} tone="violet" />
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <MetricCard title="FBS 订单" value={formatNumber(snapshot?.fbsOrderCount ?? 0)} description="近 7 天自配送订单" icon={<ShoppingCart className="h-4 w-4" />} tone="blue" />
-        <MetricCard title="FBO 订单" value={formatNumber(snapshot?.fboOrderCount ?? 0)} description="近 7 天平台仓订单" icon={<PackageOpen className="h-4 w-4" />} tone="green" />
-        <MetricCard title="待处理订单" value={formatNumber(snapshot?.pendingShipmentCount ?? 0)} description={`取消/异常：${formatNumber(snapshot?.cancelledOrderCount ?? 0)}`} icon={<AlertTriangle className="h-4 w-4" />} tone={(snapshot?.pendingShipmentCount ?? 0) > 0 ? "amber" : "gray"} />
+        <MetricCard title="FBS 订单" value={metricNumber(snapshot?.fbsOrderCount)} description="近 7 天自配送订单" icon={<ShoppingCart className="h-4 w-4" />} tone="blue" />
+        <MetricCard title="FBO 订单" value={metricNumber(snapshot?.fboOrderCount)} description="近 7 天平台仓订单" icon={<PackageOpen className="h-4 w-4" />} tone="green" />
+        <MetricCard title="待处理订单" value={metricNumber(snapshot?.pendingShipmentCount)} description={`取消/异常：${metricNumber(snapshot?.cancelledOrderCount)}`} icon={<AlertTriangle className="h-4 w-4" />} tone={(snapshot?.pendingShipmentCount ?? 0) > 0 ? "amber" : "gray"} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
-          <SectionHeader title="近 7 天订单趋势" description="按 Ozon FBS / FBO 订单创建时间统计。" />
-          {snapshot?.dailyOrders.length ? (
+          <SectionHeader title="近 7 天订单趋势" description={`按 Ozon FBS / FBO 订单创建时间统计。${orderCoverage}`} />
+          {snapshot?.orderDataStatus.state === "complete" && snapshot.dailyOrders.length ? (
             <div className="space-y-3">
               {snapshot.dailyOrders.map((item) => {
                 const total = item.fbs + item.fbo;
@@ -137,7 +150,10 @@ export default async function AnalyticsPage(
               })}
             </div>
           ) : (
-            <EmptyState title="暂无订单趋势" description="同步成功后会显示最近 7 天订单变化。" />
+            <EmptyState
+              title={snapshot?.orderDataStatus.state === "complete" ? "本期没有订单" : "订单趋势暂未获取"}
+              description={snapshot?.orderDataStatus.state === "complete" ? "当前周期没有订单记录。" : orderCoverage}
+            />
           )}
         </Card>
 
@@ -168,9 +184,12 @@ export default async function AnalyticsPage(
       </div>
 
       <Card>
-        <SectionHeader title="近 7 天热销商品" description="按 Ozon 订单商品数量排序，优先看能补货和能复投的款。" />
+        <SectionHeader
+          title={snapshot?.orderDataStatus.state === "partial" ? "读取成功渠道的近 7 天订单商品" : "近 7 天订单商品"}
+          description={`按 Ozon 订单商品件数排序。${orderCoverage}`}
+        />
         {snapshot?.topProducts.length ? (
-          <Table head={["商品", "销量", "销售额"]}>
+          <Table head={["商品", "订单件数", "订单金额"]}>
             {snapshot.topProducts.map((product) => (
               <tr key={product.offerId} className="hover:bg-gray-50">
                 <td className="px-4 py-3">
@@ -185,7 +204,10 @@ export default async function AnalyticsPage(
             ))}
           </Table>
         ) : (
-          <EmptyState title="暂无热销商品" description="同步到近 7 天订单后会显示商品销量排行。" />
+          <EmptyState
+            title={snapshot?.orderDataStatus.state === "complete" ? "本期没有订单商品" : "订单商品暂未获取"}
+            description={snapshot?.orderDataStatus.state === "complete" ? "当前周期没有订单商品记录。" : orderCoverage}
+          />
         )}
       </Card>
 

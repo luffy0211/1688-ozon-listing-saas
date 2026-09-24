@@ -42,9 +42,9 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
   cancelledOrderCount: 1,
   grossRevenueRub: 10_000,
   orderDataStatus: {
-    state: "complete",
-    fbs: { state: "complete" },
-    fbo: { state: "complete" },
+    state: "complete" as const,
+    fbs: { state: "complete" as const },
+    fbo: { state: "complete" as const },
   },
   dailyOrders: [
     { date: "2026-09-01", fbs: 2, fbo: 1 },

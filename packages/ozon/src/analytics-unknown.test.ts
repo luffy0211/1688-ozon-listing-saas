@@ -87,6 +87,6 @@ describe("Ozon analytics data completeness", () => {
     expect(summary.pendingShipmentCount).toBeNull();
     expect(summary.cancelledOrderCount).toBeNull();
     expect(summary.grossRevenueRub).toBeNull();
-    expect(summary.orderDataStatus.state).toBe("unavailable");
+    expect(summary.orderDataStatus!.state).toBe("unavailable");
   });
 });

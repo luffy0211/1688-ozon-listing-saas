@@ -185,4 +185,24 @@ describe("agent insight presentation", () => {
       "/api/v1/image-proxy?url=https%3A%2F%2Fir.ozone.ru%2Fs3%2Fmultimedia-competitor.jpg",
     );
   });
+
+  it("shows unread own content as unavailable instead of claiming it is empty", () => {
+    const source = structuredClone(competitorSource);
+    const sample = (source.contentDiagnosis as { samples: Array<Record<string, unknown>> }).samples[0]!;
+    sample.own = { title: "自家商品", imageUrl: null };
+    sample.comparison = {
+      mainImage: { ownImageCount: 0, ownReadState: "read_failed" },
+      description: { ownAvailable: false, ownReadState: "read_failed", competitorAvailableCount: 0 },
+    };
+
+    const html = renderToStaticMarkup(createElement(AgentInsightPanel, {
+      sources: [source],
+      requestPrompt: "分析同类竞品",
+    }));
+
+    expect(html).toContain("图片暂未获取");
+    expect(html).toContain("暂未获取简介");
+    expect(html).not.toContain("自家无图");
+    expect(html).not.toContain("简介为空");
+  });
 });
