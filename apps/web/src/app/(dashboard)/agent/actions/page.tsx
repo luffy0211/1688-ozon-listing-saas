@@ -27,10 +27,12 @@ export default async function AgentActionsPage() {
     riskLevel: action.riskLevel,
     title: action.title,
     rationale: action.rationale,
+    storeId: action.storeId,
     offerId: action.offerId,
     productId: action.productId,
     error: action.error,
     createdAt: action.createdAt.toISOString(),
+    updatedAt: action.updatedAt.toISOString(),
   }));
 
   return (

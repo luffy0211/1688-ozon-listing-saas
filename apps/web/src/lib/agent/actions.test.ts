@@ -59,8 +59,11 @@ vi.mock("@saas/ozon", () => ({
 }));
 
 import {
+  approveAgentAction,
+  confirmContentDraftAction,
   contentDraftImportPayload,
   executeApprovedAgentAction,
+  rejectAgentAction,
   validateCompetitorBatchPayload,
 } from "./actions";
 
@@ -1082,5 +1085,146 @@ describe("executeApprovedAgentAction", () => {
         error: expect.stringContaining("promotion_all_products_rejected"),
       },
     });
+  });
+});
+
+describe("agent action state transitions", () => {
+  const pendingAction = {
+    id: "action-concurrent",
+    tenantId: "tenant-1",
+    storeId: "store-1",
+    type: "CONTENT_DRAFT",
+    status: "PENDING_APPROVAL",
+    updatedAt: new Date("2026-09-24T12:00:00.000Z"),
+  };
+
+  it("allows only one concurrent approval transition and audit", async () => {
+    prisma.agentAction.findFirst
+      .mockResolvedValueOnce(pendingAction)
+      .mockResolvedValueOnce(pendingAction)
+      .mockResolvedValue({ ...pendingAction, status: "APPROVED" });
+    prisma.agentAction.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    prisma.agentAction.update.mockResolvedValue({ ...pendingAction, status: "APPROVED" });
+
+    await Promise.all([
+      approveAgentAction({
+        tenantId: "tenant-1",
+        userId: "user-1",
+        actionId: pendingAction.id,
+        expectedVersion: pendingAction.updatedAt.toISOString(),
+        expectedStoreId: pendingAction.storeId,
+      }),
+      approveAgentAction({
+        tenantId: "tenant-1",
+        userId: "user-1",
+        actionId: pendingAction.id,
+        expectedVersion: pendingAction.updatedAt.toISOString(),
+        expectedStoreId: pendingAction.storeId,
+      }),
+    ]);
+
+    expect(prisma.agentAction.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.agentAction.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reject an action after execution has claimed it", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      ...pendingAction,
+      status: "BLOCKED",
+      error: "execution_in_progress",
+    });
+
+    const result = await rejectAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: pendingAction.id,
+      reason: "too late",
+      expectedVersion: pendingAction.updatedAt.toISOString(),
+      expectedStoreId: pendingAction.storeId,
+    });
+
+    expect(result?.status).toBe("BLOCKED");
+    expect(prisma.agentAction.update).not.toHaveBeenCalled();
+    expect(prisma.agentAction.updateMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it("stores content edits and approval in one version-checked transition", async () => {
+    const action = {
+      ...pendingAction,
+      storeId: "store-1",
+      payloadJson: {
+        suggestions: [
+          { field: "title", suggestedRu: "旧标题" },
+          { field: "description", suggestedRu: "旧描述" },
+        ],
+      },
+    };
+    prisma.agentAction.findFirst
+      .mockResolvedValueOnce(action)
+      .mockResolvedValueOnce({ ...action, status: "APPROVED" });
+    prisma.agentAction.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await confirmContentDraftAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: action.id,
+      expectedVersion: action.updatedAt.toISOString(),
+      expectedStoreId: action.storeId,
+      edits: [
+        { field: "title", suggestedRu: "新标题" },
+        { field: "description", suggestedRu: "新描述" },
+      ],
+    });
+
+    expect(result?.status).toBe("APPROVED");
+    expect(prisma.agentAction.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: action.id,
+        tenantId: "tenant-1",
+        status: "PENDING_APPROVAL",
+        storeId: "store-1",
+        updatedAt: action.updatedAt,
+      }),
+      data: expect.objectContaining({
+        status: "APPROVED",
+        payloadJson: expect.objectContaining({
+          editedByUser: true,
+          suggestions: [
+            { field: "title", suggestedRu: "新标题" },
+            { field: "description", suggestedRu: "新描述" },
+          ],
+        }),
+      }),
+    });
+  });
+
+  it("rejects stale or unauthorized content edits before changing state", async () => {
+    prisma.agentAction.findFirst.mockResolvedValue({
+      ...pendingAction,
+      storeId: "store-1",
+      payloadJson: { suggestions: [{ field: "title", suggestedRu: "旧标题" }] },
+    });
+
+    await expect(confirmContentDraftAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: pendingAction.id,
+      expectedVersion: "2026-09-24T11:59:00.000Z",
+      expectedStoreId: "store-1",
+      edits: [{ field: "title", suggestedRu: "新标题" }],
+    })).rejects.toMatchObject({ code: "agent_action_stale" });
+    await expect(confirmContentDraftAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: pendingAction.id,
+      expectedVersion: pendingAction.updatedAt.toISOString(),
+      expectedStoreId: "store-1",
+      edits: [{ field: "description", suggestedRu: "越权描述" }],
+    })).rejects.toMatchObject({ code: "invalid_content_draft_edits" });
+    expect(prisma.agentAction.updateMany).not.toHaveBeenCalled();
   });
 });

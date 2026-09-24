@@ -25,6 +25,7 @@ import {
 } from "./policy";
 import { promotionPolicySchema, promotionPriceRuleSchema, promotionScopeSchema } from "./promotion-policy";
 import { activatePromotionEnrollment } from "./promotions";
+import { validateContentDraftEdits, type ContentDraftEdit } from "./content-draft-edits";
 
 export type ProposedAgentAction = {
   type: AgentActionType;
@@ -44,6 +45,17 @@ export type ProposedAgentAction = {
     [key: string]: unknown;
   };
 };
+
+export class AgentActionRequestError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details: unknown[] = [],
+    readonly status = 409,
+  ) {
+    super(message);
+  }
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -552,24 +564,61 @@ export async function createAgentActions(params: {
   return created;
 }
 
+function assertActionPreconditions(
+  action: { updatedAt: Date; storeId?: string | null },
+  expected: { expectedVersion: string; expectedStoreId: string | null },
+) {
+  if (action.updatedAt.toISOString() !== expected.expectedVersion) {
+    throw new AgentActionRequestError("agent_action_stale", "草案已变化，请刷新后核对最新内容");
+  }
+  if (action.storeId !== expected.expectedStoreId) {
+    throw new AgentActionRequestError("agent_action_store_mismatch", "草案所属店铺已变化，请刷新后重试");
+  }
+}
+
+async function latestActionOrConflict(
+  params: { tenantId: string; actionId: string },
+  expectedStatus: string,
+) {
+  const latest = await prisma.agentAction.findFirst({
+    where: { id: params.actionId, tenantId: params.tenantId },
+  });
+  if (!latest || latest.status !== expectedStatus) return latest;
+  throw new AgentActionRequestError("agent_action_stale", "草案已变化，请刷新后核对最新内容");
+}
+
 export async function approveAgentAction(params: {
   tenantId: string;
   userId: string;
   actionId: string;
+  expectedVersion: string;
+  expectedStoreId: string | null;
 }) {
   const action = await prisma.agentAction.findFirst({
     where: { id: params.actionId, tenantId: params.tenantId },
   });
   if (!action) return null;
-  if (action.status !== "PENDING_APPROVAL") return action;
+  if (action.status !== AgentActionStatus.PENDING_APPROVAL) return action;
+  assertActionPreconditions(action, params);
 
-  const updated = await prisma.agentAction.update({
-    where: { id: action.id },
+  const claimed = await prisma.agentAction.updateMany({
+    where: {
+      id: action.id,
+      tenantId: params.tenantId,
+      status: AgentActionStatus.PENDING_APPROVAL,
+      updatedAt: action.updatedAt,
+    },
     data: {
       status: AgentActionStatus.APPROVED,
       approvedBy: params.userId,
       approvedAt: new Date(),
     },
+  });
+  if (claimed.count !== 1) {
+    return latestActionOrConflict(params, AgentActionStatus.PENDING_APPROVAL);
+  }
+  const updated = await prisma.agentAction.findFirst({
+    where: { id: action.id, tenantId: params.tenantId },
   });
   await prisma.auditLog.create({
     data: {
@@ -584,28 +633,112 @@ export async function approveAgentAction(params: {
   return updated;
 }
 
-export async function rejectAgentAction(params: {
+export async function confirmContentDraftAction(params: {
   tenantId: string;
   userId: string;
   actionId: string;
-  reason?: string | null;
+  expectedVersion: string;
+  expectedStoreId: string | null;
+  edits: ContentDraftEdit[];
 }) {
   const action = await prisma.agentAction.findFirst({
     where: { id: params.actionId, tenantId: params.tenantId },
   });
   if (!action) return null;
-  if (!["PENDING_APPROVAL", "RECOMMENDED", "BLOCKED"].includes(action.status)) {
+  if (action.type !== "CONTENT_DRAFT" || action.status !== AgentActionStatus.PENDING_APPROVAL) {
     return action;
   }
+  assertActionPreconditions(action, params);
+  const payload = asRecord(action.payloadJson);
+  const current = Array.isArray(payload.suggestions) ? payload.suggestions.map(asRecord) : [];
+  const allowedFields = new Set(
+    current
+      .map((item) => stringField(item.field))
+      .filter((field): field is string => field !== null),
+  );
+  const validation = validateContentDraftEdits(params.edits, allowedFields);
+  if (!validation.success) {
+    throw new AgentActionRequestError(
+      "invalid_content_draft_edits",
+      validation.error.message,
+      [validation.error],
+      400,
+    );
+  }
+  const byField = new Map<string, string>(
+    validation.edits.map((edit) => [edit.field, edit.suggestedRu]),
+  );
+  const next = current.map((item) => ({
+    ...item,
+    suggestedRu: byField.get(String(item.field)) ?? item.suggestedRu,
+  }));
+  const claimed = await prisma.agentAction.updateMany({
+    where: {
+      id: action.id,
+      tenantId: params.tenantId,
+      type: "CONTENT_DRAFT",
+      status: AgentActionStatus.PENDING_APPROVAL,
+      storeId: action.storeId,
+      updatedAt: action.updatedAt,
+    },
+    data: {
+      payloadJson: { ...payload, suggestions: next, editedByUser: true } as never,
+      status: AgentActionStatus.APPROVED,
+      approvedBy: params.userId,
+      approvedAt: new Date(),
+    },
+  });
+  if (claimed.count !== 1) {
+    return latestActionOrConflict(params, AgentActionStatus.PENDING_APPROVAL);
+  }
+  const updated = await prisma.agentAction.findFirst({
+    where: { id: action.id, tenantId: params.tenantId },
+  });
+  await prisma.auditLog.create({
+    data: {
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action: "agent.action.approved",
+      entityType: "agent_action",
+      entityId: action.id,
+      metaJson: { type: action.type, confirmedVersion: params.expectedVersion } as never,
+    },
+  });
+  return updated;
+}
 
-  const updated = await prisma.agentAction.update({
-    where: { id: action.id },
+export async function rejectAgentAction(params: {
+  tenantId: string;
+  userId: string;
+  actionId: string;
+  reason?: string | null;
+  expectedVersion: string;
+  expectedStoreId: string | null;
+}) {
+  const action = await prisma.agentAction.findFirst({
+    where: { id: params.actionId, tenantId: params.tenantId },
+  });
+  if (!action) return null;
+  if (!["PENDING_APPROVAL", "RECOMMENDED"].includes(action.status)) return action;
+  assertActionPreconditions(action, params);
+
+  const claimed = await prisma.agentAction.updateMany({
+    where: {
+      id: action.id,
+      tenantId: params.tenantId,
+      status: action.status,
+      updatedAt: action.updatedAt,
+    },
     data: {
       status: AgentActionStatus.REJECTED,
       rejectedBy: params.userId,
       rejectedAt: new Date(),
       error: params.reason ?? action.error,
     },
+  });
+  if (claimed.count !== 1) return latestActionOrConflict(params, action.status);
+  const updated = await prisma.agentAction.findFirst({
+    where: { id: action.id, tenantId: params.tenantId },
   });
   await prisma.auditLog.create({
     data: {
