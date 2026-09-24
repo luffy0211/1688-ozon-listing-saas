@@ -13,6 +13,7 @@ import {
   summarizeCompetitorEvidence,
   summarizeProductRecommendations,
   summarizeFinanceTransactions,
+  hydrateOwnProductTargets,
   targetsWithoutCompetitorEvidence,
 } from "./operations";
 
@@ -252,7 +253,10 @@ describe("Ozon operations helpers", () => {
           comparison: expect.objectContaining({
             price: { ownRub: 999, competitorMedianRub: 1490 },
             heat: expect.objectContaining({ ownReviewCount: 2, competitorMedianReviewCount: 60 }),
-            themes: expect.objectContaining({ titleTerms: expect.any(Array) }),
+            themes: expect.objectContaining({
+              titleTerms: expect.any(Array),
+              ownTerms: expect.arrayContaining([expect.objectContaining({ term: "хлопковое" })]),
+            }),
             description: expect.objectContaining({ ownAvailable: true, competitorAvailableCount: 3 }),
           }),
         }),
@@ -334,6 +338,45 @@ describe("Ozon operations helpers", () => {
         description: "Current Seller API description",
       },
       cached: true,
+    });
+  });
+
+  it("hydrates own-product images and the 4191 description from Seller API details", async () => {
+    const client = {
+      getProductInfoList: async () => [{
+        offer_id: "offer-1",
+        name: "Current product",
+        images: [
+          "https://ir.ozone.ru/s3/current.jpg",
+          "https://ir.ozone.ru/s3/current-2.jpg",
+        ],
+      }],
+      getProductInfoAttributes: async () => [{
+        offer_id: "offer-1",
+        description: null,
+        attributes: [{ id: 4191, values: [{ value: "Description from attribute" }] }],
+      }],
+    };
+
+    const result = await hydrateOwnProductTargets(client as never, [{
+      offerId: "offer-1",
+      title: "Summary title",
+      publicSku: "100",
+      quantity: 0,
+      revenueRub: 0,
+    }]);
+
+    expect(result).toEqual({
+      targets: [expect.objectContaining({
+        title: "Current product",
+        imageUrls: [
+          "https://ir.ozone.ru/s3/current.jpg",
+          "https://ir.ozone.ru/s3/current-2.jpg",
+        ],
+        description: "Description from attribute",
+        descriptionReadState: "available",
+      })],
+      warnings: [],
     });
   });
 
