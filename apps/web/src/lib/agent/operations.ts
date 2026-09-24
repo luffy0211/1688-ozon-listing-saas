@@ -611,7 +611,6 @@ export function cachedCompetitorReport(value: unknown, minimumCompetitors = 1) {
     target ? target as OzonCompetitorTarget : null,
   );
   if (!usableCompetitors.length) return null;
-  if (!usableCompetitors.some((product) => product.imageUrls.length > 0)) return null;
   const requestedCount = Number(report.competitorsPerCategory);
   if (
     usableCompetitors.length < minimumCompetitors &&

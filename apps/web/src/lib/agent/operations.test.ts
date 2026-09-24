@@ -256,7 +256,7 @@ describe("Ozon operations helpers", () => {
     expect(diagnosis.vision.warning).toContain("视觉分析未启用");
   });
 
-  it("does not reuse incomplete competitor reports", () => {
+  it("rejects incomplete reports but reuses valid competitor evidence without images", () => {
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [] })).toBeNull();
     expect(cachedCompetitorReport({ source: "ozon_public_category", competitors: [{}] })).toBeNull();
     expect(cachedCompetitorReport({
@@ -290,7 +290,7 @@ describe("Ozon operations helpers", () => {
       category: { url: "https://www.ozon.ru/search/?text=polo" },
       ownProduct: { ...imageLessProduct, sku: "own" },
       competitors: [imageLessProduct],
-    })).toBeNull();
+    })).not.toBeNull();
   });
 
   it("rebuilds cached own-product data for the current category target", () => {
