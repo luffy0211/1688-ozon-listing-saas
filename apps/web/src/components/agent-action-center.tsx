@@ -15,6 +15,7 @@ export type AgentActionCenterItem = {
   offerId: string | null;
   productId: string | null;
   error: string | null;
+  executionPhase?: "executing" | "verification_pending" | "manual_required" | "finished" | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -30,6 +31,13 @@ function commandLabel(command: "confirm-execute" | "reject" | "execute") {
   if (command === "confirm-execute") return "确认并执行";
   if (command === "execute") return "执行";
   return "拒绝";
+}
+
+function visibleStatus(action: AgentActionCenterItem) {
+  if (action.executionPhase === "executing") return "执行中";
+  if (action.executionPhase === "verification_pending") return "等待平台核验";
+  if (action.executionPhase === "manual_required") return "需要人工处理";
+  return action.status;
 }
 
 export function AgentActionCenter({ initialActions }: { initialActions: AgentActionCenterItem[] }) {
@@ -61,6 +69,7 @@ export function AgentActionCenter({ initialActions }: { initialActions: AgentAct
               ...item,
               status: updated.status ?? item.status,
               error: updated.error ?? null,
+              executionPhase: updated.executionPhase ?? item.executionPhase,
               updatedAt: updated.updatedAt ?? item.updatedAt,
             }
           : item));
@@ -96,7 +105,7 @@ export function AgentActionCenter({ initialActions }: { initialActions: AgentAct
                 <div className="mt-1 text-xs text-gray-500">{action.type} · {new Date(action.createdAt).toLocaleString("zh-CN")}</div>
                 {action.error ? <div className="mt-1 text-xs text-red-700">{action.error}</div> : null}
               </td>
-              <td className="px-4 py-3"><Badge tone={toneForStatus(action.status)}>{action.status}</Badge></td>
+              <td className="px-4 py-3"><Badge tone={toneForStatus(action.status)}>{visibleStatus(action)}</Badge></td>
               <td className="px-4 py-3">{action.riskLevel}</td>
               <td className="max-w-xs truncate px-4 py-3 font-mono text-xs text-gray-500">
                 {action.offerId ?? action.productId ?? "-"}

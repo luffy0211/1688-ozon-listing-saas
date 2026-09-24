@@ -1,4 +1,4 @@
-import { Worker } from "bullmq";
+import { Queue, Worker } from "bullmq";
 import { CreditTransactionType, Prisma, prisma, decryptSecret } from "@saas/db";
 import {
   computeSalePriceRub,
@@ -29,6 +29,7 @@ import { generateRussianListingContent } from "./listing-content";
 import type { RussianClothingAttributes } from "./listing-content";
 import { translateWithOpenAiCompatible } from "./translate-text";
 import { matchOzonCategoryWithModel } from "./ozon-category-match";
+import { processAgentQueueJob, type AgentQueueJob } from "./agent-recovery";
 
 type JsonRecord = Record<string, unknown>;
 type ProductAssetLike = {
@@ -708,12 +709,46 @@ const worker = new Worker(
   },
 );
 
+const agentQueue = new Queue<AgentQueueJob>("ozon-agent", {
+  connection: { url: process.env.REDIS_URL ?? "redis://localhost:6379" },
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: 100,
+    removeOnFail: 500,
+  },
+});
+
+const agentWorker = new Worker<AgentQueueJob>(
+  "ozon-agent",
+  (job) => processAgentQueueJob(job.name, job.data, agentQueue),
+  {
+    connection: { url: process.env.REDIS_URL ?? "redis://localhost:6379" },
+    concurrency: 2,
+  },
+);
+
+await agentQueue.add("scan-agent-recovery", {}, {
+  jobId: "agent-recovery-scan",
+  repeat: { every: 60_000 },
+});
+await agentQueue.add("scan-agent-recovery", {}, {
+  jobId: `agent-recovery-startup-${Date.now()}`,
+});
+
 worker.on("completed", (job) => {
   console.log(`listing job completed: ${job.id}`);
 });
 
 worker.on("failed", (job, error) => {
   console.error(`listing job failed: ${job?.id}`, error);
+});
+
+agentWorker.on("completed", (job) => {
+  console.log(`agent job completed: ${job.id}`);
+});
+
+agentWorker.on("failed", (job, error) => {
+  console.error(`agent job failed: ${job?.id}`, error);
 });
 
 console.log("listing worker started");

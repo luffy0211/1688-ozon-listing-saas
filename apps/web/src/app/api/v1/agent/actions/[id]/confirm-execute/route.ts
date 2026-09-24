@@ -2,8 +2,8 @@ import type { NextRequest } from "next/server";
 import {
   approveAgentAction,
   confirmContentDraftAction,
-  executeApprovedAgentAction,
 } from "@/lib/agent/actions";
+import { enqueueAgentActionExecution } from "@/lib/agent/action-queue";
 import { validateContentDraftEdits } from "@/lib/agent/content-draft-edits";
 import { serializeAgentAction } from "@/lib/agent/runtime";
 import { fail, forbidden, notFound, ok, unauthorized } from "@/lib/api";
@@ -79,13 +79,21 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       return ok({ action: serializeAgentAction(approved) });
     }
 
-    const executed = await executeApprovedAgentAction({
-      tenantId: session.tenantId,
-      userId: session.userId,
-      actionId: params.id,
-    });
-    if (!executed) return notFound("Agent action not found");
-    return ok({ action: serializeAgentAction(executed) });
+    try {
+      await enqueueAgentActionExecution({
+        actionId: params.id,
+        tenantId: session.tenantId,
+        userId: session.userId,
+      });
+    } catch {
+      return fail(
+        "agent_action_queue_unavailable",
+        "执行队列暂时不可用，草案已保留为已批准，请稍后重试执行",
+        [],
+        503,
+      );
+    }
+    return ok({ action: serializeAgentAction(approved), queued: true });
   } catch (error) {
     return requestError(error);
   }

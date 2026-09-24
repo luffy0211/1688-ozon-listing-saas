@@ -54,6 +54,8 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     executionTrace: arrayFromRecord(toolCallsJson, "executionTrace"),
     actions: run.actions.map((action) => serializeContentAgentAction(action)),
     dataSources: dataSources.length ? dataSources : contentAgentDataSourcesFromToolCalls(toolCalls as never),
-    updatedAt: (run.finishedAt ?? run.createdAt).toISOString(),
+    updatedAt: typeof toolCallsJson.progressUpdatedAt === "string"
+      ? toolCallsJson.progressUpdatedAt
+      : (run.finishedAt ?? run.createdAt).toISOString(),
   });
 }

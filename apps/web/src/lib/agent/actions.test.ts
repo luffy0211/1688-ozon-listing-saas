@@ -27,6 +27,7 @@ const ozonClientMock = vi.hoisted(() => ({
   getProductInfoList: vi.fn(),
   getProductInfoAttributes: vi.fn(),
   getProductImportInfo: vi.fn(),
+  getProductStocks: vi.fn(),
   importProducts: vi.fn(),
   importPrices: vi.fn(),
 }));
@@ -49,7 +50,7 @@ vi.mock("@saas/db", () => ({
 }));
 
 vi.mock("./promotions", () => ({ activatePromotionEnrollment }));
-vi.mock("@/lib/credits", () => ({ consumeTenantCredits, refundTenantCredits }));
+vi.mock("../credits", () => ({ consumeTenantCredits, refundTenantCredits }));
 vi.mock("@saas/ozon", () => ({
   OzonClient: vi.fn(function OzonClient() {
     return ozonClientMock;
@@ -63,6 +64,7 @@ import {
   confirmContentDraftAction,
   contentDraftImportPayload,
   executeApprovedAgentAction,
+  recoverBlockedAgentAction,
   rejectAgentAction,
   validateCompetitorBatchPayload,
 } from "./actions";
@@ -384,7 +386,7 @@ describe("executeApprovedAgentAction", () => {
 
     expect(result?.status).toBe("FAILED");
     expect(prisma.agentAction.update).toHaveBeenCalledWith({
-      where: { id: "content-task-failed" },
+      where: { id: "content-task-failed", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: "ozon_import_task_failed:currency_differs_from_contract:Неверно указана валюта",
@@ -530,7 +532,7 @@ describe("executeApprovedAgentAction", () => {
     expect(result?.status).toBe("EXECUTED");
     expect(prisma.agentAction.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "content-timeout-applied" },
+        where: { id: "content-timeout-applied", tenantId: "tenant-1" },
         data: expect.objectContaining({
           status: "EXECUTED",
           guardrailJson: expect.objectContaining({
@@ -605,7 +607,7 @@ describe("executeApprovedAgentAction", () => {
     expect(result?.status).toBe("BLOCKED");
     expect(prisma.agentAction.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "content-partial-applied" },
+        where: { id: "content-partial-applied", tenantId: "tenant-1" },
         data: expect.objectContaining({
           status: "BLOCKED",
           error: "result_pending_verification",
@@ -676,7 +678,7 @@ describe("executeApprovedAgentAction", () => {
 
     expect(result?.status).toBe("FAILED");
     expect(prisma.agentAction.update).toHaveBeenCalledWith({
-      where: { id: "action-1" },
+      where: { id: "action-1", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: "real_ozon_submit_disabled",
@@ -729,7 +731,7 @@ describe("executeApprovedAgentAction", () => {
 
     expect(result?.status).toBe("FAILED");
     expect(prisma.agentAction.update).toHaveBeenCalledWith({
-      where: { id: "action-2" },
+      where: { id: "action-2", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: "real_ozon_submit_disabled",
@@ -772,7 +774,7 @@ describe("executeApprovedAgentAction", () => {
     expect(activatePromotionEnrollment).not.toHaveBeenCalled();
     expect(prisma.agentAction.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "policy-1" },
+        where: { id: "policy-1", tenantId: "tenant-1" },
         data: expect.objectContaining({ status: "EXECUTED" }),
       }),
     );
@@ -804,7 +806,7 @@ describe("executeApprovedAgentAction", () => {
     });
 
     expect(prisma.agentAction.update).toHaveBeenCalledWith({
-      where: { id: "policy-bad" },
+      where: { id: "policy-bad", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: "invalid_promotion_price_rule",
@@ -851,13 +853,88 @@ describe("executeApprovedAgentAction", () => {
 
     expect(result?.status).toBe("FAILED");
     expect(prisma.agentAction.update).toHaveBeenLastCalledWith({
-      where: { id: "price-rejected" },
+      where: { id: "price-rejected", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: expect.stringContaining("ozon_mutation_rejected"),
       },
     });
     expect(refundTenantCredits).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a timed-out price write pending without refunding or retrying it", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "price-timeout",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: null,
+      type: "UPDATE_PRICE",
+      status: "APPROVED",
+      payloadJson: { proposedPriceRub: 300 },
+      guardrailJson: {},
+      updatedAt: new Date("2026-09-24T12:00:00.000Z"),
+    });
+    ozonClientMock.getProductInfoList.mockResolvedValue([{ id: 1, offer_id: "SKU-1", price: "250" }]);
+    ozonClientMock.importPrices.mockRejectedValue(new Error("socket hang up"));
+    prisma.agentAction.update.mockImplementation(async ({ data }) => ({
+      id: "price-timeout",
+      type: "UPDATE_PRICE",
+      ...data,
+    }));
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "price-timeout",
+    });
+
+    expect(result?.status).toBe("BLOCKED");
+    expect(result?.error).toBe("result_pending_verification");
+    expect(refundTenantCredits).not.toHaveBeenCalled();
+    expect(ozonClientMock.importPrices).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers a stale price action by readback without repeating the write", async () => {
+    const action = {
+      id: "price-recover",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: null,
+      type: "UPDATE_PRICE",
+      status: "BLOCKED",
+      error: "execution_in_progress",
+      payloadJson: { proposedPriceRub: 300 },
+      guardrailJson: {},
+      updatedAt: new Date("2026-09-24T12:00:00.000Z"),
+    };
+    prisma.agentAction.findFirst.mockResolvedValue(action);
+    prisma.agentAction.updateMany.mockResolvedValue({ count: 1 });
+    ozonClientMock.getProductInfoList.mockResolvedValue([{ offer_id: "SKU-1", price: "300" }]);
+    prisma.agentAction.update.mockImplementation(async ({ data }) => ({ ...action, ...data }));
+
+    const result = await recoverBlockedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: action.id,
+      now: new Date("2026-09-24T12:03:00.000Z"),
+    });
+
+    expect(result?.status).toBe("EXECUTED");
+    expect(ozonClientMock.importPrices).not.toHaveBeenCalled();
+    expect(prisma.agentAction.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: "EXECUTED",
+        guardrailJson: expect.objectContaining({
+          execution: expect.objectContaining({
+            phase: "finished",
+            recovery: "readback",
+          }),
+        }),
+      }),
+    }));
   });
 
   it("keeps successful bulk price items and records rejected items as partial", async () => {
@@ -909,7 +986,7 @@ describe("executeApprovedAgentAction", () => {
 
     expect(result?.status).toBe("BLOCKED");
     expect(prisma.agentAction.update).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: { id: "bulk-price-partial" },
+      where: { id: "bulk-price-partial", tenantId: "tenant-1" },
       data: expect.objectContaining({
         status: "BLOCKED",
         error: "partial_execution",
@@ -961,7 +1038,7 @@ describe("executeApprovedAgentAction", () => {
     });
 
     expect(prisma.agentAction.update).toHaveBeenCalledWith({
-      where: { id: "policy-bad-scope" },
+      where: { id: "policy-bad-scope", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: "invalid_promotion_scope",
@@ -1079,7 +1156,7 @@ describe("executeApprovedAgentAction", () => {
     });
 
     expect(prisma.agentAction.update).toHaveBeenCalledWith({
-      where: { id: "enroll-3" },
+      where: { id: "enroll-3", tenantId: "tenant-1" },
       data: {
         status: "FAILED",
         error: expect.stringContaining("promotion_all_products_rejected"),

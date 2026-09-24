@@ -4,7 +4,7 @@ import {
   OzonClient,
   type OzonActionProduct,
 } from "@saas/ozon";
-import { env } from "@/lib/env";
+import { env } from "../env";
 import {
   calculatePromotionActionPrice,
   evaluate,

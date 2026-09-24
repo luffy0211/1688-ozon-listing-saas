@@ -39,6 +39,7 @@ import {
   preparePromotionEnrollment,
 } from "./promotions";
 import { buildAgentExecutionTrace, buildAgentPlan } from "./execution-trace";
+import { agentActionExecutionPhase } from "./action-execution-phase";
 import {
   inventoryTaskContextForStore,
   inventoryTaskContextForPrompt,
@@ -1218,6 +1219,25 @@ export async function runOzonContentAgent(params: {
       updatedAt: new Date().toISOString(),
     };
     setAgentRunProgress(snapshot);
+    void prisma.agentRun.updateMany({
+      where: {
+        id: runRecord.id,
+        tenantId: params.tenantId,
+        status: AgentRunStatus.RUNNING,
+      },
+      data: {
+        toolCallsJson: {
+          agent: "ozon_content_v1",
+          offerId,
+          toolCalls,
+          createdActionIds,
+          plan: snapshot.plan,
+          executionTrace: snapshot.executionTrace,
+          dataSources: snapshot.dataSources,
+          progressUpdatedAt: snapshot.updatedAt,
+        } as never,
+      },
+    }).catch(() => null);
     return snapshot;
   }
 
@@ -2495,6 +2515,7 @@ export function serializeContentAgentAction(action: {
     productId: action.productId,
     payload: action.payloadJson,
     guardrail: action.guardrailJson,
+    executionPhase: agentActionExecutionPhase(action),
     error: action.error,
     createdAt: action.createdAt.toISOString(),
     updatedAt: action.updatedAt.toISOString(),
