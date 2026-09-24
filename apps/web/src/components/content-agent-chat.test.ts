@@ -103,6 +103,17 @@ describe("content agent draft review", () => {
       { field: "description", suggestedRu: "有效描述" },
     ])).toBeNull();
   });
+
+  it("rejects an overlong or duplicated executable field as a whole", () => {
+    expect(validateDraftSuggestions([
+      { field: "title", suggestedRu: "有效标题" },
+      { field: "description", suggestedRu: "x".repeat(3001) },
+    ])).toBe("描述不能超过 3000 个字符");
+    expect(validateDraftSuggestions([
+      { field: "title", suggestedRu: "标题一" },
+      { field: "title", suggestedRu: "标题二" },
+    ])).toBe("标题重复提交");
+  });
 });
 
 describe("content agent command deck", () => {

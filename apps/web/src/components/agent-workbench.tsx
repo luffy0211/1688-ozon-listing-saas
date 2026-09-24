@@ -178,7 +178,13 @@ export function AgentWorkbench({
 
   async function updateAction(actionId: string, command: "approve" | "reject" | "execute") {
     try {
-      const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`);
+      const action = actions.find((item) => item.id === actionId);
+      const data = await postJson(
+        `/api/v1/agent/actions/${actionId}/${command}`,
+        action && command !== "execute"
+          ? { expectedVersion: action.updatedAt, expectedStoreId: action.storeId }
+          : {},
+      );
       setActions((current) =>
         current.map((item) => (item.id === actionId ? data.action : item)),
       );
@@ -372,7 +378,7 @@ export function AgentWorkbench({
                     </Button>
                     <Button
                       variant="outline"
-                      disabled={!["PENDING_APPROVAL", "RECOMMENDED", "BLOCKED"].includes(action.status)}
+                      disabled={!["PENDING_APPROVAL", "RECOMMENDED"].includes(action.status)}
                       onClick={() => updateAction(action.id, "reject")}
                       title="拒绝"
                     >

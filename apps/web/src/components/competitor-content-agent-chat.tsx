@@ -133,7 +133,11 @@ function ActionBubble({
   onCommand,
 }: {
   action: CompetitorChatActionView;
-  onCommand: (actionId: string, command: "approve" | "reject" | "execute") => void;
+  onCommand: (
+    actionId: string,
+    command: "approve" | "reject" | "execute",
+    payload?: unknown,
+  ) => void;
 }) {
   const suggestions = suggestionsFromPayload(action.payload);
 
@@ -182,7 +186,10 @@ function ActionBubble({
         <Button
           variant="success"
           disabled={action.status !== "PENDING_APPROVAL"}
-          onClick={() => onCommand(action.id, "approve")}
+          onClick={() => onCommand(action.id, "approve", {
+            expectedVersion: action.updatedAt,
+            expectedStoreId: action.storeId,
+          })}
           title="批准"
         >
           <Check className="h-4 w-4" aria-hidden="true" />
@@ -190,8 +197,11 @@ function ActionBubble({
         </Button>
         <Button
           variant="outline"
-          disabled={!["PENDING_APPROVAL", "RECOMMENDED", "BLOCKED"].includes(action.status)}
-          onClick={() => onCommand(action.id, "reject")}
+          disabled={!["PENDING_APPROVAL", "RECOMMENDED"].includes(action.status)}
+          onClick={() => onCommand(action.id, "reject", {
+            expectedVersion: action.updatedAt,
+            expectedStoreId: action.storeId,
+          })}
           title="拒绝"
         >
           <X className="h-4 w-4" aria-hidden="true" />
@@ -305,9 +315,13 @@ export function CompetitorContentAgentChat({
     }
   }
 
-  async function updateAction(actionId: string, command: "approve" | "reject" | "execute") {
+  async function updateAction(
+    actionId: string,
+    command: "approve" | "reject" | "execute",
+    payload: unknown = {},
+  ) {
     try {
-      const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`);
+      const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
       setMessages((current) => replaceAction(current, data.action));
     } catch (err) {
       setMessages((current) => [

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
+import { validateContentDraftEdits } from "@/lib/agent/content-draft-edits";
 import { Badge, Button, cn } from "./ui";
 
 type DraftAction = {
@@ -11,9 +12,11 @@ type DraftAction = {
   riskLevel: string;
   title: string;
   rationale: string;
+  storeId: string | null;
   offerId: string | null;
   payload: unknown;
   error: string | null;
+  updatedAt: string;
 };
 
 type DraftSuggestion = Record<string, unknown> & {
@@ -76,12 +79,8 @@ export function draftSuggestionGroups(value: unknown) {
 
 export function validateDraftSuggestions(value: unknown) {
   const { executable } = draftSuggestionGroups(value);
-  if (!executable.length) return "没有可以写入 Ozon 的标题或描述";
-  for (const item of executable) {
-    if (String(item.suggestedRu ?? "").trim()) continue;
-    return String(item.field) === "title" ? "标题不能为空" : "描述不能为空";
-  }
-  return null;
+  const validation = validateContentDraftEdits(executable);
+  return validation.success ? null : validation.error.message;
 }
 
 function fieldLabel(field: unknown) {
@@ -181,7 +180,13 @@ export function ContentDraftGroup({
       const succeeded = await onCommand(
         action.id,
         command,
-        action.status === "PENDING_APPROVAL" ? { suggestions: actionEdits } : undefined,
+        action.status === "PENDING_APPROVAL"
+          ? {
+              expectedVersion: action.updatedAt,
+              expectedStoreId: action.storeId,
+              suggestions: draftSuggestionGroups(actionEdits).executable,
+            }
+          : undefined,
       );
       if (succeeded) {
         setSelectedIds((current) => {
@@ -205,7 +210,10 @@ export function ContentDraftGroup({
   async function rejectAction(action: DraftAction) {
     setBusyIds((current) => new Set(current).add(action.id));
     try {
-      const rejected = await onCommand(action.id, "reject");
+      const rejected = await onCommand(action.id, "reject", {
+        expectedVersion: action.updatedAt,
+        expectedStoreId: action.storeId,
+      });
       if (rejected) {
         setSelectedIds((current) => {
           const next = new Set(current);

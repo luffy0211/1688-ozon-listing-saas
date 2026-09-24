@@ -11,10 +11,12 @@ export type AgentActionCenterItem = {
   riskLevel: string;
   title: string;
   rationale: string;
+  storeId: string | null;
   offerId: string | null;
   productId: string | null;
   error: string | null;
   createdAt: string;
+  updatedAt: string;
 };
 
 function toneForStatus(status: string): "gray" | "green" | "red" | "amber" | "blue" | "violet" {
@@ -39,8 +41,14 @@ export function AgentActionCenter({ initialActions }: { initialActions: AgentAct
     setBusyId(actionId);
     setMessage(null);
     try {
+      const action = actions.find((item) => item.id === actionId);
       const response = await fetch(`/api/v1/agent/actions/${actionId}/${command}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(action ? {
+          expectedVersion: action.updatedAt,
+          expectedStoreId: action.storeId,
+        } : {}),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -53,6 +61,7 @@ export function AgentActionCenter({ initialActions }: { initialActions: AgentAct
               ...item,
               status: updated.status ?? item.status,
               error: updated.error ?? null,
+              updatedAt: updated.updatedAt ?? item.updatedAt,
             }
           : item));
       }
@@ -79,7 +88,7 @@ export function AgentActionCenter({ initialActions }: { initialActions: AgentAct
         {actions.map((action) => {
           const canConfirm = action.status === "PENDING_APPROVAL";
           const canExecute = action.status === "APPROVED";
-          const canReject = action.status === "PENDING_APPROVAL" || action.status === "APPROVED";
+          const canReject = ["PENDING_APPROVAL", "RECOMMENDED"].includes(action.status);
           return (
             <tr key={action.id} className="hover:bg-gray-50">
               <td className="min-w-[280px] px-4 py-3">

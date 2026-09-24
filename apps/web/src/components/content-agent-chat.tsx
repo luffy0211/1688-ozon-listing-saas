@@ -20,6 +20,7 @@ import {
 import { ContentDraftGroup } from "./content-agent-drafts";
 import { buildPendingAgentExecutionTrace } from "@/lib/agent/execution-trace";
 import type { AgentExecutionStep as AgentTimelineStep } from "@/lib/agent/execution-trace";
+import { validateContentDraftEdits } from "@/lib/agent/content-draft-edits";
 
 type StoreOption = {
   id: string;
@@ -525,6 +526,10 @@ function ActionBubble({
   const priceRuleLabel = promotionPriceRuleLabel(payload.priceRule);
   const scopeLabel = promotionScopeLabel(payload.scope);
   const canEditContentDraft = action.type === "CONTENT_DRAFT" && action.status === "PENDING_APPROVAL";
+  const executableEdits = editableSuggestions.filter((suggestion) =>
+    ["title", "description"].includes(String(asRecord(suggestion).field ?? "")),
+  );
+  const editValidation = canEditContentDraft ? validateContentDraftEdits(executableEdits) : null;
 
   useEffect(() => {
     setEditableSuggestions(suggestions.map((suggestion) => ({
@@ -641,7 +646,12 @@ function ActionBubble({
             );
           })}
           {canEditContentDraft ? (
-            <div className="text-xs text-gray-500">确认执行会使用你当前编辑后的标题/描述；关键词建议仅保存展示，不直接写入 Ozon。</div>
+            <>
+              <div className="text-xs text-gray-500">确认执行会使用你当前编辑后的标题/描述；关键词建议仅保存展示，不直接写入 Ozon。</div>
+              {editValidation && !editValidation.success ? (
+                <div role="alert" className="text-xs font-medium text-red-600">{editValidation.error.message}</div>
+              ) : null}
+            </>
           ) : null}
         </div>
       ) : null}
@@ -689,7 +699,11 @@ function ActionBubble({
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
           variant="success"
-          disabled={action.status !== "PENDING_APPROVAL" || (isCompetitorBatch && !attributeChanges.length)}
+          disabled={
+            action.status !== "PENDING_APPROVAL" ||
+            (isCompetitorBatch && !attributeChanges.length) ||
+            Boolean(editValidation && !editValidation.success)
+          }
           onClick={() => {
             if (
               isCompetitorBatch &&
@@ -703,7 +717,11 @@ function ActionBubble({
             ) {
               return;
             }
-            onCommand(action.id, "confirm-execute", canEditContentDraft ? { suggestions: editableSuggestions } : undefined);
+            onCommand(action.id, "confirm-execute", {
+              expectedVersion: action.updatedAt,
+              expectedStoreId: action.storeId,
+              ...(canEditContentDraft ? { suggestions: executableEdits } : {}),
+            });
           }}
           title="确认并执行"
         >
@@ -712,8 +730,11 @@ function ActionBubble({
         </Button>
         <Button
           variant="outline"
-          disabled={!["PENDING_APPROVAL", "RECOMMENDED", "BLOCKED"].includes(action.status)}
-          onClick={() => onCommand(action.id, "reject")}
+          disabled={!["PENDING_APPROVAL", "RECOMMENDED"].includes(action.status)}
+          onClick={() => onCommand(action.id, "reject", {
+            expectedVersion: action.updatedAt,
+            expectedStoreId: action.storeId,
+          })}
           title="拒绝"
         >
           <X className="h-4 w-4" aria-hidden="true" />
