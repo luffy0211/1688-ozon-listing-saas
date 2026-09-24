@@ -237,7 +237,7 @@ export class OzonClient {
   async listWarehouses(): Promise<OzonWarehouse[]> {
     const res = await this.request<
       { result?: OzonWarehouse[] } | OzonWarehouse[]
-    >("/v1/warehouse/list", {});
+    >("/v2/warehouse/list", {});
     return Array.isArray(res) ? res : res.result ?? [];
   }
 

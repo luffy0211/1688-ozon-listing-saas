@@ -21,7 +21,7 @@ describe("Ozon warehouses", () => {
 
     await expect(client.listWarehouses()).resolves.toEqual(warehouses);
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://example.test/v1/warehouse/list",
+      "https://example.test/v2/warehouse/list",
       expect.objectContaining({ method: "POST" }),
     );
   });
