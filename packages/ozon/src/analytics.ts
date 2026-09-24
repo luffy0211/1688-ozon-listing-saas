@@ -179,6 +179,7 @@ function normalizeProducts(
         offerId: detail?.offer_id ?? stockItem?.offer_id ?? base?.offer_id ?? key,
         name: detail?.name ?? null,
         status,
+        platformStatus: detail?.status ?? (base?.visibility ? { visibility: base.visibility } : null),
         visible,
         archived,
         stock,

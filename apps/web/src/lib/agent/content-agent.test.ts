@@ -233,9 +233,10 @@ describe("content agent tool enforcement helpers", () => {
     );
     expect(shouldRunCompetitorAnalysisForDiagnosis("给我的店铺做一次完整诊断")).toBe(false);
     expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBeNull();
-    expect(shouldCreateFallbackContentDraft("给我的店铺做一次完整诊断", null)).toBe(true);
+    expect(shouldCreateFallbackContentDraft("给我的店铺做一次完整诊断", null)).toBe(false);
     expect(requiredOzonToolsForPrompt("给我的店铺做一次完整诊断", null)).toEqual([
       "diagnose_ozon_store",
+      "record_diagnosis_findings",
     ]);
   });
 

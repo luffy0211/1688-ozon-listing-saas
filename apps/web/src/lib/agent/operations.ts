@@ -26,6 +26,7 @@ import {
 } from "./ozon-crawler-process";
 import { searchOzonIndexedCompetitors, uniqueUsableIndexedCompetitors } from "./ozon-search-index";
 import { analyzeProductImagesWithVision } from "./image-vision";
+import { buildProductInvestigationEvidence } from "./product-investigation";
 
 type FinanceLike = Pick<
   OzonFinanceTransaction,
@@ -488,6 +489,7 @@ export async function diagnoseOzonStore(params: {
     previous,
     finance: summarizeFinanceTransactions(transactions),
   });
+  const productInvestigation = buildProductInvestigationEvidence(current, diagnosis.capturedAt);
   let ratingWarning: string | null = null;
   const skus = current.products
     .map((product) => product.publicSku)
@@ -505,6 +507,7 @@ export async function diagnoseOzonStore(params: {
   return {
     store: { id: store.id, name: store.name },
     ...diagnosis,
+    productInvestigation,
     lowStockProducts: current.products
       .filter((product) =>
         !product.archived && product.stock !== null && product.stock <= 5,

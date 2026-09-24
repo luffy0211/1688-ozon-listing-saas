@@ -122,16 +122,8 @@ export function buildAgentPlan(params: PlanParams): AgentPlanStep[] {
 
   if (requiredToolName === "diagnose_ozon_store") {
     steps.push(
-      step("diagnose-store", "DIAGNOSE_STORE", "读取并诊断店铺", "读取经营数据、低分商品和可改进项。", "diagnose_ozon_store"),
-      step(
-        "collect-competitors",
-        "COLLECT_COMPETITORS",
-        "对比同类竞品",
-        `每个类目采集 ${params.competitorsPerCategory ?? 1} 个同类竞品，分析标题、主图、价格、热度和简介。`,
-        "analyze_ozon_competitors",
-      ),
-      step("summarize-playbook", "SUMMARIZE_CATEGORY_PLAYBOOK", "总结经营差距", "把竞品表现转成自家商品的运营差距。"),
-      step("diagnose-products", "DIAGNOSE_PRODUCTS", "定位重点商品", "找出最值得先优化的商品和字段。"),
+      step("diagnose-store", "DIAGNOSE_STORE", "读取并诊断店铺", "读取经营数据、字段覆盖率和商品状态线索。", "diagnose_ozon_store"),
+      step("diagnose-products", "DIAGNOSE_PRODUCTS", "核实商品问题", "针对异常线索读取商品证据，区分已确认、待验证和数据不足。", "record_diagnosis_findings"),
       step("create-actions", "CREATE_ACTIONS", "生成优化建议", "生成待确认草案，确认前不修改 Ozon。"),
       step("wait-approval", "WAIT_FOR_APPROVAL", "等待人工确认", "确认前不会修改 Ozon。"),
     );
@@ -282,6 +274,7 @@ function mapToolToStepId(toolName: string) {
     get_ozon_store_snapshot: "read-store",
     get_ozon_product_content: "read-product",
     diagnose_ozon_store: "diagnose-store",
+    record_diagnosis_findings: "diagnose-products",
     analyze_ozon_competitors: "collect-competitors",
     list_ozon_promotions: "list-promotions",
     get_ozon_promotion_candidates: "read-candidates",
@@ -395,7 +388,7 @@ export function buildAgentExecutionTrace(params: {
       };
     }
 
-    if ((analysisStep || inferredStoreRead) && params.runStatus === "SUCCEEDED" && !reachedFailure) {
+    if (((analysisStep && !planStep.expectedTool) || inferredStoreRead) && params.runStatus === "SUCCEEDED" && !reachedFailure) {
       return {
         ...planStep,
         status: "succeeded",

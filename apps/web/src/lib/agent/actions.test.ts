@@ -342,6 +342,12 @@ describe("executeApprovedAgentAction", () => {
       total: 1,
       raw: {},
     });
+    ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
+      offer_id: "SKU-1",
+      name: "Старое название",
+      description: "Описание",
+      attributes: [{ id: 4191, values: [{ value: "Описание" }] }],
+    }]);
     prisma.agentAction.update.mockResolvedValue({
       id: "content-task-failed",
       type: "CONTENT_DRAFT",
@@ -410,6 +416,12 @@ describe("executeApprovedAgentAction", () => {
       },
     });
     ozonClientMock.importProducts.mockRejectedValue(new Error("ozon_down"));
+    ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
+      offer_id: "SKU-1",
+      name: "Старое название",
+      description: "Описание",
+      attributes: [{ id: 4191, values: [{ value: "Описание" }] }],
+    }]);
     prisma.agentAction.update.mockResolvedValue({
       id: "content-failed",
       type: "CONTENT_DRAFT",
@@ -440,6 +452,153 @@ describe("executeApprovedAgentAction", () => {
       referenceId: "content-failed",
       idempotencyKey: "refund:agent-action-execute:content-failed",
     });
+  });
+
+  it("marks timed-out content drafts executed when readback shows the approved field applied", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "content-timeout-applied",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: "5853386614",
+      type: "CONTENT_DRAFT",
+      status: "APPROVED",
+      guardrailJson: {},
+      payloadJson: {
+        suggestions: [{ field: "title", suggestedRu: "Новое название" }],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Старое название",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            currency_code: "CNY",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [{ id: 4191, values: [{ value: "Описание" }] }],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+    ozonClientMock.importProducts.mockRejectedValue(new Error("timeout"));
+    ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
+      offer_id: "SKU-1",
+      name: "Новое название",
+      description: "Описание",
+      attributes: [{ id: 4191, values: [{ value: "Описание" }] }],
+    }]);
+    prisma.agentAction.update.mockResolvedValue({
+      id: "content-timeout-applied",
+      type: "CONTENT_DRAFT",
+      status: "EXECUTED",
+    });
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "content-timeout-applied",
+    });
+
+    expect(result?.status).toBe("EXECUTED");
+    expect(prisma.agentAction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "content-timeout-applied" },
+        data: expect.objectContaining({
+          status: "EXECUTED",
+          guardrailJson: expect.objectContaining({
+            execution: expect.objectContaining({
+              recovery: "readback_after_error",
+              changedFields: ["title"],
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(refundTenantCredits).not.toHaveBeenCalled();
+  });
+
+  it("keeps partial content draft results pending without refunding successful fields", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "content-partial-applied",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: "5853386614",
+      type: "CONTENT_DRAFT",
+      status: "APPROVED",
+      guardrailJson: {},
+      payloadJson: {
+        suggestions: [
+          { field: "title", suggestedRu: "Новое название" },
+          { field: "description", suggestedRu: "Новое описание товара" },
+        ],
+        product: {
+          rawInfo: {
+            offer_id: "SKU-1",
+            name: "Старое название",
+            description: "Старое описание",
+            description_category_id: 200000933,
+            type_id: 93194,
+            price: "129.00",
+            old_price: "269.00",
+            currency_code: "CNY",
+            vat: "0",
+            images: ["https://example.com/1.jpg"],
+            attributes: [{ id: 4191, values: [{ value: "Старое описание" }] }],
+            weight: 300,
+            width: 200,
+            height: 10,
+            depth: 300,
+          },
+        },
+      },
+    });
+    ozonClientMock.importProducts.mockRejectedValue(new Error("timeout"));
+    ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
+      offer_id: "SKU-1",
+      name: "Новое название",
+      description: "Старое описание",
+      attributes: [{ id: 4191, values: [{ value: "Старое описание" }] }],
+    }]);
+    prisma.agentAction.update.mockResolvedValue({
+      id: "content-partial-applied",
+      type: "CONTENT_DRAFT",
+      status: "BLOCKED",
+      error: "result_pending_verification",
+    });
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "content-partial-applied",
+    });
+
+    expect(result?.status).toBe("BLOCKED");
+    expect(prisma.agentAction.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "content-partial-applied" },
+        data: expect.objectContaining({
+          status: "BLOCKED",
+          error: "result_pending_verification",
+          guardrailJson: expect.objectContaining({
+            execution: expect.objectContaining({
+              recovery: "readback_after_error",
+              appliedFields: ["title"],
+              missingFields: ["description"],
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(refundTenantCredits).not.toHaveBeenCalled();
   });
 
   it("requires the approved competitor preview to match the exact Ozon attributes", () => {

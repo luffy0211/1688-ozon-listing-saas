@@ -410,6 +410,7 @@ export type OzonAnalyticsProduct = {
   offerId: string;
   name: string | null;
   status: string | null;
+  platformStatus?: unknown;
   visible: boolean | null;
   archived: boolean;
   stock: number | null;

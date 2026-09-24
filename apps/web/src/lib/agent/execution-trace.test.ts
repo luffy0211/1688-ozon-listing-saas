@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { buildAgentExecutionTrace, buildAgentPlan, buildPendingAgentExecutionTrace } from "./execution-trace";
 
 describe("agent execution trace", () => {
+  it("plans store diagnosis without an implicit competitor branch", () => {
+    const plan = buildAgentPlan({
+      prompt: "给我的店铺做一次完整诊断",
+      requiredToolName: "diagnose_ozon_store",
+    });
+
+    expect(plan.map((step) => step.kind)).toEqual([
+      "RECEIVE_TASK",
+      "PLAN_TASK",
+      "DIAGNOSE_STORE",
+      "DIAGNOSE_PRODUCTS",
+      "CREATE_ACTIONS",
+      "WAIT_FOR_APPROVAL",
+    ]);
+    expect(plan.map((step) => step.kind)).not.toContain("COLLECT_COMPETITORS");
+  });
+
   it("plans competitor analysis as a controlled workflow", () => {
     const plan = buildAgentPlan({
       prompt: "根据我的店铺商品做一次竞品分析，每个二级类目分析 5 个商品数据。",

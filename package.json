@@ -26,5 +26,9 @@
     "typescript": "^5.6.3",
     "vite": "^6.4.3",
     "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "client-only": "0.0.1",
+    "server-only": "0.0.1"
   }
 }

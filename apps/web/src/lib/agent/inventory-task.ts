@@ -54,8 +54,25 @@ export function inventoryTaskContextForStore(taskContext: unknown, currentStoreI
   const requestedStoreId = typeof currentStoreId === "string" && currentStoreId.trim()
     ? currentStoreId.trim()
     : null;
-  if (contextStoreId && requestedStoreId && contextStoreId !== requestedStoreId) return null;
+  if (requestedStoreId && contextStoreId !== requestedStoreId) return null;
   return Object.keys(context).length ? context : null;
+}
+
+export function inventoryTaskContextForPrompt(taskContext: unknown, prompt: string) {
+  const context = record(taskContext);
+  const products = Array.isArray(context.selectedProducts) ? context.selectedProducts : [];
+  const match = prompt.match(/第\s*([1-9]\d*|[一二三四五六七八九十])\s*(?:款|个|件|项)/);
+  if (!match?.[1]) return Object.keys(context).length ? context : null;
+  const chinese: Record<string, number> = {
+    一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
+  };
+  const index = (chinese[match[1]] ?? Number(match[1])) - 1;
+  const selected = products[index];
+  return {
+    ...context,
+    selectedProducts: selected ? [selected] : [],
+    ...(selected ? {} : { selectionError: "ordinal_out_of_range" }),
+  };
 }
 
 export function inventoryTargetFromPrompt(prompt: string): InventoryTarget | null {

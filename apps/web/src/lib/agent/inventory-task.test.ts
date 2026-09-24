@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   inventoryTaskContextForStore,
   inventoryTaskContextFromToolCalls,
+  inventoryTaskContextForPrompt,
   inventoryTargetFromPrompt,
 } from "./inventory-task";
 
@@ -61,5 +62,30 @@ describe("inventory task context", () => {
 
     expect(inventoryTaskContextForStore(context, "store-2")).toBeNull();
     expect(inventoryTaskContextForStore(context, "store-1")).toEqual(context);
+  });
+
+  it("does not reuse products with unknown store ownership in an explicit store", () => {
+    expect(inventoryTaskContextForStore({
+      version: 1,
+      storeId: null,
+      selectedProducts: [{ offerId: "A", productId: "1", stock: 0 }],
+    }, "store-2")).toBeNull();
+  });
+
+  it("narrows an existing product set when the user selects the second item", () => {
+    const context = {
+      version: 1,
+      storeId: "store-1",
+      selectedProducts: [
+        { offerId: "A", productId: "1", stock: 0 },
+        { offerId: "B", productId: "2", stock: 3 },
+        { offerId: "C", productId: "3", stock: 5 },
+      ],
+    };
+
+    expect(inventoryTaskContextForPrompt(context, "只处理第二款")).toEqual({
+      ...context,
+      selectedProducts: [{ offerId: "B", productId: "2", stock: 3 }],
+    });
   });
 });
