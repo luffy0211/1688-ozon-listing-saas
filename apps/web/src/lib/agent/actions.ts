@@ -14,8 +14,9 @@ import {
   type OzonProductInfoItem,
   type OzonProductPayload,
 } from "@saas/ozon";
-import { env } from "@/lib/env";
-import { consumeTenantCredits, refundTenantCredits } from "@/lib/credits";
+import { randomUUID } from "node:crypto";
+import { env } from "../env";
+import { consumeTenantCredits, refundTenantCredits } from "../credits";
 import {
   actionNeedsApproval,
   actionApprovalPolicy,
@@ -979,19 +980,19 @@ async function verifyPriceApplied(params: {
 
 async function markActionExecuted(params: {
   tenantId: string;
-  userId: string;
+  userId?: string;
   action: { id: string; type: AgentActionType; guardrailJson: unknown };
   execution: Record<string, unknown>;
 }) {
   const updated = await prisma.agentAction.update({
-    where: { id: params.action.id },
+    where: { id: params.action.id, tenantId: params.tenantId },
     data: {
       status: AgentActionStatus.EXECUTED,
       executedAt: new Date(),
       error: null,
       guardrailJson: {
         ...asRecord(params.action.guardrailJson),
-        execution: params.execution,
+        execution: { ...params.execution, phase: "finished" },
       } as never,
     },
   });
@@ -1015,7 +1016,7 @@ async function markActionFailed(params: {
   error: string;
 }) {
   const updated = await prisma.agentAction.update({
-    where: { id: params.action.id },
+    where: { id: params.action.id, tenantId: params.tenantId },
     data: {
       status: AgentActionStatus.FAILED,
       error: params.error,
@@ -1035,17 +1036,22 @@ async function markActionFailed(params: {
 }
 
 async function markActionPendingVerification(params: {
+  tenantId: string;
   action: { id: string; guardrailJson: unknown };
   execution: Record<string, unknown>;
 }) {
   return prisma.agentAction.update({
-    where: { id: params.action.id },
+    where: { id: params.action.id, tenantId: params.tenantId },
     data: {
       status: AgentActionStatus.BLOCKED,
       error: "result_pending_verification",
       guardrailJson: {
         ...asRecord(params.action.guardrailJson),
-        execution: params.execution,
+        execution: {
+          ...params.execution,
+          phase: "verification_pending",
+          lastVerifiedAt: new Date().toISOString(),
+        },
       } as never,
     },
   });
@@ -1058,13 +1064,13 @@ async function markActionPartial(params: {
   execution: Record<string, unknown>;
 }) {
   const updated = await prisma.agentAction.update({
-    where: { id: params.action.id },
+    where: { id: params.action.id, tenantId: params.tenantId },
     data: {
       status: AgentActionStatus.BLOCKED,
       error: "partial_execution",
       guardrailJson: {
         ...asRecord(params.action.guardrailJson),
-        execution: params.execution,
+        execution: { ...params.execution, phase: "manual_required" },
       } as never,
     },
   });
@@ -1625,7 +1631,7 @@ async function executeBulkProductUpdateAction(params: {
     results,
   };
   if (pending.length) {
-    return markActionPendingVerification({ action, execution });
+    return markActionPendingVerification({ tenantId: params.tenantId, action, execution });
   }
   if (failed.length) {
     return markActionPartial({
@@ -1756,6 +1762,16 @@ export async function executeApprovedAgentAction(params: {
   if (!action) return null;
   if (action.status !== "APPROVED") return action;
 
+  const startedAt = new Date();
+  const executionLease = {
+    phase: "executing",
+    leaseId: randomUUID(),
+    startedAt: startedAt.toISOString(),
+    heartbeatAt: startedAt.toISOString(),
+    leaseExpiresAt: new Date(startedAt.getTime() + 120_000).toISOString(),
+    confirmedVersion: action.updatedAt?.toISOString() ?? null,
+    retryCount: 0,
+  };
   const claim = await prisma.agentAction.updateMany({
     where: {
       id: action.id,
@@ -1765,6 +1781,10 @@ export async function executeApprovedAgentAction(params: {
     data: {
       status: AgentActionStatus.BLOCKED,
       error: "execution_in_progress",
+      guardrailJson: {
+        ...asRecord(action.guardrailJson),
+        execution: executionLease,
+      } as never,
     },
   });
   if (claim.count !== 1) {
@@ -1778,6 +1798,29 @@ export async function executeApprovedAgentAction(params: {
     idempotencyKey: `agent-action-execute:${action.id}`,
   };
   let charged = false;
+  const heartbeat = setInterval(() => {
+    const heartbeatAt = new Date();
+    void prisma.agentAction.updateMany({
+      where: {
+        id: action.id,
+        tenantId: params.tenantId,
+        status: AgentActionStatus.BLOCKED,
+        error: "execution_in_progress",
+      },
+      data: {
+        updatedAt: heartbeatAt,
+        guardrailJson: {
+          ...asRecord(action.guardrailJson),
+          execution: {
+            ...executionLease,
+            heartbeatAt: heartbeatAt.toISOString(),
+            leaseExpiresAt: new Date(heartbeatAt.getTime() + 120_000).toISOString(),
+          },
+        } as never,
+      },
+    }).catch(() => null);
+  }, 15_000);
+  heartbeat.unref?.();
   try {
     await prisma.auditLog.create({
       data: {
@@ -1843,7 +1886,22 @@ export async function executeApprovedAgentAction(params: {
     });
   } catch (error) {
     if (error instanceof ActionVerificationPendingError) {
-      return markActionPendingVerification({ action, execution: error.execution });
+      return markActionPendingVerification({
+        tenantId: params.tenantId,
+        action,
+        execution: { ...executionLease, ...error.execution },
+      });
+    }
+    if (requiresRealOzonSubmit(action.type) && isUncertainOzonWriteError(error)) {
+      return markActionPendingVerification({
+        tenantId: params.tenantId,
+        action,
+        execution: {
+          ...executionLease,
+          kind: action.type,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
     if (charged) {
       await refundTenantCredits({
@@ -1861,5 +1919,135 @@ export async function executeApprovedAgentAction(params: {
       action,
       error: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    clearInterval(heartbeat);
   }
+}
+
+async function readRecoveredActionApplied(
+  action: NonNullable<Awaited<ReturnType<typeof prisma.agentAction.findFirst>>>,
+) {
+  const store = await resolveActionStore(action);
+  const client = ozonClientForStore(store);
+  const payload = asRecord(action.payloadJson);
+  const offerId = offerIdFrom(action);
+  const productId = productIdFrom(action);
+
+  if (action.type === "UPDATE_PRICE" && offerId) {
+    const [product] = await client.getProductInfoList({ offerIds: [offerId] });
+    const expected = numberField(payload.proposedPriceRub ?? payload.price);
+    const actual = numberField(product?.price ?? product?.marketing_price);
+    return expected != null && actual === expected;
+  }
+  if (action.type === "UPDATE_STOCK") {
+    const warehouseId = numberField(payload.warehouseId ?? payload.warehouse_id);
+    const expected = numberField(payload.stock);
+    if (!warehouseId || expected == null) return null;
+    const products = await client.getProductStocks({
+      ...(offerId ? { offerIds: [offerId] } : {}),
+      ...(productId ? { productIds: [String(productId)] } : {}),
+      limit: 100,
+    });
+    const product = products.find((item) =>
+      offerId ? item.offer_id === offerId : String(item.product_id ?? "") === String(productId ?? ""),
+    );
+    const stock = product?.stocks?.find((item) =>
+      item.warehouse_id === warehouseId || item.warehouse_ids?.includes(warehouseId),
+    );
+    return stock ? stock.present === expected : false;
+  }
+  if (action.type === "CONTENT_DRAFT" && offerId) {
+    const edits = Array.isArray(payload.suggestions) ? payload.suggestions.map(asRecord) : [];
+    const expectedTitle = stringField(edits.find((item) => item.field === "title")?.suggestedRu);
+    const expectedDescription = stringField(
+      edits.find((item) => item.field === "description")?.suggestedRu,
+    );
+    const [product] = await client.getProductInfoAttributes({ offerIds: [offerId] });
+    const actualDescription = stringField(product?.description) ?? attributeValueById(
+      asRecord(product).attributes,
+      OZON_DESCRIPTION_ATTRIBUTE_ID,
+    );
+    return (!expectedTitle || stringField(product?.name) === expectedTitle)
+      && (!expectedDescription || actualDescription === expectedDescription);
+  }
+  return null;
+}
+
+export async function recoverBlockedAgentAction(params: {
+  tenantId: string;
+  userId?: string;
+  actionId: string;
+  now?: Date;
+}) {
+  const now = params.now ?? new Date();
+  const action = await prisma.agentAction.findFirst({
+    where: { id: params.actionId, tenantId: params.tenantId },
+  });
+  if (!action || action.status !== AgentActionStatus.BLOCKED) return action;
+  if (!["execution_in_progress", "result_pending_verification"].includes(action.error ?? "")) {
+    return action;
+  }
+  if (
+    action.error === "execution_in_progress"
+    && now.getTime() - action.updatedAt.getTime() < 120_000
+  ) {
+    return action;
+  }
+
+  const previous = asRecord(asRecord(action.guardrailJson).execution);
+  const retryCount = (numberField(previous.retryCount) ?? 0) + 1;
+  const recovery = {
+    ...previous,
+    phase: "verification_pending",
+    recovery: "readback",
+    retryCount,
+    lastVerifiedAt: now.toISOString(),
+    recoveryLeaseId: randomUUID(),
+  };
+  const claimed = await prisma.agentAction.updateMany({
+    where: {
+      id: action.id,
+      tenantId: params.tenantId,
+      status: AgentActionStatus.BLOCKED,
+      updatedAt: action.updatedAt,
+    },
+    data: {
+      error: "result_pending_verification",
+      guardrailJson: {
+        ...asRecord(action.guardrailJson),
+        execution: recovery,
+      } as never,
+    },
+  });
+  if (claimed.count !== 1) {
+    return prisma.agentAction.findFirst({
+      where: { id: action.id, tenantId: params.tenantId },
+    });
+  }
+
+  const applied = await readRecoveredActionApplied(action).catch(() => null);
+  if (applied) {
+    return markActionExecuted({
+      tenantId: params.tenantId,
+      userId: params.userId,
+      action,
+      execution: recovery,
+    });
+  }
+  const startedAt = Date.parse(stringField(previous.startedAt) ?? action.updatedAt.toISOString());
+  const expired = retryCount >= 10 || now.getTime() - startedAt >= 10 * 60_000;
+  return prisma.agentAction.update({
+    where: { id: action.id, tenantId: params.tenantId },
+    data: {
+      status: AgentActionStatus.BLOCKED,
+      error: expired ? "verification_expired" : "result_pending_verification",
+      guardrailJson: {
+        ...asRecord(action.guardrailJson),
+        execution: {
+          ...recovery,
+          phase: expired ? "manual_required" : "verification_pending",
+        },
+      } as never,
+    },
+  });
 }

@@ -7,6 +7,7 @@ import { extractOfferId, extractOzonUrls } from "./chat-input";
 import { runCompetitorContentAgent } from "./competitor-content";
 import { getProfitGuardrails, redactSensitiveText } from "./policy";
 import { getAgentStoreSnapshot } from "./snapshot";
+import { agentActionExecutionPhase } from "./action-execution-phase";
 
 const actionTypeSchema = z.enum([
   "UPDATE_PRICE",
@@ -563,6 +564,7 @@ export function serializeAgentAction(action: {
     productId: action.productId,
     payload: action.payloadJson,
     guardrail: action.guardrailJson,
+    executionPhase: agentActionExecutionPhase(action),
     error: action.error,
     createdAt: action.createdAt.toISOString(),
     updatedAt: action.updatedAt.toISOString(),

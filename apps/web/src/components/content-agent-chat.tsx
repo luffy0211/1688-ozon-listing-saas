@@ -53,6 +53,7 @@ export type ContentAgentActionView = {
   productId: string | null;
   payload: unknown;
   guardrail: unknown;
+  executionPhase?: "executing" | "verification_pending" | "manual_required" | "finished" | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -344,6 +345,8 @@ function friendlyActionError(error: string | null) {
     execution_in_progress: "任务正在执行，请稍后刷新状态。",
     result_pending_verification: "Ozon 已接收任务，结果仍在同步中，请不要重复提交。",
     partial_execution: "部分商品已执行，失败项未写入；请查看明细后单独处理。",
+    verification_expired: "平台结果仍无法确认，需要人工核对；系统不会自动重复写入。",
+    content_agent_interrupted: "任务因服务中断而结束，请重新发起本次诊断。",
     real_ozon_submit_disabled: "真实 Ozon 写入开关未开启，当前不能执行。",
   };
   return messages[error] ?? error;
@@ -1127,7 +1130,7 @@ export function ContentAgentChat({
       setMessages((current) => replaceAction(current, data.action));
       return command === "reject"
         ? data.action?.status === "REJECTED"
-        : data.action?.status === "EXECUTED";
+        : data.queued === true || data.action?.status === "EXECUTED";
     } catch (err) {
       setMessages((current) => [
         ...current,

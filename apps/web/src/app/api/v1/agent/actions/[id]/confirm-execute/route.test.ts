@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   approve: vi.fn(),
   confirm: vi.fn(),
   execute: vi.fn(),
+  enqueue: vi.fn(),
   reject: vi.fn(),
   session: vi.fn(),
 }));
@@ -16,6 +17,9 @@ vi.mock("@/lib/agent/actions", () => ({
   rejectAgentAction: mocks.reject,
 }));
 vi.mock("@/lib/agent/runtime", () => ({ serializeAgentAction: (value: unknown) => value }));
+vi.mock("@/lib/agent/action-queue", () => ({
+  enqueueAgentActionExecution: mocks.enqueue,
+}));
 vi.mock("@/lib/request-session", () => ({ sessionFromRequest: mocks.session }));
 
 import { POST as approvePOST } from "../approve/route";
@@ -28,6 +32,7 @@ beforeEach(() => {
   mocks.approve.mockResolvedValue({ id: "action-1", type: "CONTENT_DRAFT", status: "APPROVED" });
   mocks.confirm.mockResolvedValue({ id: "action-1", type: "CONTENT_DRAFT", status: "APPROVED" });
   mocks.execute.mockResolvedValue({ id: "action-1", type: "CONTENT_DRAFT", status: "EXECUTED" });
+  mocks.enqueue.mockResolvedValue(undefined);
 });
 
 describe("POST confirm-execute", () => {
@@ -68,6 +73,9 @@ describe("POST confirm-execute", () => {
     }) as never, { params: Promise.resolve({ id: "action-1" }) });
 
     expect(response.status).toBe(200);
+    await expect(response.clone().json()).resolves.toMatchObject({
+      data: { queued: true },
+    });
     expect(mocks.confirm).toHaveBeenCalledWith({
       tenantId: "tenant-1",
       userId: "user-1",
@@ -80,7 +88,31 @@ describe("POST confirm-execute", () => {
       ],
     });
     expect(mocks.approve).not.toHaveBeenCalled();
-    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueue).toHaveBeenCalledWith({
+      actionId: "action-1",
+      tenantId: "tenant-1",
+      userId: "user-1",
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps an approved action pending when the queue is unavailable", async () => {
+    mocks.enqueue.mockRejectedValue(new Error("redis unavailable"));
+    const response = await POST(new Request("http://localhost/api/v1/agent/actions/action-1/confirm-execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: "2026-09-24T12:00:00.000Z",
+        expectedStoreId: "store-1",
+      }),
+    }) as never, { params: Promise.resolve({ id: "action-1" }) });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "agent_action_queue_unavailable" },
+    });
+    expect(mocks.approve).toHaveBeenCalledTimes(1);
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });
 
