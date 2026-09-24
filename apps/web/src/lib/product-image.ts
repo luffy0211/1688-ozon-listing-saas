@@ -6,10 +6,15 @@ type ProductImageAsset = {
 
 const IMAGE_KIND_PRIORITY = ["main_image", "sku_image", "detail_image"];
 
+export function isTrustedProductImageHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "ir.ozone.ru" || host === "alicdn.com" || host.endsWith(".alicdn.com");
+}
+
 export function displayProductImageUrl(url: string): string {
   try {
     const parsed = new URL(url);
-    if (parsed.hostname === "alicdn.com" || parsed.hostname.endsWith(".alicdn.com")) {
+    if (parsed.protocol === "https:" && isTrustedProductImageHost(parsed.hostname)) {
       return `/api/v1/image-proxy?url=${encodeURIComponent(url)}`;
     }
   } catch {

@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Button, cn } from "./ui";
+import { displayProductImageUrl } from "@/lib/product-image";
 
 export type AgentInsightSource = {
   toolName: string;
@@ -387,7 +388,7 @@ function PriorityProducts({
         {products.map((product) => (
           <div key={product.offerId} className="grid grid-cols-[64px_1fr] gap-3 rounded-xl border border-[#e6edf6] bg-[#f8fbff] p-3">
             {product.imageUrl ? (
-              <img src={product.imageUrl} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
+              <img src={displayProductImageUrl(product.imageUrl)} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
             ) : (
               <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">无图</div>
             )}
@@ -506,7 +507,7 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
               <div className="grid gap-3 border-b border-[#e4f4f1] bg-[#f8fffd] p-3 lg:grid-cols-[1fr_1fr]">
                 <div className="grid grid-cols-[64px_1fr] gap-3">
                   {stringValue(own.imageUrl) ? (
-                    <img src={stringValue(own.imageUrl)!} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
+                    <img src={displayProductImageUrl(stringValue(own.imageUrl)!)} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
                   ) : (
                     <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">自家无图</div>
                   )}
@@ -519,7 +520,7 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
                 </div>
                 <div className="grid grid-cols-[64px_1fr] gap-3">
                   {stringValue(firstCompetitor?.imageUrl) ? (
-                    <img src={stringValue(firstCompetitor?.imageUrl)!} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
+                    <img src={displayProductImageUrl(stringValue(firstCompetitor?.imageUrl)!)} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
                   ) : (
                     <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">竞品无图</div>
                   )}
@@ -605,7 +606,7 @@ function CompetitorCards({ sample }: { sample: Record<string, unknown> }) {
         const content = (
           <>
           {stringValue(item.imageUrl) ? (
-            <img src={stringValue(item.imageUrl)!} alt="" className="h-20 w-14 rounded-md border bg-white object-contain" />
+            <img src={displayProductImageUrl(stringValue(item.imageUrl)!)} alt="" className="h-20 w-14 rounded-md border bg-white object-contain" />
           ) : (
             <div className="flex h-20 w-14 items-center justify-center rounded-md border border-dashed bg-gray-50 text-[10px] text-gray-400">无图</div>
           )}
