@@ -6,14 +6,17 @@ import {
   contentAgentModelName,
   contentAgentModelSettings,
   contentAgentDataSourcesFromToolCalls,
+  buildAgentInput,
   fallbackPromotionPolicyFromPrompt,
   fallbackContentDraftSuggestion,
   normalizeOzonProductContent,
   optionalStoreId,
   productContentForDraft,
   requiredOzonToolForPrompt,
+  requiredOzonToolsForPrompt,
   shouldRunCompetitorAnalysisForDiagnosis,
   shouldRefreshCompetitorEvidence,
+  shouldCreateFallbackContentDraft,
 } from "./content-agent";
 
 describe("contentAgentModelSettings", () => {
@@ -124,7 +127,7 @@ describe("normalizeOzonProductContent", () => {
     expect(product.found).toBe(false);
     expect(product.offerId).toBe("MISSING-1");
     expect(product.productId).toBeNull();
-    expect(product.stock).toBe(0);
+    expect(product.stock).toBeNull();
   });
 
   it("keeps earlier reads available when drafting after another product read", () => {
@@ -165,10 +168,33 @@ describe("content agent tool enforcement helpers", () => {
       name: "Мужское летнее поло с абстрактно-геометрическим принтом, облегающего кроя",
     });
 
+    expect(suggestion).not.toBeNull();
+    if (!suggestion) throw new Error("expected fallback suggestion");
     expect(suggestion.field).toBe("title");
     expect(suggestion.current).toContain("облегающего кроя");
     expect(suggestion.suggestedRu).toContain("облегающий крой");
     expect(suggestion.sourceTag).toBe("自家信息优化");
+  });
+
+  it("does not create a fallback draft when the title would stay unchanged", () => {
+    expect(fallbackContentDraftSuggestion({
+      offerId: "SKU-UNCHANGED",
+      name: "Мужское классическое поло",
+    })).toBeNull();
+  });
+
+  it("builds model context from the newest messages in chronological order", () => {
+    const history = Array.from({ length: 12 }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      content: `message-${index + 1}`,
+    }));
+
+    const input = buildAgentInput("latest-request", history, "store-context");
+
+    expect(input).toContain("message-1");
+    expect(input).toContain("message-8");
+    expect(input).not.toContain("message-9");
+    expect(input.indexOf("message-8")).toBeLessThan(input.indexOf("message-1"));
   });
 
   it("refreshes Tavily evidence only when the user explicitly requests it", () => {
@@ -205,8 +231,12 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("给我的店铺做一次完整诊断", null)).toBe(
       "diagnose_ozon_store",
     );
-    expect(shouldRunCompetitorAnalysisForDiagnosis("给我的店铺做一次完整诊断")).toBe(true);
-    expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBe(1);
+    expect(shouldRunCompetitorAnalysisForDiagnosis("给我的店铺做一次完整诊断")).toBe(false);
+    expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBeNull();
+    expect(shouldCreateFallbackContentDraft("给我的店铺做一次完整诊断", null)).toBe(true);
+    expect(requiredOzonToolsForPrompt("给我的店铺做一次完整诊断", null)).toEqual([
+      "diagnose_ozon_store",
+    ]);
   });
 
   it("uses store diagnosis to pick a product when content optimization has no offerId", () => {

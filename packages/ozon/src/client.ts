@@ -20,6 +20,7 @@ import type {
   OzonProductInfoItem,
   OzonProductRating,
   OzonProductStockItem,
+  OzonWarehouse,
   ProductArchiveRequest,
   ProductMutationResult,
   UpdateAttributesRequest,
@@ -233,6 +234,13 @@ export class OzonClient {
     return res.result;
   }
 
+  async listWarehouses(): Promise<OzonWarehouse[]> {
+    const res = await this.request<
+      { result?: OzonWarehouse[] } | OzonWarehouse[]
+    >("/v1/warehouse/list", {});
+    return Array.isArray(res) ? res : res.result ?? [];
+  }
+
   async getAttributeValues(
     categoryId: number,
     typeId: number,
@@ -264,18 +272,31 @@ export class OzonClient {
   }
 
   async listProducts(limit = 1000): Promise<OzonListProductsResult> {
-    const res = await this.request<{ result: OzonListProductsResult }>(
-      "/v3/product/list",
-      {
-        filter: {},
-        limit,
-      },
-    );
-    return {
-      items: res.result.items ?? [],
-      total: res.result.total,
-      last_id: res.result.last_id,
-    };
+    const pageSize = Math.min(Math.max(limit, 1), 1000);
+    const items: OzonListProductsResult["items"] = [];
+    let lastId = "";
+    let total: number | undefined;
+    for (;;) {
+      const res = await this.request<{ result: OzonListProductsResult }>(
+        "/v3/product/list",
+        {
+          filter: {},
+          limit: pageSize,
+          ...(lastId ? { last_id: lastId } : {}),
+        },
+      );
+      const page = res.result.items ?? [];
+      items.push(...page);
+      total = res.result.total ?? total;
+      const nextId = res.result.last_id ?? "";
+      if (nextId && nextId === lastId) {
+        throw new Error("Ozon product list pagination did not advance");
+      }
+      if (!nextId || page.length === 0 || (total !== undefined && items.length >= total)) {
+        return { items, total, last_id: nextId || undefined };
+      }
+      lastId = nextId;
+    }
   }
 
   async getProductInfoList(params: {
@@ -297,18 +318,52 @@ export class OzonClient {
     offerIds?: string[];
     limit?: number;
   } = {}): Promise<OzonProductStockItem[]> {
-    const res = await this.request<{ items?: OzonProductStockItem[]; result?: { items?: OzonProductStockItem[] } }>(
-      "/v4/product/info/stocks",
-      {
-        filter: {
-          product_id: params.productIds ?? [],
-          offer_id: params.offerIds ?? [],
-          visibility: "ALL",
+    const pageSize = Math.min(Math.max(params.limit ?? 1000, 1), 1000);
+    const items: OzonProductStockItem[] = [];
+    let cursor = "";
+    let lastId = "";
+    let total: number | undefined;
+    for (;;) {
+      const res = await this.request<{
+        items?: OzonProductStockItem[];
+        cursor?: string;
+        last_id?: string;
+        total?: number;
+        result?: {
+          items?: OzonProductStockItem[];
+          cursor?: string;
+          last_id?: string;
+          total?: number;
+        };
+      }>(
+        "/v4/product/info/stocks",
+        {
+          filter: {
+            product_id: params.productIds ?? [],
+            offer_id: params.offerIds ?? [],
+            visibility: "ALL",
+          },
+          limit: pageSize,
+          ...(cursor ? { cursor } : {}),
+          ...(!cursor && lastId ? { last_id: lastId } : {}),
         },
-        limit: params.limit ?? 1000,
-      },
-    );
-    return res.items ?? res.result?.items ?? [];
+      );
+      const page = res.items ?? res.result?.items ?? [];
+      items.push(...page);
+      total = res.total ?? res.result?.total ?? total;
+      const nextCursor = res.cursor ?? res.result?.cursor ?? "";
+      const nextLastId = res.last_id ?? res.result?.last_id ?? "";
+      const nextPageToken = nextCursor || nextLastId;
+      const currentPageToken = cursor || lastId;
+      if (nextPageToken && nextPageToken === currentPageToken) {
+        throw new Error("Ozon product stock pagination did not advance");
+      }
+      if (!nextPageToken || page.length === 0 || (total !== undefined && items.length >= total)) {
+        return items;
+      }
+      cursor = nextCursor;
+      lastId = nextLastId;
+    }
   }
 
   async getProductInfoAttributes(params: {

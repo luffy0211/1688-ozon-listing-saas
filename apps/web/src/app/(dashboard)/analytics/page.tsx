@@ -56,7 +56,9 @@ export default async function AnalyticsPage(
   const snapshot = view.latestSnapshot;
   const orderMax = maxOrderCount(snapshot?.dailyOrders ?? []);
   const funnelMax = Math.max(1, view.localFunnel.collected);
-  const riskyProducts = view.products.filter((product) => product.stock <= 5).slice(0, 20);
+  const riskyProducts = view.products.filter((product) =>
+    product.stock !== null && product.stock <= 5,
+  ).slice(0, 20);
 
   return (
     <div className="space-y-6">
@@ -210,11 +212,13 @@ export default async function AnalyticsPage(
                 </td>
                 <td className="px-4 py-3">
                   <Badge tone={product.visible && !product.archived ? "green" : "gray"}>
-                    {product.archived ? "已归档" : product.status ?? (product.visible ? "可售" : "不可售")}
+                    {product.archived
+                      ? "已归档"
+                      : product.status ?? (product.visible === null ? "状态未知" : product.visible ? "可售" : "不可售")}
                   </Badge>
                 </td>
-                <td className="px-4 py-3 font-semibold text-gray-950">{formatNumber(product.stock)}</td>
-                <td className="px-4 py-3 text-gray-600">{formatNumber(product.reservedStock)}</td>
+                <td className="px-4 py-3 font-semibold text-gray-950">{product.stock === null ? "未知" : formatNumber(product.stock)}</td>
+                <td className="px-4 py-3 text-gray-600">{product.reservedStock === null ? "未知" : formatNumber(product.reservedStock)}</td>
                 <td className="px-4 py-3">{product.priceRub ? formatRub(product.priceRub) : "-"}</td>
               </tr>
             ))}

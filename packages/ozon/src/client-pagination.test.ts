@@ -43,4 +43,32 @@ describe("OzonClient product pagination", () => {
 
     await expect(client.listProducts(1)).rejects.toThrow("product list pagination did not advance");
   });
+
+  it("reads every stock page using Ozon pagination cursors", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: { items: [{ product_id: 1 }], total: 2, cursor: "next" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ result: { items: [{ product_id: 2 }], total: 2, cursor: "" } }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new OzonClient({
+      clientId: "123",
+      apiKey: "key",
+      baseUrl: "https://example.test",
+    });
+
+    await expect(client.getProductStocks({ limit: 1 })).resolves.toEqual([
+      { product_id: 1 },
+      { product_id: 2 },
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1].body))).toMatchObject({
+      cursor: "next",
+      limit: 1,
+    });
+  });
 });

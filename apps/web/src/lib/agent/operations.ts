@@ -95,17 +95,19 @@ export function buildStoreDiagnosis(params: {
 }) {
   const currentOrders = orderCount(params.current);
   const previousOrders = orderCount(params.previous);
-  const visibleGap = Math.max(
-    params.current.productCount -
-      params.current.visibleProductCount -
-      params.current.archivedProductCount,
-    0,
-  );
+  const visibleGap = params.current.visibleProductCount === null
+    ? null
+    : Math.max(
+        params.current.productCount -
+          params.current.visibleProductCount -
+          params.current.archivedProductCount,
+        0,
+      );
   const issues = [
-    ...(params.current.lowStockCount > 0
+    ...((params.current.lowStockCount ?? 0) > 0
       ? [`${params.current.lowStockCount} 个商品库存不高于 5`]
       : []),
-    ...(visibleGap > 0 ? [`${visibleGap} 个商品当前不可见且未归档`] : []),
+    ...((visibleGap ?? 0) > 0 ? [`${visibleGap} 个商品当前不可见且未归档`] : []),
     ...(params.current.cancelledOrderCount > 0
       ? [`${params.current.cancelledOrderCount} 个订单处于取消状态`]
       : []),
@@ -194,10 +196,10 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
       const bSales = sales.get(b.offerId);
       return (bSales?.revenueRub ?? 0) - (aSales?.revenueRub ?? 0) ||
         (bSales?.quantity ?? 0) - (aSales?.quantity ?? 0) ||
-        b.stock - a.stock;
+        (b.stock ?? -1) - (a.stock ?? -1);
     });
-  const visible = candidates.filter((item) => item.visible && item.stock > 0);
-  const stocked = candidates.filter((item) => item.stock > 0);
+  const visible = candidates.filter((item) => item.visible && (item.stock ?? 0) > 0);
+  const stocked = candidates.filter((item) => (item.stock ?? 0) > 0);
   const pool = visible.length ? visible : stocked.length ? stocked : candidates;
   const categorized = candidates.filter((item) => item.descriptionCategoryId && item.typeId);
 
@@ -214,7 +216,7 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
           (total, item) => ({
             revenue: total.revenue + (sales.get(item.offerId)?.revenueRub ?? 0),
             quantity: total.quantity + (sales.get(item.offerId)?.quantity ?? 0),
-            stock: total.stock + item.stock,
+            stock: total.stock + (item.stock ?? 0),
           }),
           { revenue: 0, quantity: 0, stock: 0 },
         );
@@ -503,6 +505,17 @@ export async function diagnoseOzonStore(params: {
   return {
     store: { id: store.id, name: store.name },
     ...diagnosis,
+    lowStockProducts: current.products
+      .filter((product) =>
+        !product.archived && product.stock !== null && product.stock <= 5,
+      )
+      .map((product) => ({
+        offerId: product.offerId,
+        productId: product.productId,
+        name: product.name,
+        stock: product.stock,
+        visible: product.visible,
+      })),
     lowContentRatingProducts: lowContentRatingProducts(current.products, ratings),
     warnings: [
       ...diagnosis.warnings,

@@ -40,6 +40,11 @@ import {
 } from "./promotions";
 import { buildAgentExecutionTrace, buildAgentPlan } from "./execution-trace";
 import {
+  inventoryTaskContextForStore,
+  inventoryTaskContextFromToolCalls,
+  inventoryTargetFromPrompt,
+} from "./inventory-task";
+import {
   clearAgentRunProgressLater,
   setAgentRunProgress,
   type AgentRunProgressSnapshot,
@@ -253,8 +258,8 @@ export type NormalizedProductContent = {
   currencyCode: string | null;
   primaryImage: string | null;
   images: string[];
-  stock: number;
-  reservedStock: number;
+  stock: number | null;
+  reservedStock: number | null;
   description: string | null;
   attributes: unknown[];
   rawInfo: unknown;
@@ -379,7 +384,7 @@ async function ensureSession(params: {
 }) {
   if (params.sessionId) {
     const existing = await prisma.agentSession.findFirst({
-      where: { id: params.sessionId, tenantId: params.tenantId },
+      where: { id: params.sessionId, tenantId: params.tenantId, status: "OPEN" },
     });
     if (existing) return existing;
   }
@@ -548,6 +553,7 @@ function statusFrom(info: OzonProductInfoItem | null | undefined) {
 }
 
 function stockTotal(items: OzonProductStockItem[], key: "present" | "reserved") {
+  if (!items.length) return null;
   return items.reduce((total, item) => {
     return (
       total +
@@ -651,9 +657,9 @@ function buildInstructions(offerId: string | null) {
     "普通聊天、解释概念、讨论流程时，可以直接回答，不要要求用户必须提供 offerId。",
     "只要问题涉及自家店铺、商品数量、库存、订单、价格、草稿、商品状态或具体 offerId，必须先调用真实工具读取数据，再回答。",
     "如果工具没有返回某个字段，就明确说不知道或当前 API 未返回，不要猜测、不要编造。",
-    "用户要求店铺诊断时，必须调用 diagnose_ozon_store；店铺诊断已经自动包含同类竞品分析。只根据工具返回的 Ozon 数据解释问题，不把净回款称为真实利润。",
+    "用户要求店铺诊断时，先调用 diagnose_ozon_store 读取自家数据。只有用户明确要求竞品、价格竞争力或同类表达参考时，才调用 analyze_ozon_competitors。只根据工具返回的数据解释问题，不把净回款称为真实利润。",
     "店铺诊断回复面向电商运营人员，不要输出 source、toolCalls、categoryKey、typeId、descriptionCategoryId、hasCrawlerBlocked、insufficientCategoryCount、uniqueCompetitorCount、HTTP 错误、缓存等技术字段。技术细节只留在追踪日志。",
-    "店铺诊断主回答固定用业务结构：一句话结论、重点问题、同类竞品差距、建议动作、待确认草案。每段尽量短，让用户一眼判断下一步。",
+    "店铺诊断主回答固定用业务结构：一句话结论、重点问题、建议动作、待确认草案。实际读取过竞品时再增加同类竞品差距。每段尽量短，让用户一眼判断下一步。",
     "竞品差距优先分析标题、主图、价格、热度代理、主题关键词、简介内容。销量不可见时，用评分、评价数和搜索位置作为热度代理，并避免称为真实销量。",
     "店铺诊断返回 lowContentRatingProducts 时，按评分从低到高说明 Ozon 官方改进条件。最多选择最紧急的 3 个商品，依次调用 get_ozon_product_content 和 propose_content_draft，生成标题或描述优化待确认动作；没有真实新图片或明确属性值时只建议，不创建图片或属性写动作。",
     "用户要求重新采集竞品分析时，每个类目分析竞品数量允许 1 至 10 个；未说明时默认每个类目 1 个。必须调用 analyze_ozon_competitors；该工具统计自家店铺全部未归档 Ozon 官方类目，每个类目选择一个代表商品获取竞品证据，再用类目经验诊断该类目的全部自家商品。用户要求基于已保存、之前、历史竞品分析时，优先使用系统预读的竞品记忆，不要重新采集。竞品结论必须带页面证据，不得复制竞品整段文案。",
@@ -678,20 +684,23 @@ function buildInstructions(offerId: string | null) {
     "用户明确要求报名某个活动时，必须先读取候选商品，再调用 propose_promotion_enrollment 创建高风险待确认动作。你不能直接报名。",
     offerId ? `当前消息里识别到的 offerId 是 ${offerId}。` : "当前消息没有识别到 offerId。",
     "当用户明确要求优化某个商品的标题、描述、关键词、属性或内容时，必须调用 get_ozon_product_content 读取实时 Ozon API 商品信息。",
-    "只有在成功读取商品且用户明确要求内容优化时，才调用 propose_content_draft 保存 CONTENT_DRAFT，供人工确认。",
+    "在成功读取商品后，用户要求内容优化或店铺诊断发现低内容分商品时，必须调用 propose_content_draft 保存 CONTENT_DRAFT，供人工确认。",
     "不要调用任何直接执行上架、改价、改库存或改商品的 API；本版本只创建待人工确认的 action，不直接写回 Ozon。",
     "当用户明确要求改库存、改图片、改单独属性、改类目、删除商品、批量修改商品、改价、归档或恢复时，只能调用 propose_product_mutation_actions 创建待人工确认的 action，不能声称已经修改。",
+    "库存修改前先调用 list_ozon_warehouses 读取仓库。只有一个适用仓库时直接使用；多个仓库时让用户按名称选择，不要求用户提供内部 ID。",
+    "“补到20”表示目标总库存 20；“增加20”表示在当前库存上增加 20；“补20”语义不明确，必须先追问是增加 20 还是补到 20，不能创建草案。",
     "批量修改商品必须创建 BULK_PRODUCT_UPDATE，每批最多 50 个商品，payload.items 里保留每个商品的 type、offerId、productId 和需要写入的字段。",
   ].join("\n");
 }
 
-function buildInput(
+export function buildAgentInput(
   prompt: string,
   history: Array<{ role: string; content: string }>,
   preloadedContext = "",
 ) {
   const recentHistory = history
-    .slice(-8)
+    .slice(0, 8)
+    .reverse()
     .map((item) => `${item.role}: ${item.content}`)
     .join("\n");
 
@@ -718,15 +727,15 @@ export function fallbackContentDraftSuggestion(product: Pick<NormalizedProductCo
     .replace(/\s+/g, " ")
     .trim();
 
+  if (suggested === current) return null;
+
   return {
     field: "title" as const,
     current,
-    suggestedRu: suggested === current ? current : suggested,
-    reasonZh: suggested === current
-      ? "模型已读取商品但未创建待确认动作，系统保守生成标题草稿供人工确认，不直接写入 Ozon。"
-      : "修正俄语标题中的搭配表达，使商品标题更自然；该修改只进入待确认动作，不直接写入 Ozon。",
+    suggestedRu: suggested,
+    reasonZh: "修正俄语标题中的搭配表达，使商品标题更自然；该修改只进入待确认动作，不直接写入 Ozon。",
     sourceTag: "自家信息优化" as const,
-    confidence: suggested === current ? 0.55 : 0.78,
+    confidence: 0.78,
   };
 }
 
@@ -748,8 +757,14 @@ function storeDiagnosisIntent(prompt: string) {
   return /(?:店铺|经营|运营).{0,8}(?:诊断|体检)|(?:诊断|体检).{0,8}(?:店铺|经营|运营)|店铺分析/i.test(prompt);
 }
 
+function inventoryMutationIntent(prompt: string) {
+  const target = inventoryTargetFromPrompt(prompt);
+  if (!target || target.mode === "ambiguous") return false;
+  return /库存|补货|补到|每款|这(?:三个|几个|些)/i.test(prompt);
+}
+
 export function shouldRunCompetitorAnalysisForDiagnosis(prompt: string) {
-  return storeDiagnosisIntent(prompt);
+  return competitorAnalysisIntent(prompt);
 }
 
 function savedCompetitorEvidenceIntent(prompt: string) {
@@ -766,7 +781,7 @@ export function competitorsPerCategoryFromPrompt(prompt: string) {
     prompt.match(/每(?:个)?(?:二级)?类目.{0,12}([1-9]\d?|[一二三四五六七八九十])\s*个?/i) ??
     prompt.trim().match(/^([1-9]\d?|[一二三四五六七八九十])\s*个?$/);
   if (!match?.[1]) {
-    return competitorAnalysisIntent(prompt) || shouldRunCompetitorAnalysisForDiagnosis(prompt) ? 1 : null;
+    return competitorAnalysisIntent(prompt) ? 1 : null;
   }
   const chineseNumbers: Record<string, number> = {
     一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10,
@@ -796,9 +811,22 @@ export function requiredOzonToolForPrompt(prompt: string, offerId: string | null
   return null;
 }
 
+export function requiredOzonToolsForPrompt(prompt: string, offerId: string | null) {
+  if (inventoryMutationIntent(prompt)) {
+    return ["get_ozon_store_snapshot", "list_ozon_warehouses"];
+  }
+  const primary = requiredOzonToolForPrompt(prompt, offerId);
+  return primary ? [primary] : [];
+}
+
 function shouldRequireContentDraft(prompt: string, offerId: string | null) {
   if (!offerId) return false;
   return contentOptimizationIntent(prompt) || /(优化|改标题|标题|关键词|描述|属性|文案|内容|草稿)/i.test(prompt);
+}
+
+export function shouldCreateFallbackContentDraft(prompt: string, offerId: string | null) {
+  return shouldRequireContentDraft(prompt, offerId) ||
+    (!offerId && (contentOptimizationIntent(prompt) || storeDiagnosisIntent(prompt)));
 }
 
 function hasSuccessfulToolCall(toolCalls: ToolCallLog[], toolName: string) {
@@ -813,11 +841,10 @@ function requiredToolSatisfied(toolCalls: ToolCallLog[], toolName: string) {
   return false;
 }
 
-function blockedMissingToolOutput(toolName: string) {
+function blockedMissingToolOutput(_toolName: string) {
   return [
-    "这次回答已拦截：你的问题涉及自家 Ozon 实时数据，但 Agent 没有成功调用真实数据工具。",
-    `缺少工具调用：${toolName}`,
-    "系统不会用模型猜测店铺或商品数据。请重试，或检查 Ozon API 配置。",
+    "这次没有读取到完整的店铺或同类竞品数据，因此没有生成诊断结论。",
+    "系统不会用推测数据代替真实数据。请稍后重试；如果持续失败，请检查 Ozon 店铺连接。",
   ].join("\n");
 }
 
@@ -1098,7 +1125,8 @@ export async function runOzonContentAgent(params: {
   });
 
   const toolCalls: ToolCallLog[] = [];
-  const requiredToolName = requiredOzonToolForPrompt(prompt, offerId);
+  const requiredToolNames = requiredOzonToolsForPrompt(prompt, offerId);
+  const requiredToolName = requiredToolNames[0] ?? null;
   const createdActionIds: string[] = [];
   const agentPlan = buildAgentPlan({
     prompt,
@@ -1194,10 +1222,19 @@ export async function runOzonContentAgent(params: {
           input: { storeId: requestedStoreId },
           output: {
             storeName: snapshot.store?.name ?? null,
+            storeId: snapshot.store?.id ?? null,
             productCount: snapshot.latestSnapshot?.productCount ?? null,
             visibleProductCount: snapshot.latestSnapshot?.visibleProductCount ?? null,
             totalStock: snapshot.latestSnapshot?.totalStock ?? null,
             syncedAt: snapshot.latestSnapshot?.syncedAt ?? null,
+            products: snapshot.products
+              .filter((product) => product.stock !== null && product.stock <= 5)
+              .map((product) => ({
+                offerId: product.offerId,
+                productId: product.productId,
+                stock: product.stock,
+                name: product.name,
+              })),
           },
         });
         finishToolProgress();
@@ -1274,6 +1311,7 @@ export async function runOzonContentAgent(params: {
           },
           output: {
             storeName: result.store.name,
+            storeId: result.store.id,
             reportCount: result.reports.length,
             analyzedProductCount: result.analyzedProductCount,
             competitorCount,
@@ -1335,85 +1373,84 @@ export async function runOzonContentAgent(params: {
       }
     }
 
-    const diagnoseStoreTool = tool({
-      name: "diagnose_ozon_store",
-      description:
-        "Read own-store operations data, then automatically compare same-category competitor products as part of the store diagnosis. Net payout is not accounting profit.",
-      parameters: z.object({ storeId: z.string().nullable() }),
-      execute: async ({ storeId }) => {
-        const requestedStoreId = optionalStoreId(params.storeId) ?? optionalStoreId(storeId);
-        const at = new Date().toISOString();
-        const creditKey = `agent-tool:${runRecord.id}:diagnose_ozon_store`;
-        let charged = false;
-        startToolProgress("diagnose_ozon_store");
-        try {
-          await chargeContentAgentFeature({
+    async function runStoreDiagnosis(storeId: string | null) {
+      const requestedStoreId = optionalStoreId(params.storeId) ?? optionalStoreId(storeId);
+      const at = new Date().toISOString();
+      const creditKey = `agent-tool:${runRecord.id}:diagnose_ozon_store`;
+      let charged = false;
+      startToolProgress("diagnose_ozon_store");
+      try {
+        await chargeContentAgentFeature({
+          tenantId: params.tenantId,
+          userId: params.userId,
+          feature: "store_diagnosis",
+          referenceType: "agent_run_tool",
+          referenceId: `${runRecord.id}:diagnose_ozon_store`,
+          idempotencyKey: creditKey,
+        });
+        charged = true;
+        const result = await diagnoseOzonStore({
+          tenantId: params.tenantId,
+          storeId: requestedStoreId,
+        });
+        latestLowContentOfferId = result.lowContentRatingProducts[0]?.offerId ?? null;
+        toolCalls.push({
+          name: "diagnose_ozon_store",
+          at,
+          input: { storeId: requestedStoreId },
+          output: {
+            storeName: result.store.name,
+            productCount: result.current30d.productCount,
+            visibleProductCount: result.current30d.visibleProductCount,
+            totalStock: result.current30d.totalStock,
+            lowStockCount: result.current30d.lowStockCount,
+            financeDataAvailable: result.financeDataAvailable,
+            lowStockProducts: result.lowStockProducts,
+            lowContentRatingCount: result.lowContentRatingProducts.length,
+            issues: result.issues,
+            lowContentRatingProducts: result.lowContentRatingProducts.map((product) => ({
+              offerId: product.offerId,
+              title: product.title,
+              imageUrl: product.imageUrl,
+              contentRating: product.contentRating,
+              visible: product.visible,
+              stock: product.stock,
+              priceRub: product.priceRub,
+              recommendations: product.recommendations,
+            })),
+          },
+        });
+        finishToolProgress();
+        return result;
+      } catch (error) {
+        if (charged) {
+          await refundContentAgentFeature({
             tenantId: params.tenantId,
             userId: params.userId,
             feature: "store_diagnosis",
             referenceType: "agent_run_tool",
             referenceId: `${runRecord.id}:diagnose_ozon_store`,
-            idempotencyKey: creditKey,
-          });
-          charged = true;
-          const result = await diagnoseOzonStore({
-            tenantId: params.tenantId,
-            storeId: requestedStoreId,
-          });
-          latestLowContentOfferId = result.lowContentRatingProducts[0]?.offerId ?? null;
-          toolCalls.push({
-            name: "diagnose_ozon_store",
-            at,
-            input: { storeId: requestedStoreId },
-            output: {
-              storeName: result.store.name,
-              productCount: result.current30d.productCount,
-              visibleProductCount: result.current30d.visibleProductCount,
-              totalStock: result.current30d.totalStock,
-              lowStockCount: result.current30d.lowStockCount,
-              financeDataAvailable: result.financeDataAvailable,
-              lowContentRatingCount: result.lowContentRatingProducts.length,
-              issues: result.issues,
-              lowContentRatingProducts: result.lowContentRatingProducts.map((product) => ({
-                offerId: product.offerId,
-                title: product.title,
-                imageUrl: product.imageUrl,
-                contentRating: product.contentRating,
-                visible: product.visible,
-                stock: product.stock,
-                priceRub: product.priceRub,
-                recommendations: product.recommendations,
-              })),
-            },
-          });
-          finishToolProgress();
-          const competitorDiagnosis = await runCompetitorAnalysis({
-            storeId,
-            throwOnError: false,
-          });
-          return { ...result, competitorDiagnosis };
-        } catch (error) {
-          if (charged) {
-            await refundContentAgentFeature({
-              tenantId: params.tenantId,
-              userId: params.userId,
-              feature: "store_diagnosis",
-              referenceType: "agent_run_tool",
-              referenceId: `${runRecord.id}:diagnose_ozon_store`,
-              idempotencyKey: `refund:${creditKey}`,
-            }).catch(() => null);
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          toolCalls.push({
-            name: "diagnose_ozon_store",
-            at,
-            input: { storeId: requestedStoreId },
-            error: message,
-          });
-          finishToolProgress();
-          throw error;
+            idempotencyKey: `refund:${creditKey}`,
+          }).catch(() => null);
         }
-      },
+        const message = error instanceof Error ? error.message : String(error);
+        toolCalls.push({
+          name: "diagnose_ozon_store",
+          at,
+          input: { storeId: requestedStoreId },
+          error: message,
+        });
+        finishToolProgress();
+        throw error;
+      }
+    }
+
+    const diagnoseStoreTool = tool({
+      name: "diagnose_ozon_store",
+      description:
+        "Read own-store operations data for diagnosis. This does not collect competitors. Net payout is not accounting profit.",
+      parameters: z.object({ storeId: z.string().nullable() }),
+      execute: async ({ storeId }) => runStoreDiagnosis(storeId),
     });
 
     const analyzeCompetitorsTool = tool({
@@ -1702,6 +1739,38 @@ export async function runOzonContentAgent(params: {
       },
     });
 
+    const listWarehousesTool = tool({
+      name: "list_ozon_warehouses",
+      description: "Read the current store's FBS/rFBS warehouse names and IDs before proposing stock changes. This is read-only.",
+      parameters: z.object({ storeId: z.string().nullable() }),
+      execute: async ({ storeId }) => {
+        const at = new Date().toISOString();
+        const store = await resolveStore(params.tenantId, storeId ?? params.storeId);
+        const client = new OzonClient({
+          clientId: store.ozonClientId,
+          apiKey: decryptSecret(store.ozonApiKey),
+          baseUrl: env.ozonApiBase,
+          enableRealSubmit: false,
+        });
+        const warehouses = await client.listWarehouses();
+        toolCalls.push({
+          name: "list_ozon_warehouses",
+          at,
+          input: { storeId: store.id },
+          output: {
+            storeName: store.name,
+            warehouses: warehouses.map((warehouse) => ({
+              id: warehouse.warehouse_id,
+              name: warehouse.name,
+              isRfbs: warehouse.is_rfbs ?? false,
+              status: warehouse.status ?? null,
+            })),
+          },
+        });
+        return { store: { id: store.id, name: store.name }, warehouses };
+      },
+    });
+
     const proposeDraftTool = tool({
       name: "propose_content_draft",
       description:
@@ -1777,6 +1846,21 @@ export async function runOzonContentAgent(params: {
         actions: z.array(productMutationActionSchema).min(1).max(20),
       }),
       execute: async ({ actions }) => {
+        const stockActions = actions.filter((action) => action.type === "UPDATE_STOCK");
+        const inventoryTarget = inventoryTargetFromPrompt(prompt);
+        if (stockActions.length && inventoryTarget?.mode === "ambiguous") {
+          throw new Error("库存目标不明确：请先询问用户是增加库存还是补到目标总库存。");
+        }
+        if (
+          stockActions.length &&
+          inventoryTarget?.mode === "set_total" &&
+          stockActions.some((action) => action.payload?.stock !== inventoryTarget.value)
+        ) {
+          throw new Error("库存草案与用户确认的目标总库存不一致。");
+        }
+        if (stockActions.some((action) => !action.payload?.warehouseId)) {
+          throw new Error("库存草案缺少已读取并确认的仓库。");
+        }
         const store = latestProductContent
           ? { id: latestProductContent.storeId }
           : await resolveStore(params.tenantId, params.storeId);
@@ -1832,32 +1916,85 @@ export async function runOzonContentAgent(params: {
         sessionId: session.id,
         id: { not: userMessage.id },
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
       take: 20,
       select: { role: true, content: true },
     });
+    const previousRun = await prisma.agentRun.findFirst({
+      where: {
+        tenantId: params.tenantId,
+        sessionId: session.id,
+        id: { not: runRecord.id },
+        status: AgentRunStatus.SUCCEEDED,
+      },
+      orderBy: { startedAt: "desc" },
+      select: { toolCallsJson: true },
+    });
+    const previousTaskContext = inventoryTaskContextForStore(
+      rawRecord(previousRun?.toolCallsJson).taskContext,
+      params.storeId,
+    );
     const competitorMemoryContext = await loadCompetitorMemoryContext(params.tenantId);
     const planContext = [
       "本次任务必须按以下计划执行；涉及真实店铺、竞品、商品、活动和 Ozon 写操作时，必须调用对应工具，不允许猜测。",
       ...agentPlan.map((item, index) => `${index + 1}. ${item.title}：${item.description}`),
     ].join("\n");
 
-    if (requiredToolName === "get_ozon_store_snapshot") {
+    if (requiredToolName === "diagnose_ozon_store") {
+      const diagnosis = await runStoreDiagnosis(params.storeId ?? null);
+      preloadedContext = [
+        planContext,
+        competitorMemoryContext,
+        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        "店铺诊断已经由后端真实工具完成。请直接总结自家数据，并按需读取具体商品、创建待确认草案，不要再次调用诊断工具。没有实际竞品证据时不要输出竞品结论。",
+        JSON.stringify({
+          store: diagnosis.store,
+          current30d: diagnosis.current30d,
+          previous30d: diagnosis.previous30d,
+          financeDataAvailable: diagnosis.financeDataAvailable,
+          issues: diagnosis.issues,
+          lowStockProducts: diagnosis.lowStockProducts,
+          lowContentRatingProducts: diagnosis.lowContentRatingProducts,
+        }),
+      ].filter(Boolean).join("\n");
+    } else if (requiredToolName === "analyze_ozon_competitors") {
+      const competitors = await runCompetitorAnalysis({
+        storeId: params.storeId ?? null,
+        throwOnError: true,
+      });
+      preloadedContext = [
+        planContext,
+        competitorMemoryContext,
+        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+        "同类竞品分析已经由后端真实工具完成。请直接输出业务对比和建议，不要再次调用竞品工具。",
+        JSON.stringify(competitors),
+      ].filter(Boolean).join("\n");
+    } else if (requiredToolName === "get_ozon_store_snapshot") {
       const snapshot = await readStoreSnapshot(params.storeId);
       preloadedContext = [
         planContext,
         competitorMemoryContext,
+        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
         `店铺：${snapshot.store?.name ?? "未选择"}`,
         `商品数：${snapshot.latestSnapshot?.productCount ?? "未知"}`,
         `可见商品数：${snapshot.latestSnapshot?.visibleProductCount ?? "未知"}`,
         `总库存：${snapshot.latestSnapshot?.totalStock ?? "未知"}`,
         `同步时间：${snapshot.latestSnapshot?.syncedAt ?? snapshot.capturedAt}`,
+        `低库存商品：${JSON.stringify(snapshot.products
+          .filter((product) => product.stock !== null && product.stock <= 5)
+          .map((product) => ({
+            offerId: product.offerId,
+            productId: product.productId,
+            name: product.name,
+            stock: product.stock,
+          })))}`,
       ].filter(Boolean).join("\n");
     } else if (requiredToolName === "get_ozon_product_content" && offerId) {
       const product = await readProductContent(offerId, params.storeId);
       preloadedContext = [
         planContext,
         competitorMemoryContext,
+        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
         `商品 offerId：${product.offerId}`,
         `商品名称：${product.name ?? "未知"}`,
         `商品状态：${product.status ?? "未知"}`,
@@ -1867,32 +2004,46 @@ export async function runOzonContentAgent(params: {
         `当前描述：${product.description ?? "未知"}`,
       ].filter(Boolean).join("\n");
     } else {
-      preloadedContext = [planContext, competitorMemoryContext].filter(Boolean).join("\n");
+      preloadedContext = [
+        planContext,
+        competitorMemoryContext,
+        previousTaskContext ? `上一轮任务上下文：${JSON.stringify(previousTaskContext)}` : "",
+      ].filter(Boolean).join("\n");
     }
+
+    const preloadedToolNames = new Set(
+      requiredToolName === "diagnose_ozon_store"
+        ? ["diagnose_ozon_store"]
+        : requiredToolName === "analyze_ozon_competitors"
+          ? ["analyze_ozon_competitors"]
+          : [],
+    );
+    const availableTools = [
+      getStoreSnapshotTool,
+      diagnoseStoreTool,
+      analyzeCompetitorsTool,
+      listPromotionsTool,
+      getPromotionCandidatesTool,
+      compilePromotionPolicyTool,
+      proposePromotionEnrollmentTool,
+      getProductTool,
+      listWarehousesTool,
+      proposeDraftTool,
+      proposeProductMutationTool,
+    ].filter((agentTool) => !preloadedToolNames.has(agentTool.name));
 
     const agent = new Agent({
       name: "Ozon Operations Agent",
       model: contentAgentModelName(env.openaiBaseUrl, env.openaiAgentModel),
       modelSettings: contentAgentModelSettings(env.openaiBaseUrl),
       instructions: buildInstructions(offerId),
-      tools: [
-        getStoreSnapshotTool,
-        diagnoseStoreTool,
-        analyzeCompetitorsTool,
-        listPromotionsTool,
-        getPromotionCandidatesTool,
-        compilePromotionPolicyTool,
-        proposePromotionEnrollmentTool,
-        getProductTool,
-        proposeDraftTool,
-        proposeProductMutationTool,
-      ],
+      tools: availableTools,
     });
     const runner = new Runner({
       modelProvider: createModelProvider(),
       tracingDisabled: !env.openaiAgentTraceSensitiveData,
     });
-    const result = await runner.run(agent, buildInput(prompt, history, preloadedContext), {
+    const result = await runner.run(agent, buildAgentInput(prompt, history, preloadedContext), {
       maxTurns: 12,
     });
 
@@ -1956,81 +2107,130 @@ export async function runOzonContentAgent(params: {
     if (
       !createdActionIds.length &&
       !offerId &&
-      contentOptimizationIntent(prompt) &&
+      (contentOptimizationIntent(prompt) || storeDiagnosisIntent(prompt)) &&
       latestLowContentOfferId &&
       !hasFoundProduct(latestProductContent)
     ) {
       await readProductContent(latestLowContentOfferId, params.storeId).catch(() => null);
     }
 
+    const productForDraftRecovery = latestProductContent as NormalizedProductContent | null;
+    if (
+      !createdActionIds.length &&
+      hasFoundProduct(productForDraftRecovery) &&
+      shouldCreateFallbackContentDraft(prompt, offerId)
+    ) {
+      const actionCountBeforeRecovery = createdActionIds.length;
+      const recoveryAgent = new Agent({
+        name: "Ozon Draft Recovery Agent",
+        model: contentAgentModelName(env.openaiBaseUrl, env.openaiAgentModel),
+        modelSettings: contentAgentModelSettings(env.openaiBaseUrl),
+        instructions: [
+          "你负责补全遗漏的 Ozon 内容草案，必须使用中文说明并调用 propose_content_draft。",
+          "只根据提供的自家商品真实内容提出标题、描述或关键词建议，不得编造材质、功能、认证、品牌或配件。",
+          "建议必须和当前内容有实质差异；如果没有可靠改进，不要创建相同内容的草案。",
+          "只创建待确认草案，不直接修改 Ozon。",
+        ].join("\n"),
+        tools: [proposeDraftTool],
+      });
+      await runner.run(
+        recoveryAgent,
+        [
+          `用户请求：${prompt}`,
+          `商品：${JSON.stringify({
+            offerId: productForDraftRecovery.offerId,
+            name: productForDraftRecovery.name,
+            description: productForDraftRecovery.description,
+            attributes: productForDraftRecovery.attributes,
+          })}`,
+          `上一轮分析：${String(result.finalOutput ?? "未生成草案")}`,
+        ].join("\n\n"),
+        { maxTurns: 4 },
+      ).catch((error) => {
+        toolCalls.push({
+          name: "propose_content_draft",
+          at: new Date().toISOString(),
+          input: { offerId: productForDraftRecovery.offerId, recovery: true },
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      if (createdActionIds.length > actionCountBeforeRecovery) {
+        fallbackDraftOutput = [
+          String(result.finalOutput ?? "店铺诊断已完成。"),
+          "",
+          "Agent 已补充生成待确认的内容优化草案，确认前不会修改 Ozon。",
+        ].join("\n");
+      }
+    }
+
     const productForFallbackDraft = latestProductContent as NormalizedProductContent | null;
     if (
       !createdActionIds.length &&
       hasFoundProduct(productForFallbackDraft) &&
-      (shouldRequireContentDraft(prompt, offerId) || (!offerId && contentOptimizationIntent(prompt)))
+      shouldCreateFallbackContentDraft(prompt, offerId)
     ) {
       const suggestion = fallbackContentDraftSuggestion(productForFallbackDraft);
-      const created = await createAgentActions({
-        tenantId: params.tenantId,
-        sessionId: session.id,
-        runId: runRecord.id,
-        requestedBy: params.userId,
-        actions: [
-          {
-            type: AgentActionType.CONTENT_DRAFT,
-            title: `标题优化建议：${productForFallbackDraft.offerId}`,
-            rationale: "Agent 已读取商品但未创建内容草稿，系统生成一条保守待确认建议，避免直接失败。",
-            riskLevel: AgentRiskLevel.LOW,
-            storeId: productForFallbackDraft.storeId,
-            offerId: productForFallbackDraft.offerId,
-            productId: productForFallbackDraft.productId,
-            payload: {
-              agentVersion: "ozon_content_v1",
-              summaryZh: "系统兜底生成的保守标题优化建议，需人工确认后才会执行。",
-              suggestions: [suggestion],
-              product: productForFallbackDraft,
+      if (suggestion) {
+        const created = await createAgentActions({
+          tenantId: params.tenantId,
+          sessionId: session.id,
+          runId: runRecord.id,
+          requestedBy: params.userId,
+          actions: [
+            {
+              type: AgentActionType.CONTENT_DRAFT,
+              title: `标题优化建议：${productForFallbackDraft.offerId}`,
+              rationale: "Agent 已读取商品但未创建内容草稿，系统生成一条保守待确认建议，避免直接失败。",
+              riskLevel: AgentRiskLevel.LOW,
+              storeId: productForFallbackDraft.storeId,
+              offerId: productForFallbackDraft.offerId,
+              productId: productForFallbackDraft.productId,
+              payload: {
+                agentVersion: "ozon_content_v1",
+                summaryZh: "系统兜底生成的保守标题优化建议，需人工确认后才会执行。",
+                suggestions: [suggestion],
+                product: productForFallbackDraft,
+              },
             },
+          ],
+        });
+        createdActionIds.push(...created.map((item) => item.id));
+        toolCalls.push({
+          name: "propose_content_draft",
+          at: new Date().toISOString(),
+          input: {
+            offerId: productForFallbackDraft.offerId,
+            suggestionCount: 1,
+            fallback: true,
           },
-        ],
-      });
-      createdActionIds.push(...created.map((item) => item.id));
-      toolCalls.push({
-        name: "propose_content_draft",
-        at: new Date().toISOString(),
-        input: {
-          offerId: productForFallbackDraft.offerId,
-          suggestionCount: 1,
-          fallback: true,
-        },
-        output: {
-          created: created.map((item) => ({
-            id: item.id,
-            type: item.type,
-            status: item.status,
-          })),
-        },
-      });
-      fallbackDraftOutput = [
-        `已为 ${productForFallbackDraft.offerId} 生成 1 条待确认的内容修改建议，未直接执行 Ozon。`,
-        "",
-        "| 项目 | 修改前 | 修改后 |",
-        "|---|---|---|",
-        `| 标题 | ${suggestion.current} | ${suggestion.suggestedRu} |`,
-        "",
-        `原因：${suggestion.reasonZh}`,
-        "你确认后再执行该待审批动作。",
-      ].join("\n");
+          output: {
+            created: created.map((item) => ({
+              id: item.id,
+              type: item.type,
+              status: item.status,
+            })),
+          },
+        });
+        fallbackDraftOutput = [
+          `已为 ${productForFallbackDraft.offerId} 生成 1 条待确认的内容修改建议，未直接执行 Ozon。`,
+          "",
+          `标题：${suggestion.current} → ${suggestion.suggestedRu}`,
+          `原因：${suggestion.reasonZh}`,
+          "你确认后再执行该待审批动作。",
+        ].join("\n");
+      }
     }
 
     const output =
       fallbackPromotionPolicyOutput ??
       fallbackDraftOutput ??
       String(result.finalOutput ?? "Agent 没有返回内容。");
-    const blockedMissingTool = requiredToolName
-      ? !requiredToolSatisfied(toolCalls, requiredToolName)
-      : false;
+    const missingRequiredTools = requiredToolNames.filter(
+      (toolName) => !requiredToolSatisfied(toolCalls, toolName),
+    );
+    const blockedMissingTool = missingRequiredTools.length > 0;
     const guardedOutput = blockedMissingTool && requiredToolName
-      ? blockedMissingToolOutput(requiredToolName)
+      ? blockedMissingToolOutput(missingRequiredTools.join("、"))
       : output;
     const dataSources = contentAgentDataSourcesFromToolCalls(toolCalls);
     const executionTrace = buildAgentExecutionTrace({
@@ -2051,7 +2251,9 @@ export async function runOzonContentAgent(params: {
         toolCalls,
         createdActionIds,
         requiredToolName,
+        requiredToolNames,
         blockedMissingTool,
+        taskContext: inventoryTaskContextFromToolCalls(toolCalls),
         plan: agentPlan,
         executionTrace,
         dataSources,

@@ -9,7 +9,7 @@ import {
 describe("content agent task routing", () => {
   it("does not force competitor collection for store or inventory diagnosis", () => {
     expect(requiredOzonToolsForPrompt("检查店铺库存，不用竞品", null)).toEqual([
-      "diagnose_ozon_store",
+      "get_ozon_store_snapshot",
     ]);
     expect(requiredOzonToolsForPrompt("给我的店铺做一次完整诊断", null)).toEqual([
       "diagnose_ozon_store",
@@ -23,5 +23,12 @@ describe("content agent task routing", () => {
       "analyze_ozon_competitors",
     ]);
     expect(competitorsPerCategoryFromPrompt("每个类目分析 3 个竞品")).toBe(3);
+  });
+
+  it("requires store data and warehouses before stock mutation drafts", () => {
+    expect(requiredOzonToolsForPrompt("这三个每款补到20", null)).toEqual([
+      "get_ozon_store_snapshot",
+      "list_ozon_warehouses",
+    ]);
   });
 });

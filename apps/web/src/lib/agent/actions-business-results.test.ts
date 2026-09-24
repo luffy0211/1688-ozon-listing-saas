@@ -23,4 +23,10 @@ describe("Ozon mutation business results", () => {
       ],
     })).toThrow("ozon_mutation_partial");
   });
+
+  it("rejects empty business results because HTTP success is not mutation proof", () => {
+    expect(() => assertOzonMutationSucceeded({ result: { items: [] } })).toThrow(
+      "ozon_mutation_unknown",
+    );
+  });
 });

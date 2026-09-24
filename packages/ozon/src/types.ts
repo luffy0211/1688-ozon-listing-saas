@@ -142,6 +142,14 @@ export type CategoryNode = {
   children?: CategoryNode[];
 };
 
+export type OzonWarehouse = {
+  warehouse_id: number;
+  name: string;
+  is_rfbs?: boolean;
+  is_economy?: boolean;
+  status?: string;
+};
+
 export type CategoryAttribute = {
   id: number;
   attribute_id?: number;
@@ -402,10 +410,10 @@ export type OzonAnalyticsProduct = {
   offerId: string;
   name: string | null;
   status: string | null;
-  visible: boolean;
+  visible: boolean | null;
   archived: boolean;
-  stock: number;
-  reservedStock: number;
+  stock: number | null;
+  reservedStock: number | null;
   priceRub: number | null;
   imageUrl: string | null;
   publicSku: string | null;
@@ -433,10 +441,10 @@ export type OzonOrderSummary = {
 
 export type OzonAnalyticsSummary = {
   productCount: number;
-  visibleProductCount: number;
+  visibleProductCount: number | null;
   archivedProductCount: number;
-  totalStock: number;
-  lowStockCount: number;
+  totalStock: number | null;
+  lowStockCount: number | null;
   fbsOrderCount: number;
   fboOrderCount: number;
   pendingShipmentCount: number;

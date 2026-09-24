@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { inventoryTaskContextFromToolCalls, inventoryTargetFromPrompt } from "./inventory-task";
+import {
+  inventoryTaskContextForStore,
+  inventoryTaskContextFromToolCalls,
+  inventoryTargetFromPrompt,
+} from "./inventory-task";
 
 describe("inventory task target", () => {
   it("treats 补到20 as an absolute target", () => {
@@ -46,5 +50,16 @@ describe("inventory task context", () => {
         { offerId: "C", productId: "3", stock: 5 },
       ],
     });
+  });
+
+  it("does not reuse a previous product set after switching stores", () => {
+    const context = {
+      version: 1,
+      storeId: "store-1",
+      selectedProducts: [{ offerId: "A", productId: "1", stock: 0 }],
+    };
+
+    expect(inventoryTaskContextForStore(context, "store-2")).toBeNull();
+    expect(inventoryTaskContextForStore(context, "store-1")).toEqual(context);
   });
 });

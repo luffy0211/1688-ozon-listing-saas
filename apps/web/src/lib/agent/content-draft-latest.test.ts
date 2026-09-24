@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { contentDraftImportPayload } from "./actions";
+import { contentDraftFieldConflicts, contentDraftImportPayload } from "./actions";
 
 describe("content draft latest product merge", () => {
   it("preserves fields changed in Ozon after the draft was created", () => {
@@ -31,7 +31,7 @@ describe("content draft latest product merge", () => {
 
     const result = contentDraftImportPayload(action, {
       offer_id: "SKU-1",
-      name: "Title changed directly in Ozon",
+      name: "Old title",
       description: "Description changed directly in Ozon",
       description_category_id: 10,
       type_id: 20,
@@ -58,4 +58,16 @@ describe("content draft latest product merge", () => {
       depth: 31,
     });
   });
+});
+
+it("detects changes to an approved target field before execution", () => {
+  expect(contentDraftFieldConflicts({
+    offerId: "SKU-1",
+    payloadJson: {
+      suggestions: [{ field: "title", current: "Old title", suggestedRu: "Approved title" }],
+    },
+  }, {
+    offer_id: "SKU-1",
+    name: "Changed directly in Ozon",
+  })).toEqual(["title"]);
 });
