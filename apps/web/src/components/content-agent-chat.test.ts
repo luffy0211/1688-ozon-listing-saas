@@ -125,6 +125,7 @@ describe("content agent command deck", () => {
       role: "assistant",
       content: "诊断完成",
       createdAt: "2026-09-24T10:00:00.000Z",
+      requestPrompt: "只做商品内容诊断",
       plan: [{ id: "plan", kind: "PLAN_TASK", title: "计划", description: "计划任务", status: "succeeded" }],
       executionTrace: [
         { id: "trace", kind: "DIAGNOSE_STORE", title: "诊断", description: "读取店铺", status: "succeeded" },
@@ -135,6 +136,7 @@ describe("content agent command deck", () => {
     expect(message.plan?.[0]?.id).toBe("plan");
     expect(message.executionTrace?.[0]?.id).toBe("trace");
     expect(message.executionTrace?.[1]?.status).toBe("succeeded");
+    expect(message.requestPrompt).toBe("只做商品内容诊断");
   });
 
   it("removes an archived session and opens the next available conversation", () => {
