@@ -12,6 +12,12 @@ const prisma = vi.hoisted(() => ({
   auditLog: {
     create: vi.fn(),
   },
+  sourceProduct: {
+    findFirst: vi.fn(),
+  },
+  pricingRule: {
+    findFirst: vi.fn(),
+  },
 }));
 
 const activatePromotionEnrollment = vi.hoisted(() => vi.fn());
@@ -22,6 +28,7 @@ const ozonClientMock = vi.hoisted(() => ({
   getProductInfoAttributes: vi.fn(),
   getProductImportInfo: vi.fn(),
   importProducts: vi.fn(),
+  importPrices: vi.fn(),
 }));
 
 vi.mock("@saas/db", () => ({
@@ -72,6 +79,17 @@ beforeEach(() => {
     description: "Описание из аннотации",
   }]);
   ozonClientMock.importProducts.mockResolvedValue({ task_id: 123 });
+  ozonClientMock.importPrices.mockResolvedValue({
+    task_id: 123,
+    raw: { result: { task_id: 123 } },
+  });
+  prisma.sourceProduct.findFirst.mockResolvedValue({
+    productFacts: [{ normalizedJson: { purchaseCny: { value: 10 } } }],
+  });
+  prisma.pricingRule.findFirst.mockResolvedValue({
+    cnyToRub: 10,
+    commissionRate: 0.15,
+  });
   ozonClientMock.getProductImportInfo.mockResolvedValue({
     items: [{ offer_id: "SKU-1", status: "imported", errors: [] }],
     total: 1,
@@ -789,6 +807,127 @@ describe("executeApprovedAgentAction", () => {
         error: "invalid_promotion_price_rule",
       },
     });
+  });
+
+  it("fails a price update when Ozon rejects it inside HTTP 200", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "price-rejected",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: "SKU-1",
+      productId: null,
+      type: "UPDATE_PRICE",
+      status: "APPROVED",
+      payloadJson: { proposedPriceRub: 300 },
+      guardrailJson: {},
+    });
+    ozonClientMock.getProductInfoList
+      .mockResolvedValueOnce([{ id: 1, offer_id: "SKU-1" }])
+      .mockResolvedValueOnce([{ id: 1, offer_id: "SKU-1", price: "300" }]);
+    ozonClientMock.importPrices.mockResolvedValue({
+      raw: {
+        result: [{
+          offer_id: "SKU-1",
+          updated: false,
+          errors: [{ code: "BAD_PRICE" }],
+        }],
+      },
+    });
+    prisma.agentAction.update.mockImplementation(async ({ data }) => ({
+      id: "price-rejected",
+      type: "UPDATE_PRICE",
+      ...data,
+    }));
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "price-rejected",
+    });
+
+    expect(result?.status).toBe("FAILED");
+    expect(prisma.agentAction.update).toHaveBeenLastCalledWith({
+      where: { id: "price-rejected" },
+      data: {
+        status: "FAILED",
+        error: expect.stringContaining("ozon_mutation_rejected"),
+      },
+    });
+    expect(refundTenantCredits).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps successful bulk price items and records rejected items as partial", async () => {
+    process.env.ENABLE_REAL_OZON_SUBMIT = "true";
+    prisma.agentAction.findFirst.mockResolvedValue({
+      id: "bulk-price-partial",
+      tenantId: "tenant-1",
+      storeId: "store-1",
+      offerId: null,
+      productId: null,
+      type: "BULK_PRODUCT_UPDATE",
+      status: "APPROVED",
+      payloadJson: {
+        items: [
+          { type: "UPDATE_PRICE", offerId: "SKU-A", proposedPriceRub: 300 },
+          { type: "UPDATE_PRICE", offerId: "SKU-B", proposedPriceRub: 320 },
+        ],
+      },
+      guardrailJson: {},
+    });
+    ozonClientMock.getProductInfoList
+      .mockResolvedValueOnce([{ id: 1, offer_id: "SKU-A" }])
+      .mockResolvedValueOnce([{ id: 1, offer_id: "SKU-A", price: "300" }])
+      .mockResolvedValueOnce([{ id: 2, offer_id: "SKU-B" }]);
+    ozonClientMock.importPrices
+      .mockResolvedValueOnce({
+        raw: { result: [{ offer_id: "SKU-A", updated: true, errors: [] }] },
+      })
+      .mockResolvedValueOnce({
+        raw: {
+          result: [{
+            offer_id: "SKU-B",
+            updated: false,
+            errors: [{ code: "BAD_PRICE" }],
+          }],
+        },
+      });
+    prisma.agentAction.update.mockImplementation(async ({ data }) => ({
+      id: "bulk-price-partial",
+      type: "BULK_PRODUCT_UPDATE",
+      ...data,
+    }));
+
+    const result = await executeApprovedAgentAction({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      actionId: "bulk-price-partial",
+    });
+
+    expect(result?.status).toBe("BLOCKED");
+    expect(prisma.agentAction.update).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { id: "bulk-price-partial" },
+      data: expect.objectContaining({
+        status: "BLOCKED",
+        error: "partial_execution",
+        guardrailJson: expect.objectContaining({
+          execution: expect.objectContaining({
+            total: 2,
+            executed: 1,
+            failed: 1,
+            results: [
+              expect.objectContaining({ offerId: "SKU-A", status: "executed" }),
+              expect.objectContaining({
+                offerId: "SKU-B",
+                status: "failed",
+                error: expect.stringContaining("ozon_mutation_rejected"),
+              }),
+            ],
+          }),
+        }),
+      }),
+    }));
+    expect(refundTenantCredits).not.toHaveBeenCalled();
   });
 
   it("rejects a promotion policy with an unsafe scope", async () => {
