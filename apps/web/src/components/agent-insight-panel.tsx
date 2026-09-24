@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import {
   BarChart3,
   ChevronRight,
@@ -9,7 +10,7 @@ import {
   ScanSearch,
   Sparkles,
 } from "lucide-react";
-import { cn } from "./ui";
+import { Button, cn } from "./ui";
 
 export type AgentInsightSource = {
   toolName: string;
@@ -47,6 +48,39 @@ export type AgentInsightSource = {
   }>;
   error?: string | null;
 };
+
+type AgentInsightAction = {
+  type: string;
+};
+
+export type AgentInsightPresentation = {
+  showStoreDiagnosis: boolean;
+  showContentDiagnosis: boolean;
+  showContentProducts: boolean;
+  showCompetitorComparison: boolean;
+};
+
+export function insightPresentationFor(
+  requestPrompt: string,
+  actions: AgentInsightAction[],
+): AgentInsightPresentation {
+  const contentFocused = /(?:商品内容|内容评分|商品优化|优化商品)|(?:内容|文案).{0,8}(?:诊断|体检|优化|改进|修改|草案|草稿)|(?:诊断|体检|优化|改进|修改|生成).{0,8}(?:内容|文案|标题|描述|简介|关键词|图片|主图|视频|属性|草案|草稿)|(?:content|listing|draft)/i.test(requestPrompt);
+  const competitorFocused = /(?:竞品|竞争对手|同款|对比)/i.test(requestPrompt);
+  const otherFocusedTask = /(?:库存|仓库|补货|价格|售价|活动|促销|报名|上架|下架|归档|类目).{0,8}(?:诊断|分析|检查|修改|调整)|(?:诊断|分析|检查|修改|调整|只看|重点看).{0,8}(?:库存|仓库|补货|价格|售价|活动|促销|报名|上架|下架|归档|类目)/i.test(requestPrompt);
+  const storeDiagnosis = /(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检|分析).{0,8}(?:店铺|经营|运营)/i.test(requestPrompt);
+  const broadStoreDiagnosis = storeDiagnosis && /(?:完整|全面|深度|全部|所有)/i.test(requestPrompt);
+  const hasContentDraft = actions.some((action) => action.type === "CONTENT_DRAFT");
+  const showContentDiagnosis = contentFocused;
+
+  return {
+    showStoreDiagnosis: broadStoreDiagnosis || (
+      storeDiagnosis && !showContentDiagnosis && !competitorFocused && !otherFocusedTask
+    ),
+    showContentDiagnosis,
+    showContentProducts: showContentDiagnosis && !hasContentDraft,
+    showCompetitorComparison: competitorFocused,
+  };
+}
 
 const commands = [
   {
@@ -124,68 +158,6 @@ function Metric({ label, value, accent }: { label: string; value: string | numbe
   );
 }
 
-function DiagnosisInsight({ source }: { source: AgentInsightSource }) {
-  const products = source.lowContentRatingProducts ?? [];
-  return (
-    <div className="rounded-xl border border-[#f3dfd2] bg-[#fffaf6] p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 font-bold text-[#702400]">
-          <Gauge className="h-4 w-4" aria-hidden="true" /> 店铺诊断快照
-        </div>
-        <span className="rounded-md bg-[#ff5b22] px-2 py-1 text-[11px] font-bold text-white">
-          {source.financeDataAvailable ? "含财务流水" : "经营数据"}
-        </span>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Metric label="商品总数" value={source.productCount ?? "-"} accent="#ff5b22" />
-        <Metric label="低内容评分" value={source.lowContentRatingCount ?? 0} accent="#d858a8" />
-        <Metric label="问题项" value={source.issues?.length ?? 0} accent="#f5c842" />
-        <Metric label="数据状态" value={source.status === "ok" ? "已同步" : "异常"} accent="#18a7a0" />
-      </div>
-      {source.issues?.length ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {source.issues.slice(0, 5).map((issue) => (
-            <span key={issue} className="border-l-4 border-[#f5c842] bg-white px-2 py-1 text-xs text-gray-700">
-              {issue}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {products.length ? (
-        <div className="mt-3 space-y-2">
-          {products.slice(0, 5).map((product) => (
-            <div key={product.offerId} className="grid grid-cols-[48px_1fr] gap-2 border-t border-[#ffd7be] pt-2 sm:grid-cols-[48px_1fr_100px]">
-              {product.imageUrl ? (
-                <img
-                  src={product.imageUrl}
-                  alt=""
-                  className="h-16 w-12 border border-[#ffd7be] bg-white object-contain"
-                />
-              ) : (
-                <div className="flex h-16 w-12 items-center justify-center border border-dashed border-[#ffb27f] bg-white text-[10px] text-gray-400">无图</div>
-              )}
-              <div className="min-w-0">
-                <div className="line-clamp-1 text-xs font-bold text-gray-950">{product.title ?? product.offerId}</div>
-                <div className="mt-1 line-clamp-2 text-xs text-gray-600">
-                  {product.recommendations.slice(0, 2).join("；") || "等待生成优化建议"}
-                </div>
-              </div>
-              <div className="col-span-2 sm:col-span-1">
-                <div className="flex justify-between text-[11px] font-semibold text-gray-600">
-                  <span>内容评分</span><span>{product.contentRating}</span>
-                </div>
-                <div className="mt-1 h-2 overflow-hidden rounded-sm bg-[#ffd7be]">
-                  <div className="h-full bg-[#ff5b22]" style={{ width: `${Math.max(4, Math.min(product.contentRating, 100))}%` }} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -194,6 +166,17 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function safeExternalUrl(value: unknown) {
+  const text = stringValue(value);
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    return url.protocol === "http:" || url.protocol === "https:" ? text : null;
+  } catch {
+    return null;
+  }
 }
 
 function numberValue(value: unknown) {
@@ -239,11 +222,10 @@ function percentLabel(value: number | null | undefined) {
 function problemSummary(product: NonNullable<AgentInsightSource["lowContentRatingProducts"]>[number]) {
   const text = product.recommendations.join(" ");
   const parts = [
-    product.visible === false ? "不可见" : null,
-    product.stock === 0 ? "无库存" : product.stock !== null && product.stock !== undefined && product.stock <= 5 ? "低库存" : null,
     /Аннотация|简介/i.test(text) ? "简介缺失" : null,
     /Видео|视频/i.test(text) ? "缺视频" : null,
     /изображ|图片|Изображения/i.test(text) ? "图片不足" : null,
+    /атрибут|属性/i.test(text) ? "属性不完整" : null,
   ].filter(Boolean);
   return parts.length ? parts.join(" · ") : product.recommendations[0] ?? "内容信息不完整";
 }
@@ -261,7 +243,13 @@ function primaryStoreProblem(source?: AgentInsightSource | null) {
   return "暂未发现高优先级异常，继续观察订单和内容质量。";
 }
 
-function StoreAnomalyOverview({ source }: { source?: AgentInsightSource | null }) {
+function StoreAnomalyOverview({
+  source,
+  onRun,
+}: {
+  source?: AgentInsightSource | null;
+  onRun?: (prompt: string) => void;
+}) {
   const productCount = source?.productCount ?? 0;
   const visible = source?.visibleProductCount ?? null;
   const invisible = visible === null ? null : Math.max(productCount - visible, 0);
@@ -272,18 +260,42 @@ function StoreAnomalyOverview({ source }: { source?: AgentInsightSource | null }
   ).length;
   const issues = [
     invisible && invisible > 0
-      ? { label: "商品不可见", value: invisible, action: "先查审核、价格、仓库和库存状态", tone: "bg-red-50 text-red-800 border-red-200" }
+      ? {
+          label: "商品不可见",
+          value: invisible,
+          action: "查清哪些商品不可见以及平台已返回的原因",
+          prompt: "请只查看当前不可见商品，说明已确认原因和下一步，不要直接修改。",
+          tone: "bg-red-50 text-red-800 border-red-200",
+        }
       : null,
     zeroStock > 0
-      ? { label: "无库存样本", value: zeroStock, action: "确认是否补库存后再优化内容", tone: "bg-orange-50 text-orange-800 border-orange-200" }
+      ? {
+          label: "无库存商品",
+          value: zeroStock,
+          action: "查看商品和可用仓库，再决定是否生成库存草案",
+          prompt: "请只查看当前无库存商品和可用仓库，告诉我可执行的下一步，不要直接修改库存。",
+          tone: "bg-orange-50 text-orange-800 border-orange-200",
+        }
       : null,
     lowStock > 0
-      ? { label: "低库存商品", value: lowStock, action: "补货或暂停推广", tone: "bg-amber-50 text-amber-800 border-amber-200" }
+      ? {
+          label: "低库存商品",
+          value: lowStock,
+          action: "先查看具体商品和可用仓库",
+          prompt: "请只分析当前低库存商品，列出具体商品和可执行的处理步骤，不要直接修改库存。",
+          tone: "bg-amber-50 text-amber-800 border-amber-200",
+        }
       : null,
     (source?.lowContentRatingCount ?? 0) > 0
-      ? { label: "低内容分", value: source?.lowContentRatingCount ?? 0, action: "补简介、图片、视频和真实属性", tone: "bg-blue-50 text-blue-800 border-blue-200" }
+      ? {
+          label: "低内容分",
+          value: source?.lowContentRatingCount ?? 0,
+          action: "查看 Ozon 返回的具体内容缺项",
+          prompt: "请只做商品内容诊断，列出内容评分最低的商品和 Ozon 官方改进项，不要分析库存或其他经营问题。",
+          tone: "bg-blue-50 text-blue-800 border-blue-200",
+        }
       : null,
-  ].filter((item): item is { label: string; value: number; action: string; tone: string } => Boolean(item));
+  ].filter((item): item is { label: string; value: number; action: string; prompt: string; tone: string } => Boolean(item));
 
   return (
     <div className="rounded-2xl border border-[#f0d4c3] bg-[#fff8f3] p-4 shadow-[0_10px_28px_rgba(122,73,39,0.08)]">
@@ -292,7 +304,7 @@ function StoreAnomalyOverview({ source }: { source?: AgentInsightSource | null }
           <div className="text-xs font-black uppercase tracking-wide text-[#ff5b22]">店铺运营诊断报告</div>
           <div className="mt-1 text-base font-black text-gray-950">{primaryStoreProblem(source)}</div>
         </div>
-        <span className="rounded-full bg-[#ff5b22] px-3 py-1 text-xs font-bold text-white">先处理异常，再优化内容</span>
+        <span className="rounded-full bg-[#ff5b22] px-3 py-1 text-xs font-bold text-white">选择一项继续处理</span>
       </div>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-4">
@@ -308,6 +320,14 @@ function StoreAnomalyOverview({ source }: { source?: AgentInsightSource | null }
             <div key={issue.label} className={cn("rounded-xl border px-3 py-2", issue.tone)}>
               <div className="text-xs font-bold">{issue.label}：{issue.value}</div>
               <div className="mt-1 text-xs">{issue.action}</div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-2 h-8 bg-white px-2 text-xs"
+                onClick={() => onRun?.(issue.prompt)}
+              >
+                查看并处理
+              </Button>
             </div>
           ))}
         </div>
@@ -316,12 +336,53 @@ function StoreAnomalyOverview({ source }: { source?: AgentInsightSource | null }
   );
 }
 
-function PriorityProducts({ source }: { source?: AgentInsightSource | null }) {
+function ContentDiagnosisOverview({
+  source,
+  draftCount,
+}: {
+  source?: AgentInsightSource | null;
+  draftCount: number;
+}) {
+  if (!source) return null;
+  const recommendations = [...new Set(
+    (source.lowContentRatingProducts ?? []).flatMap((product) => product.recommendations),
+  )].slice(0, 4);
+  return (
+    <div className="rounded-2xl border border-[#dce8f5] bg-[#f8fbff] p-4 shadow-[0_10px_28px_rgba(45,78,128,0.08)]">
+      <div className="text-xs font-black uppercase tracking-wide text-[#3478f6]">商品内容诊断</div>
+      <div className="mt-1 text-base font-black text-gray-950">
+        {source.lowContentRatingCount ?? 0} 个商品内容分偏低
+      </div>
+      <div className="mt-1 text-xs text-gray-600">
+        {draftCount > 0
+          ? `本轮已生成 ${draftCount} 份内容草案，请在下方查看处理状态。`
+          : "建议从内容评分最低的商品开始处理。"}
+      </div>
+      {recommendations.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {recommendations.map((recommendation) => (
+            <span key={recommendation} className="rounded-md bg-white px-2 py-1 text-xs text-gray-700">
+              {recommendation}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PriorityProducts({
+  source,
+  onRun,
+}: {
+  source?: AgentInsightSource | null;
+  onRun?: (prompt: string) => void;
+}) {
   const products = (source?.lowContentRatingProducts ?? []).slice(0, 4);
   if (!products.length) return null;
   return (
     <div className="rounded-2xl border border-[#dce8f5] bg-white p-4 shadow-[0_10px_28px_rgba(45,78,128,0.08)]">
-      <div className="text-sm font-black text-gray-950">优先处理商品</div>
+      <div className="text-sm font-black text-gray-950">需要优化的商品</div>
       <div className="mt-3 grid gap-3 xl:grid-cols-2">
         {products.map((product) => (
           <div key={product.offerId} className="grid grid-cols-[64px_1fr] gap-3 rounded-xl border border-[#e6edf6] bg-[#f8fbff] p-3">
@@ -338,12 +399,17 @@ function PriorityProducts({ source }: { source?: AgentInsightSource | null }) {
                 </span>
               </div>
               <div className="mt-1 line-clamp-1 text-xs text-gray-600">{product.title ?? "未命名商品"}</div>
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                <span className="rounded-md bg-white px-2 py-1 text-gray-700">库存 {product.stock ?? "-"}</span>
-                <span className="rounded-md bg-white px-2 py-1 text-gray-700">价格 {rub(product.priceRub)}</span>
-                <span className="rounded-md bg-white px-2 py-1 text-gray-700">{product.visible === false ? "不可见" : "可见状态未知"}</span>
-              </div>
               <div className="mt-2 text-xs font-semibold text-[#7c2d12]">{problemSummary(product)}</div>
+              <Button
+                type="button"
+                variant="outline"
+                className="mt-3 h-8 px-2 text-xs"
+                onClick={() => onRun?.(
+                  `请只优化商品 ${product.offerId} 的内容。读取真实商品信息，说明内容问题，并生成待确认内容草案；不要分析库存或其他店铺经营问题。`,
+                )}
+              >
+                生成内容草案
+              </Button>
             </div>
           </div>
         ))}
@@ -434,6 +500,7 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
           const own = asRecord(sample.own);
           const competitors = arrayValue(sample.competitors).map(asRecord);
           const firstCompetitor = competitors[0];
+          const competitorUrl = safeExternalUrl(firstCompetitor?.url);
           return (
             <div key={`${stringValue(sample.offerId) ?? index}`} className="overflow-hidden rounded-xl border border-[#ccebe6] bg-white">
               <div className="grid gap-3 border-b border-[#e4f4f1] bg-[#f8fffd] p-3 lg:grid-cols-[1fr_1fr]">
@@ -458,14 +525,20 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
                   )}
                   <div className="min-w-0">
                     <div className="text-[11px] font-bold text-[#087f78]">竞品参考</div>
-                    <a
-                      href={stringValue(firstCompetitor?.url) ?? undefined}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 line-clamp-2 text-xs font-black text-gray-950 hover:text-[#087f78]"
-                    >
-                      {shortText(firstCompetitor?.title, "本类目暂无有效竞品")}
-                    </a>
+                    {competitorUrl ? (
+                      <a
+                        href={competitorUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 line-clamp-2 text-xs font-black text-gray-950 hover:text-[#087f78]"
+                      >
+                        {shortText(firstCompetitor?.title, "本类目暂无有效竞品")}
+                      </a>
+                    ) : (
+                      <div className="mt-1 line-clamp-2 text-xs font-black text-gray-950">
+                        {shortText(firstCompetitor?.title, "本类目暂无有效竞品")}
+                      </div>
+                    )}
                     <div className="mt-1 text-[11px] text-gray-500">
                       价格 {rub(firstCompetitor?.priceRub)} · 评分 {numberValue(firstCompetitor?.rating) ?? "-"} · 评价 {numberValue(firstCompetitor?.reviewCount) ?? "-"}
                     </div>
@@ -495,15 +568,29 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
   );
 }
 
-function OperationsDiagnosisReport({ sources }: { sources: AgentInsightSource[] }) {
+function OperationsDiagnosisReport({
+  sources,
+  presentation,
+  actions,
+  onRun,
+}: {
+  sources: AgentInsightSource[];
+  presentation: AgentInsightPresentation;
+  actions: AgentInsightAction[];
+  onRun?: (prompt: string) => void;
+}) {
   const diagnosis = sources.find((source) => source.status === "ok" && source.toolName === "diagnose_ozon_store");
   const competitor = sources.find((source) => source.status === "ok" && source.toolName === "analyze_ozon_competitors");
   if (!diagnosis && !competitor) return null;
+  const draftCount = actions.filter((action) => action.type === "CONTENT_DRAFT").length;
   return (
     <div className="space-y-3">
-      <StoreAnomalyOverview source={diagnosis} />
-      <PriorityProducts source={diagnosis} />
-      <CompetitorBusinessComparison source={competitor} />
+      {presentation.showStoreDiagnosis ? <StoreAnomalyOverview source={diagnosis} onRun={onRun} /> : null}
+      {presentation.showContentDiagnosis ? (
+        <ContentDiagnosisOverview source={diagnosis} draftCount={draftCount} />
+      ) : null}
+      {presentation.showContentProducts ? <PriorityProducts source={diagnosis} onRun={onRun} /> : null}
+      {presentation.showCompetitorComparison ? <CompetitorBusinessComparison source={competitor} /> : null}
     </div>
   );
 }
@@ -513,14 +600,10 @@ function CompetitorCards({ sample }: { sample: Record<string, unknown> }) {
   if (!competitors.length) return null;
   return (
     <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-      {competitors.map((item, index) => (
-        <a
-          key={`${stringValue(item.url) ?? index}`}
-          href={stringValue(item.url) ?? undefined}
-          target="_blank"
-          rel="noreferrer"
-          className="grid grid-cols-[58px_1fr] gap-2 rounded-lg border border-[#ccebe6] bg-white p-2 hover:border-[#54cfc4]"
-        >
+      {competitors.map((item, index) => {
+        const competitorUrl = safeExternalUrl(item.url);
+        const content = (
+          <>
           {stringValue(item.imageUrl) ? (
             <img src={stringValue(item.imageUrl)!} alt="" className="h-20 w-14 rounded-md border bg-white object-contain" />
           ) : (
@@ -537,8 +620,23 @@ function CompetitorCards({ sample }: { sample: Record<string, unknown> }) {
               {stringValue(item.description) ?? "暂无简介摘要"}
             </div>
           </div>
-        </a>
-      ))}
+          </>
+        );
+        const className = "grid grid-cols-[58px_1fr] gap-2 rounded-lg border border-[#ccebe6] bg-white p-2";
+        return competitorUrl ? (
+          <a
+            key={`${competitorUrl}-${index}`}
+            href={competitorUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={`${className} hover:border-[#54cfc4]`}
+          >
+            {content}
+          </a>
+        ) : (
+          <div key={`competitor-${index}`} className={className}>{content}</div>
+        );
+      })}
     </div>
   );
 }
@@ -649,8 +747,19 @@ function DefaultInsight({ source }: { source: AgentInsightSource }) {
   );
 }
 
-export function AgentInsightPanel({ sources }: { sources?: AgentInsightSource[] }) {
+export function AgentInsightPanel({
+  sources,
+  requestPrompt = "",
+  actions = [],
+  onRun,
+}: {
+  sources?: AgentInsightSource[];
+  requestPrompt?: string;
+  actions?: AgentInsightAction[];
+  onRun?: (prompt: string) => void;
+}) {
   if (!sources?.length) return null;
+  const presentation = insightPresentationFor(requestPrompt, actions);
   const reportSources = sources.filter((source) =>
     ["diagnose_ozon_store", "analyze_ozon_competitors"].includes(source.toolName)
   );
@@ -661,7 +770,12 @@ export function AgentInsightPanel({ sources }: { sources?: AgentInsightSource[] 
   );
   return (
     <div className="mt-3 space-y-2">
-      <OperationsDiagnosisReport sources={reportSources} />
+      <OperationsDiagnosisReport
+        sources={reportSources}
+        presentation={presentation}
+        actions={actions}
+        onRun={onRun}
+      />
       {errorSources.map((source, index) => (
         <div key={`${source.toolName}-${source.at}-${index}`} className="flex items-start gap-2 border-l-4 border-red-500 bg-red-50 p-3 text-xs text-red-800">
           <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

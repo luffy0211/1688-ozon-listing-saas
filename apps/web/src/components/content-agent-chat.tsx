@@ -61,6 +61,7 @@ type ChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  requestPrompt?: string;
   actions?: ContentAgentActionView[];
   dataSources?: AgentInsightSource[];
   plan?: AgentTimelineStep[];
@@ -98,6 +99,7 @@ export function mapPersistedChatMessage(message: PersistedChatMessage): ChatMess
     id: message.id,
     role: message.role,
     content: message.content,
+    requestPrompt: message.requestPrompt,
     actions: message.actions,
     dataSources: message.dataSources,
     plan: message.plan,
@@ -1053,6 +1055,7 @@ export function ContentAgentChat({
           id: `assistant-${started.runId}`,
           role: "assistant",
           content: data.status === "failed" ? data.error ?? "Agent 执行失败" : data.output,
+          requestPrompt: content,
           actions: data.actions,
           dataSources: data.dataSources,
           plan: data.plan,
@@ -1218,7 +1221,14 @@ export function ContentAgentChat({
                       )}
                     >
                       <div className="whitespace-pre-wrap break-words">{message.content}</div>
-                      {message.role === "assistant" ? <AgentInsightPanel sources={message.dataSources} /> : null}
+                      {message.role === "assistant" ? (
+                        <AgentInsightPanel
+                          sources={message.dataSources}
+                          requestPrompt={message.requestPrompt}
+                          actions={message.actions}
+                          onRun={(nextPrompt) => void sendPrompt(nextPrompt)}
+                        />
+                      ) : null}
                     </div>
                     {message.actions?.some((action) => action.type === "CONTENT_DRAFT") ? (
                       <ContentDraftGroup

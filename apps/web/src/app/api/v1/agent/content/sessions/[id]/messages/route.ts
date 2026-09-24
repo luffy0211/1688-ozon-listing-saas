@@ -101,7 +101,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
             sessionId: params.id,
             id: { in: runIds },
           },
-          select: { id: true, toolCallsJson: true },
+          select: { id: true, input: true, toolCallsJson: true },
         })
       : Promise.resolve([]),
     runIds.length
@@ -140,6 +140,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
         id: message.id,
         role: message.role === "USER" ? "user" : "assistant",
         content: message.content,
+        requestPrompt: message.role === "ASSISTANT" ? run?.input : undefined,
         createdAt: message.createdAt.toISOString(),
         dataSources: message.role === "ASSISTANT" ? dataSourcesFromRun(run) : [],
         plan: message.role === "ASSISTANT" ? arrayFromRun(run, "plan") : [],
