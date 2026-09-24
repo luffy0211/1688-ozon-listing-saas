@@ -4,6 +4,7 @@ import {
   buildCompetitorBatchProposal,
   buildCompetitorContentDiagnosis,
   buildStoreDiagnosis,
+  cachedReportForTarget,
   cachedCompetitorReport,
   countUniqueCompetitors,
   lowContentRatingProducts,
@@ -219,7 +220,7 @@ describe("Ozon operations helpers", () => {
       rating: 4.8,
       reviewCount: 32,
       sellerName: "seller",
-      imageUrls: [`https://cdn.example.com/${sku}.jpg`],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes: {},
       description: "Легкое поло из хлопка для города и офиса",
       reviews: [],
@@ -269,6 +270,54 @@ describe("Ozon operations helpers", () => {
       category: { url: "https://www.ozon.ru/category/example-1/" },
       competitors: [{ sku: "1" }],
     })).toBeNull();
+    const imageLessProduct = {
+      sku: "1",
+      url: "https://www.ozon.ru/product/1/",
+      title: "Мужское поло",
+      priceRub: null,
+      oldPriceRub: null,
+      rating: null,
+      reviewCount: null,
+      sellerName: null,
+      imageUrls: [],
+      attributes: { Материал: "Хлопок" },
+      description: "Описание",
+      reviews: [],
+    };
+    expect(cachedCompetitorReport({
+      source: "ozon_search_index",
+      detailScope: "category_search_index_attributes_description_v3",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: { ...imageLessProduct, sku: "own" },
+      competitors: [imageLessProduct],
+    })).toBeNull();
+  });
+
+  it("rebuilds cached own-product data for the current category target", () => {
+    const report = cachedReportForTarget({
+      target: { offerId: "old", title: "Old product", publicSku: "1" },
+      ownProduct: { sku: "1", title: "Old product", imageUrls: ["https://ir.ozone.ru/s3/old.jpg"] },
+      competitors: [],
+    }, {
+      offerId: "current",
+      title: "Current product",
+      publicSku: "2",
+      imageUrl: "https://ir.ozone.ru/s3/current.jpg",
+      priceRub: 299,
+      quantity: 0,
+      revenueRub: 0,
+    });
+
+    expect(report).toMatchObject({
+      target: { offerId: "current", publicSku: "2" },
+      ownProduct: {
+        sku: "2",
+        title: "Current product",
+        priceRub: 299,
+        imageUrls: ["https://ir.ozone.ru/s3/current.jpg"],
+      },
+      cached: true,
+    });
   });
 
   it("rebuilds content benchmarks from cached competitor details", () => {
@@ -281,7 +330,7 @@ describe("Ozon operations helpers", () => {
       rating: null,
       reviewCount: null,
       sellerName: null,
-      imageUrls: [],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes,
       description: "Хлопковое поло для повседневной носки.",
       reviews: [],
@@ -321,7 +370,7 @@ describe("Ozon operations helpers", () => {
       rating: null,
       reviewCount: null,
       sellerName: null,
-      imageUrls: [],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes: { Материал: "Хлопок" },
       description: null,
       reviews: [],
@@ -375,7 +424,7 @@ describe("Ozon operations helpers", () => {
       rating: null,
       reviewCount: null,
       sellerName: null,
-      imageUrls: [],
+      imageUrls: [`https://ir.ozone.ru/s3/${sku}.jpg`],
       attributes,
       description,
       reviews: [],

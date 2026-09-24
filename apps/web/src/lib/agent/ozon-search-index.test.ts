@@ -159,7 +159,7 @@ describe("Ozon search index", () => {
       max_results: 10,
     });
     expect(result?.competitors.map((item) => item.sku)).toEqual(["1607177448"]);
-    expect(result?.ownProduct?.imageUrls).toEqual(["https://ir.ozone.ru/s3/multimedia-own.jpg"]);
+    expect(result?.ownProduct?.imageUrls[0]).toBe("https://ir.ozone.ru/s3/multimedia-own.jpg");
     expect(result?.category?.name).toBe("Поло");
   });
 

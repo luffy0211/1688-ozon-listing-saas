@@ -30,6 +30,8 @@ export type OzonCompetitorTarget = {
   offerId: string;
   title: string;
   publicSku: string | null;
+  imageUrl?: string | null;
+  priceRub?: number | null;
   quantity: number;
   revenueRub: number;
   descriptionCategoryId?: number | null;
@@ -39,6 +41,39 @@ export type OzonCompetitorTarget = {
   gender?: string | null;
   ageGroup?: string | null;
 };
+
+export function ozonCdnImageUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" &&
+      url.hostname === "ir.ozone.ru" &&
+      /\.(?:avif|gif|jpe?g|png|webp)$/i.test(url.pathname)
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function ownOzonProduct(target: OzonCompetitorTarget): OzonPublicProduct {
+  const sku = target.publicSku ?? target.offerId;
+  const imageUrl = ozonCdnImageUrl(target.imageUrl);
+  return {
+    sku,
+    url: target.publicSku ? `https://www.ozon.ru/product/${target.publicSku}/` : "",
+    title: target.title,
+    priceRub: target.priceRub ?? null,
+    oldPriceRub: null,
+    rating: null,
+    reviewCount: null,
+    sellerName: null,
+    imageUrls: imageUrl ? [imageUrl] : [],
+    attributes: {},
+    description: null,
+    reviews: [],
+  };
+}
 
 export type OzonCategoryCompetitorResult = {
   target: OzonCompetitorTarget;
@@ -264,9 +299,8 @@ function allImages(values: unknown[]) {
   const images = new Set<string>();
   const collect = (value: unknown): void => {
     if (typeof value === "string") {
-      if (/^https:\/\//i.test(value) && /\.(?:avif|jpe?g|png|webp)(?:\?|$)/i.test(value)) {
-        images.add(value);
-      }
+      const imageUrl = ozonCdnImageUrl(value);
+      if (imageUrl) images.add(imageUrl);
       return;
     }
     if (Array.isArray(value)) return value.forEach(collect);

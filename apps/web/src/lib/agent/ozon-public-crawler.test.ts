@@ -103,7 +103,7 @@ describe("Ozon public category crawler", () => {
       states({
         "webProductHeading-1": { title: "Платье женское" },
         "webPrice-1": { price: "1 990 ₽", originalPrice: "2 500 ₽" },
-        "webGallery-1": { images: ["https://cdn.test/own-1.jpg"] },
+        "webGallery-1": { images: ["https://ir.ozone.ru/s3/own-1.jpg"] },
         "webCharacteristics-1": {
           characteristics: [{ name: "Материал", values: [{ text: "Полиэстер" }] }],
         },
@@ -116,7 +116,7 @@ describe("Ozon public category crawler", () => {
           "webProductHeading-1": { title: "Платье женское летнее шифоновое" },
           "webPrice-1": { price: "1 500 ₽" },
           "webGallery-1": {
-            images: ["https://cdn.test/a.jpg", "https://cdn.test/b.jpg", "https://cdn.test/c.jpg"],
+            images: ["https://ir.ozone.ru/s3/a.jpg", "https://ir.ozone.ru/s3/b.jpg", "https://ir.ozone.ru/s3/c.jpg"],
           },
           "webReviewProductScore-1": { totalScore: "4.8", reviewsCount: "300" },
           "webDescription-1": { description: "Легкое летнее платье из шифона для прогулок." },
@@ -134,7 +134,7 @@ describe("Ozon public category crawler", () => {
           "webProductHeading-1": { title: "Платье женское летнее вечернее" },
           "webPrice-1": { price: "1 700 ₽" },
           "webGallery-1": {
-            images: ["https://cdn.test/d.jpg", "https://cdn.test/e.jpg"],
+            images: ["https://ir.ozone.ru/s3/d.jpg", "https://ir.ozone.ru/s3/e.jpg"],
           },
           "webReviewProductScore-1": { totalScore: "4.9", reviewsCount: "500" },
           "webDescription-1": { description: "Вечернее шифоновое платье с легким силуэтом." },
@@ -275,7 +275,7 @@ describe("Ozon public category crawler", () => {
       rating: 4.8,
       reviewCount: 321,
       sellerName: null,
-      imageUrls: ["https://cdn.test/card.jpg"],
+      imageUrls: ["https://ir.ozone.ru/s3/card.jpg"],
       attributes: {},
       description: null,
       reviews: [],
@@ -285,7 +285,7 @@ describe("Ozon public category crawler", () => {
       ...card,
       url: "https://www.ozon.ru/product/200/",
       sellerName: "Fashion Store",
-      imageUrls: ["https://cdn.test/detail-1.jpg", "https://cdn.test/detail-2.jpg"],
+      imageUrls: ["https://ir.ozone.ru/s3/detail-1.jpg", "https://ir.ozone.ru/s3/detail-2.jpg"],
       attributes: { Материал: "Шифон", Сезон: "Лето" },
       description: "Летнее платье",
       reviews: [{ rating: 5, text: "Хорошее платье" }],

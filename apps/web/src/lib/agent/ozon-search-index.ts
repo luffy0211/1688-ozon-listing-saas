@@ -2,6 +2,8 @@ import {
   buildCompetitorBenchmarks,
   inferOzonCategoryName,
   isUsableCompetitorEvidence,
+  ownOzonProduct,
+  ozonCdnImageUrl,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -12,6 +14,7 @@ type IndexedResult = {
   url?: string;
   content?: string;
   raw_content?: string | null;
+  images?: Array<string | { url?: string }>;
 };
 
 const ATTRIBUTE_NAMES = [
@@ -50,6 +53,13 @@ function productSku(url: string) {
 function numberFromText(value: string) {
   const parsed = Number(value.replace(/\s/g, "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function ozonImageUrls(images: IndexedResult["images"]) {
+  return [...new Set((images ?? []).flatMap((image) => {
+    const value = typeof image === "string" ? image : image.url;
+    return ozonCdnImageUrl(value) ?? [];
+  }))];
 }
 
 function extractInlinePairs(text: string) {
@@ -129,7 +139,7 @@ export function parseIndexedOzonProduct(result: IndexedResult, position: number)
     rating: ratingMatch ? numberFromText(ratingMatch[1]!) : null,
     reviewCount: ratingMatch ? numberFromText(ratingMatch[2]!) : null,
     sellerName: null,
-    imageUrls: [],
+    imageUrls: ozonImageUrls(result.images),
     attributes: extractAttributes(lines, text),
     description: extractDescription(lines, text),
     reviews: [],
@@ -183,24 +193,6 @@ function categorySearchLabel(target: OzonCompetitorTarget) {
     .join(" ");
 }
 
-function emptyOwnProduct(target: OzonCompetitorTarget): OzonPublicProduct {
-  const sku = target.publicSku ?? target.offerId;
-  return {
-    sku,
-    url: target.publicSku ? `https://www.ozon.ru/product/${target.publicSku}/` : "",
-    title: target.title,
-    priceRub: null,
-    oldPriceRub: null,
-    rating: null,
-    reviewCount: null,
-    sellerName: null,
-    imageUrls: [],
-    attributes: {},
-    description: null,
-    reviews: [],
-  };
-}
-
 export async function searchOzonIndexedCompetitors(params: {
   apiKey: string;
   targets: OzonCompetitorTarget[];
@@ -219,7 +211,7 @@ export async function searchOzonIndexedCompetitors(params: {
       results.push({
         target,
         category: null,
-        ownProduct: emptyOwnProduct(target),
+        ownProduct: ownOzonProduct(target),
         competitors: [],
         benchmarks: null,
         warnings: ["自家商品缺少 Ozon 官方类目名称，已跳过竞品搜索"],
@@ -248,6 +240,7 @@ export async function searchOzonIndexedCompetitors(params: {
           query: `site:ozon.ru/product/ ${label} Характеристики Описание`,
           include_domains: ["ozon.ru"],
           include_raw_content: "text",
+          include_images: true,
           search_depth: "advanced",
           chunks_per_source: 3,
           max_results: 10,
@@ -272,7 +265,17 @@ export async function searchOzonIndexedCompetitors(params: {
         .slice(0, params.limitPerProduct ?? 5);
       const rejectedCount = indexed.filter((item) => !matchesTargetCategory({ title: item.title }, target)).length;
       targets.forEach((currentTarget) => {
-        const ownProduct = indexed.find((item) => item.sku === currentTarget.publicSku) ?? emptyOwnProduct(currentTarget);
+        const indexedOwnProduct = indexed.find((item) => item.sku === currentTarget.publicSku) ?? ownOzonProduct(currentTarget);
+        const currentImage = ozonCdnImageUrl(currentTarget.imageUrl);
+        const ownProduct = currentImage
+          ? {
+              ...indexedOwnProduct,
+              imageUrls: [
+                currentImage,
+                ...indexedOwnProduct.imageUrls.filter((url) => url !== currentImage),
+              ],
+            }
+          : indexedOwnProduct;
         const warnings = [
           ...(rejectedCount ? [`已过滤 ${rejectedCount} 个无法证明属于 ${categoryName} 的搜索结果`] : []),
           ...(emptyEvidenceCount ? [`已过滤 ${emptyEvidenceCount} 个无效或不匹配的搜索结果`] : []),
@@ -291,7 +294,7 @@ export async function searchOzonIndexedCompetitors(params: {
       targets.forEach((currentTarget) => results.push({
         target: currentTarget,
         category,
-        ownProduct: emptyOwnProduct(currentTarget),
+        ownProduct: ownOzonProduct(currentTarget),
         competitors: [],
         benchmarks: null,
         warnings: [`搜索失败：${error instanceof Error ? error.message : String(error)}`],

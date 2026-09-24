@@ -11,6 +11,8 @@ import {
   inferOzonCategoryName,
   inferOzonGender,
   isUsableCompetitorEvidence,
+  ownOzonProduct,
+  ozonCdnImageUrl,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -87,24 +89,6 @@ function preciseOzonCategoryUrl(productType: string, gender: string | null) {
   ]).get(key);
 }
 
-function ownProduct(target: OzonCompetitorTarget): OzonPublicProduct {
-  const sku = target.publicSku ?? target.offerId;
-  return {
-    sku,
-    url: target.publicSku ? `https://www.ozon.ru/product/${target.publicSku}/` : "",
-    title: target.title,
-    priceRub: null,
-    oldPriceRub: null,
-    rating: null,
-    reviewCount: null,
-    sellerName: null,
-    imageUrls: [],
-    attributes: {},
-    description: null,
-    reviews: [],
-  };
-}
-
 export function buildOzonCrawlerJob(params: {
   requestId: string;
   targets: OzonCompetitorTarget[];
@@ -158,7 +142,7 @@ function publicProduct(value: z.infer<typeof competitorSchema>): OzonPublicProdu
     rating: value.rating ?? null,
     reviewCount: value.reviewCount ?? null,
     sellerName: value.sellerName ?? null,
-    imageUrls: value.imageUrls ?? [],
+    imageUrls: (value.imageUrls ?? []).flatMap((item) => ozonCdnImageUrl(item) ?? []),
     attributes: value.attributes,
     description: value.description ?? null,
     reviews: [],
@@ -175,7 +159,7 @@ export function parseOzonCrawlerOutput(
   return targets.map((target) => {
     const key = categoryKey(target);
     const result = key ? byCategory.get(key) : null;
-    const own = ownProduct(target);
+    const own = ownOzonProduct(target);
     const parsedCompetitors = (result?.competitors ?? []).map(publicProduct);
     const competitors = parsedCompetitors.filter((product) => isUsableCompetitorEvidence(product, target));
     const invalidEvidenceCount = parsedCompetitors.length - competitors.length;

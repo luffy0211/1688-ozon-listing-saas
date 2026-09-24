@@ -16,6 +16,8 @@ import { env } from "@/lib/env";
 import {
   buildCompetitorBenchmarks,
   isUsableCompetitorEvidence,
+  ownOzonProduct,
+  ozonCdnImageUrl,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
@@ -226,32 +228,42 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
         return right.revenue - left.revenue || right.quantity - left.quantity || right.stock - left.stock;
       })
       .map((items) => items[0]!)
-      .map((item) => ({
+      .map((item) => {
+        const imageUrl = ozonCdnImageUrl(item.imageUrl);
+        return {
+          offerId: item.offerId,
+          title: item.name!,
+          publicSku: item.publicSku,
+          ...(imageUrl ? { imageUrl } : {}),
+          priceRub: item.priceRub,
+          quantity: sales.get(item.offerId)?.quantity ?? 0,
+          revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
+          descriptionCategoryId: item.descriptionCategoryId ?? null,
+          typeId: item.typeId ?? null,
+          categoryNameRu: null,
+          categoryPathRu: [],
+        };
+      });
+  }
+
+  return pool
+    .slice(0, 5)
+    .map((item) => {
+      const imageUrl = ozonCdnImageUrl(item.imageUrl);
+      return {
         offerId: item.offerId,
         title: item.name!,
         publicSku: item.publicSku,
+        ...(imageUrl ? { imageUrl } : {}),
+        priceRub: item.priceRub,
         quantity: sales.get(item.offerId)?.quantity ?? 0,
         revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
         descriptionCategoryId: item.descriptionCategoryId ?? null,
         typeId: item.typeId ?? null,
         categoryNameRu: null,
         categoryPathRu: [],
-      }));
-  }
-
-  return pool
-    .slice(0, 5)
-    .map((item) => ({
-      offerId: item.offerId,
-      title: item.name!,
-      publicSku: item.publicSku,
-      quantity: sales.get(item.offerId)?.quantity ?? 0,
-      revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
-      descriptionCategoryId: item.descriptionCategoryId ?? null,
-      typeId: item.typeId ?? null,
-      categoryNameRu: null,
-      categoryPathRu: [],
-    }));
+      };
+    });
 }
 
 function competitorCategoryKey(value: {
@@ -541,6 +553,9 @@ const COMPETITOR_DETAIL_SCOPE = "category_search_index_attributes_description_v3
 function cachedPublicProduct(value: unknown): OzonPublicProduct | null {
   const product = record(value);
   const attributes = record(product.attributes);
+  const imageUrls = Array.isArray(product.imageUrls)
+    ? product.imageUrls.map(ozonCdnImageUrl).filter((item): item is string => Boolean(item))
+    : null;
   const nullableNumber = (item: unknown) => item === null || (typeof item === "number" && Number.isFinite(item));
   const nullableString = (item: unknown) => item === null || typeof item === "string";
   return typeof product.sku === "string" &&
@@ -552,12 +567,28 @@ function cachedPublicProduct(value: unknown): OzonPublicProduct | null {
     nullableNumber(product.reviewCount) &&
     nullableString(product.sellerName) &&
     nullableString(product.description) &&
-    Array.isArray(product.imageUrls) && product.imageUrls.every((item) => typeof item === "string") &&
+    imageUrls !== null &&
     product.attributes !== null && typeof product.attributes === "object" && !Array.isArray(product.attributes) &&
     Object.values(attributes).every((item) => typeof item === "string") &&
     Array.isArray(product.reviews)
-    ? product as OzonPublicProduct
+    ? { ...product, imageUrls } as OzonPublicProduct
     : null;
+}
+
+export function cachedReportForTarget(value: unknown, target: OzonCompetitorTarget) {
+  const report = record(value);
+  const ownProduct = ownOzonProduct(target);
+  const competitors = Array.isArray(report.competitors)
+    ? report.competitors.map(cachedPublicProduct).filter((item): item is OzonPublicProduct => Boolean(item))
+    : [];
+  return {
+    ...report,
+    target,
+    ownProduct,
+    competitors,
+    benchmarks: competitors.length ? buildCompetitorBenchmarks(ownProduct, competitors) : null,
+    cached: true,
+  };
 }
 
 export function cachedCompetitorReport(value: unknown, minimumCompetitors = 1) {
@@ -580,6 +611,7 @@ export function cachedCompetitorReport(value: unknown, minimumCompetitors = 1) {
     target ? target as OzonCompetitorTarget : null,
   );
   if (!usableCompetitors.length) return null;
+  if (!usableCompetitors.some((product) => product.imageUrls.length > 0)) return null;
   const requestedCount = Number(report.competitorsPerCategory);
   if (
     usableCompetitors.length < minimumCompetitors &&
@@ -1057,7 +1089,7 @@ export async function analyzeOzonCompetitors(params: {
       ? cachedCompetitorReport(cachedReport.reportJson, params.competitorsPerCategory)
       : null;
     if (reused) {
-      reports.push({ ...reused, cached: true });
+      reports.push(cachedReportForTarget(reused, target));
       continue;
     }
     pending.push(target);
