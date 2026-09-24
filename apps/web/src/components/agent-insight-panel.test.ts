@@ -31,6 +31,28 @@ const diagnosisSource: AgentInsightSource = {
   }],
 };
 
+const competitorSource: AgentInsightSource = {
+  toolName: "analyze_ozon_competitors",
+  label: "Ozon 同类竞品证据",
+  status: "ok",
+  at: "2026-09-24T00:00:00.000Z",
+  contentDiagnosis: {
+    samples: [{
+      offerId: "OWN-1",
+      own: {
+        title: "自家商品",
+        imageUrl: "https://ir.ozone.ru/s3/multimedia-own.jpg",
+      },
+      competitors: [{
+        title: "竞品商品",
+        url: "https://www.ozon.ru/product/1/",
+        imageUrl: "https://ir.ozone.ru/s3/multimedia-competitor.jpg",
+      }],
+      comparison: {},
+    }],
+  },
+};
+
 function renderPanel(requestPrompt: string, actions: Array<{ type: string }> = []) {
   return renderToStaticMarkup(createElement(AgentInsightPanel, {
     sources: [diagnosisSource],
@@ -151,5 +173,16 @@ describe("agent insight presentation", () => {
     expect(safeExternalUrl("data:text/html,unsafe")).toBeNull();
     expect(safeExternalUrl("https://www.ozon.ru/product/1/")).toBe("https://www.ozon.ru/product/1/");
     expect(safeExternalUrl("http://example.com/product/1")).toBe("http://example.com/product/1");
+  });
+
+  it("renders Ozon competitor images through the authenticated image proxy", () => {
+    const html = renderToStaticMarkup(createElement(AgentInsightPanel, {
+      sources: [competitorSource],
+      requestPrompt: "分析同类竞品",
+    }));
+
+    expect(html).toContain(
+      "/api/v1/image-proxy?url=https%3A%2F%2Fir.ozone.ru%2Fs3%2Fmultimedia-competitor.jpg",
+    );
   });
 });
