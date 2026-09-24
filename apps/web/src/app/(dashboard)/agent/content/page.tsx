@@ -43,6 +43,7 @@ export default async function ContentAgentPage() {
     prisma.agentSession.findMany({
       where: {
         tenantId: user.tenantId,
+        status: "OPEN",
         OR: [
           {
             messages: {

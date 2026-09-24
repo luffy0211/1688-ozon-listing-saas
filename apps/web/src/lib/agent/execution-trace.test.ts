@@ -51,6 +51,8 @@ describe("agent execution trace", () => {
 
     expect(trace.find((step) => step.id === "read-store")?.status).toBe("succeeded");
     expect(trace.find((step) => step.id === "collect-competitors")?.outputSummary).toContain("竞品 15");
+    expect(trace.find((step) => step.id === "summarize-playbook")?.status).toBe("succeeded");
+    expect(trace.find((step) => step.id === "diagnose-products")?.status).toBe("succeeded");
     expect(trace.find((step) => step.id === "create-actions")?.status).toBe("succeeded");
     expect(trace.find((step) => step.id === "wait-approval")?.status).toBe("waiting");
   });
@@ -76,6 +78,27 @@ describe("agent execution trace", () => {
 
     expect(trace.find((step) => step.id === "read-product")?.status).toBe("failed");
     expect(trace.find((step) => step.id === "create-actions")?.status).toBe("skipped");
+  });
+
+  it("finishes a successful read-only workflow without leaving pending steps", () => {
+    const plan = buildAgentPlan({
+      prompt: "分析店铺竞品",
+      requiredToolName: "analyze_ozon_competitors",
+      competitorsPerCategory: 1,
+    });
+    const trace = buildAgentExecutionTrace({
+      plan,
+      runStatus: "SUCCEEDED",
+      toolCalls: [{
+        name: "analyze_ozon_competitors",
+        at: "2026-09-17T01:00:00.000Z",
+        output: { competitorCount: 1, analyzedProductCount: 1 },
+      }],
+    });
+
+    expect(trace.every((step) => step.status !== "pending")).toBe(true);
+    expect(trace.find((step) => step.id === "create-actions")?.status).toBe("skipped");
+    expect(trace.find((step) => step.id === "wait-approval")?.status).toBe("skipped");
   });
 
   it("builds a pending trace immediately for the chat UI", () => {

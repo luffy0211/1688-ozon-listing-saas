@@ -51,6 +51,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
     where: {
       id: params.id,
       tenantId: requestSession.tenantId,
+      status: "OPEN",
       OR: [
         {
           messages: {

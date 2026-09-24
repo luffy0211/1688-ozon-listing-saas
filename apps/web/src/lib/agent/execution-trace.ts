@@ -316,6 +316,12 @@ export function buildAgentExecutionTrace(params: {
     const createsActions = planStep.kind === "CREATE_ACTIONS";
     const waitsForApproval = planStep.kind === "WAIT_FOR_APPROVAL";
     const directAnswer = planStep.kind === "DIRECT_ANSWER";
+    const analysisStep = ["SUMMARIZE_CATEGORY_PLAYBOOK", "DIAGNOSE_PRODUCTS"].includes(
+      planStep.kind,
+    );
+    const inferredStoreRead = planStep.kind === "READ_STORE_SNAPSHOT" && params.toolCalls.some(
+      (toolCall) => toolCall.name === "analyze_ozon_competitors" && !toolCall.error,
+    );
 
     if (call) {
       const failed = Boolean(call.error);
@@ -385,6 +391,34 @@ export function buildAgentExecutionTrace(params: {
         toolName: null,
         inputSummary: null,
         outputSummary: "等待用户在待审批中心确认",
+        error: null,
+      };
+    }
+
+    if ((analysisStep || inferredStoreRead) && params.runStatus === "SUCCEEDED" && !reachedFailure) {
+      return {
+        ...planStep,
+        status: "succeeded",
+        startedAt: params.toolCalls.at(-1)?.at ?? null,
+        finishedAt: params.toolCalls.at(-1)?.at ?? null,
+        durationMs: null,
+        toolName: null,
+        inputSummary: null,
+        outputSummary: inferredStoreRead ? "竞品分析已读取店铺类目" : "已完成分析",
+        error: null,
+      };
+    }
+
+    if ((createsActions || waitsForApproval) && params.runStatus === "SUCCEEDED" && !reachedFailure) {
+      return {
+        ...planStep,
+        status: "skipped",
+        startedAt: null,
+        finishedAt: params.toolCalls.at(-1)?.at ?? null,
+        durationMs: null,
+        toolName: null,
+        inputSummary: null,
+        outputSummary: createsActions ? "本次未生成待审批动作" : "本次无需人工确认",
         error: null,
       };
     }

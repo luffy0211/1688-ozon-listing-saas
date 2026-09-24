@@ -5,8 +5,10 @@ import {
   AlertTriangle,
   Check,
   Loader2,
+  MoreHorizontal,
   Plus,
   Send,
+  Trash2,
   X,
 } from "lucide-react";
 import { Badge, Button, Select, cn } from "./ui";
@@ -15,8 +17,9 @@ import {
   AgentInsightPanel,
   type AgentInsightSource,
 } from "./agent-insight-panel";
-import type { AgentTimelineStep } from "./agent-execution-timeline";
+import { ContentDraftGroup } from "./content-agent-drafts";
 import { buildPendingAgentExecutionTrace } from "@/lib/agent/execution-trace";
+import type { AgentExecutionStep as AgentTimelineStep } from "@/lib/agent/execution-trace";
 
 type StoreOption = {
   id: string;
@@ -60,15 +63,47 @@ type ChatMessage = {
   content: string;
   actions?: ContentAgentActionView[];
   dataSources?: AgentInsightSource[];
+  plan?: AgentTimelineStep[];
+  executionTrace?: AgentTimelineStep[];
 };
 
 export function shouldShowCommandDeck(messages: Array<Pick<ChatMessage, "role">>) {
   return !messages.some((message) => message.role === "user");
 }
 
+export function shouldSubmitChatKey(event: {
+  key: string;
+  shiftKey: boolean;
+  isComposing: boolean;
+}) {
+  return event.key === "Enter" && !event.shiftKey && !event.isComposing;
+}
+
 type PersistedChatMessage = ChatMessage & {
   createdAt: string;
 };
+
+export function mapPersistedChatMessage(message: PersistedChatMessage): ChatMessage {
+  const traceIsComplete = message.executionTrace?.some((step) =>
+    ["succeeded", "waiting", "skipped"].includes(step.status),
+  ) && !message.executionTrace.some((step) => ["running", "failed"].includes(step.status));
+  const executionTrace = traceIsComplete
+    ? message.executionTrace?.map((step) =>
+        step.status === "pending" && ["SUMMARIZE_CATEGORY_PLAYBOOK", "DIAGNOSE_PRODUCTS"].includes(step.kind)
+          ? { ...step, status: "succeeded" as const, outputSummary: step.outputSummary ?? "已完成分析" }
+          : step,
+      )
+    : message.executionTrace;
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    actions: message.actions,
+    dataSources: message.dataSources,
+    plan: message.plan,
+    executionTrace,
+  };
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -108,7 +143,8 @@ export function attributeChangesFromPayload(payload: unknown) {
 
 function toneForStatus(status: string) {
   if (status === "APPROVED") return "green";
-  if (status === "REJECTED" || status === "FAILED" || status === "BLOCKED") return "red";
+  if (status === "REJECTED" || status === "FAILED") return "red";
+  if (status === "BLOCKED") return "amber";
   if (status === "PENDING_APPROVAL") return "amber";
   return "blue";
 }
@@ -261,6 +297,18 @@ function actionPayloadSummary(action: ContentAgentActionView) {
 
 function actionExecutionSummary(action: ContentAgentActionView) {
   const execution = asRecord(asRecord(action.guardrail).execution);
+  if (execution.kind === "UPDATE_STOCK") {
+    return execution.phase === "verification_pending"
+      ? "Ozon 已接收，正在等待库存同步"
+      : asRecord(execution.verification).stock === execution.stock
+        ? "库存已回读核实"
+        : "";
+  }
+  if (execution.kind === "BULK_PRODUCT_UPDATE") {
+    const executed = Number(execution.executed ?? 0);
+    const failed = Number(execution.failed ?? 0);
+    return failed > 0 ? `${executed} 项成功，${failed} 项失败` : `${executed} 项已执行`;
+  }
   if (execution.kind !== "CONTENT_DRAFT") return "";
   const verification = asRecord(execution.verification);
   const changedFields = Array.isArray(execution.changedFields)
@@ -282,9 +330,13 @@ function actionExecutionSummary(action: ContentAgentActionView) {
 
 function friendlyActionError(error: string | null) {
   if (!error) return "";
+  if (error.startsWith("content_draft_stale_target_fields:")) {
+    return "草案目标字段已在 Ozon 发生变化，请重新读取并确认新版本。";
+  }
   const messages: Record<string, string> = {
     content_draft_not_reflected_after_import: "Ozon 已接收任务，但内容同步超时，请稍后刷新商品内容。",
     execution_in_progress: "任务正在执行，请稍后刷新状态。",
+    result_pending_verification: "Ozon 已接收任务，结果仍在同步中，请不要重复提交。",
     real_ozon_submit_disabled: "真实 Ozon 写入开关未开启，当前不能执行。",
   };
   return messages[error] ?? error;
@@ -302,7 +354,7 @@ function introMessageFor(agentConfig: AgentConfig): ChatMessage {
     id: "intro",
     role: "assistant",
     content: agentConfig.configured
-      ? "你可以直接让 Agent 做店铺诊断、商品优化和 Ozon 活动建议。店铺诊断会自动对比同类竞品；任何商品改动或活动报名都必须先生成待确认动作。"
+      ? "你可以直接让 Agent 做店铺诊断、商品优化和 Ozon 活动建议。需要市场参考时再采集竞品；任何商品改动或活动报名都必须先生成待确认动作。"
       : agentConfig.message,
   };
 }
@@ -315,6 +367,20 @@ function upsertSession(sessions: SessionOption[], session: SessionOption) {
 
 export function initialContentAgentSessionId(sessions: SessionOption[]) {
   return [...sessions].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0]?.id ?? "new";
+}
+
+export function sessionsAfterArchive(
+  sessions: SessionOption[],
+  archivedSessionId: string,
+  selectedSessionId: string,
+) {
+  const remaining = sessions.filter((session) => session.id !== archivedSessionId);
+  return {
+    sessions: remaining,
+    selectedSessionId: selectedSessionId === archivedSessionId
+      ? initialContentAgentSessionId(remaining)
+      : selectedSessionId,
+  };
 }
 
 function sessionTitleFromPrompt(prompt: string) {
@@ -344,6 +410,13 @@ async function getJson(path: string) {
   return json.data;
 }
 
+async function deleteJson(path: string) {
+  const response = await fetch(path, { method: "DELETE" });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(json.error?.message ?? "删除对话失败");
+  return json.data;
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -368,7 +441,7 @@ const runningKindLabels: Record<string, string> = {
   READ_PRODUCT_CONTENT: "正在读取商品内容...",
   DIAGNOSE_STORE: "正在诊断店铺经营情况...",
   COLLECT_COMPETITORS: "正在采集并分析竞品数据...",
-  SUMMARIZE_CATEGORY_PLAYBOOK: "正在总结类目属性经验...",
+  SUMMARIZE_CATEGORY_PLAYBOOK: "正在总结竞品内容规律...",
   DIAGNOSE_PRODUCTS: "正在检查自家商品差距...",
   LIST_PROMOTIONS: "正在读取 Ozon 活动...",
   READ_PROMOTION_CANDIDATES: "正在读取活动候选商品...",
@@ -660,15 +733,45 @@ function SessionSidebar({
   running,
   onSelect,
   onNewChat,
+  onArchive,
 }: {
   sessions: SessionOption[];
   selectedSessionId: string;
   running: boolean;
   onSelect: (sessionId: string) => void;
   onNewChat: () => void;
+  onArchive: (sessionId: string) => void;
 }) {
+  const [menu, setMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const asideRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menu]);
+
+  function openMenu(sessionId: string, x: number, y: number) {
+    const bounds = asideRef.current?.getBoundingClientRect();
+    const localX = bounds ? x - bounds.left : x;
+    const localY = bounds ? y - bounds.top : y;
+    setMenu({
+      sessionId,
+      x: Math.max(8, Math.min(localX, (bounds?.width ?? window.innerWidth) - 152)),
+      y: Math.max(8, Math.min(localY, (bounds?.height ?? window.innerHeight) - 56)),
+    });
+  }
+
   return (
-    <aside className="hidden h-full w-64 shrink-0 flex-col rounded-2xl border border-white bg-white/75 p-3 shadow-[0_14px_40px_rgba(45,78,128,0.10)] backdrop-blur md:flex">
+    <aside ref={asideRef} className="relative hidden h-full w-64 shrink-0 flex-col rounded-2xl border border-white bg-white/90 p-3 shadow-[0_14px_40px_rgba(45,78,128,0.10)] md:flex">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold text-gray-950">历史对话</div>
         <Button
@@ -701,25 +804,68 @@ function SessionSidebar({
         </button>
 
         {sessions.map((session) => (
-          <button
+          <div
             key={session.id}
-            type="button"
-            onClick={() => onSelect(session.id)}
-            disabled={running}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              openMenu(session.id, event.clientX, event.clientY);
+            }}
             className={cn(
-              "w-full rounded-xl border px-3 py-2.5 text-left text-sm transition-all",
+              "group flex w-full items-center rounded-xl border text-sm transition-all",
               selectedSessionId === session.id
                 ? "border-[#bfd4ff] bg-[#eaf1ff] text-[#245fcf] shadow-[0_6px_16px_rgba(52,120,246,0.10)]"
                 : "border-transparent bg-white/70 text-gray-700 hover:border-[#dce8f5] hover:bg-white",
             )}
           >
-            <div className="truncate font-medium">{session.title ?? session.id}</div>
-            <div className="mt-1 truncate text-xs text-gray-500">
-              {formatTime(session.updatedAt) ?? session.updatedAt}
-            </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => onSelect(session.id)}
+              disabled={running}
+              className="min-w-0 flex-1 px-3 py-2.5 text-left"
+            >
+              <div className="truncate font-medium">{session.title ?? session.id}</div>
+              <div className="mt-1 truncate text-xs text-gray-500">
+                {formatTime(session.updatedAt) ?? session.updatedAt}
+              </div>
+            </button>
+            <button
+              type="button"
+              disabled={running}
+              aria-label={`管理对话：${session.title ?? session.id}`}
+              title="更多"
+              onClick={(event) => {
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                openMenu(session.id, rect.right - 140, rect.bottom + 4);
+              }}
+              className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
         ))}
       </div>
+      {menu ? (
+        <div
+          role="menu"
+          className="absolute z-[100] w-36 rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              onArchive(menu.sessionId);
+              setMenu(null);
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            删除对话
+          </button>
+        </div>
+      ) : null}
     </aside>
   );
 }
@@ -804,13 +950,7 @@ export function ContentAgentChat({
       .then((data) => {
         if (cancelled) return;
         const loadedMessages = Array.isArray(data.messages)
-          ? data.messages.map((message: PersistedChatMessage) => ({
-              id: message.id,
-              role: message.role,
-              content: message.content,
-              actions: message.actions,
-              dataSources: message.dataSources,
-            }))
+          ? data.messages.map((message: PersistedChatMessage) => mapPersistedChatMessage(message))
           : [];
         setMessages(loadedMessages.length ? loadedMessages : [introMessage]);
         if (data.session) {
@@ -842,6 +982,28 @@ export function ContentAgentChat({
     setPrompt("");
     setLoadingHistory(false);
     setMessages([introMessage]);
+  }
+
+  async function archiveSession(sessionId: string) {
+    if (running || !window.confirm("删除这条历史对话？")) return;
+    try {
+      await deleteJson(`/api/v1/agent/content/sessions/${sessionId}`);
+      const next = sessionsAfterArchive(sessionList, sessionId, selectedSessionId);
+      setSessionList(next.sessions);
+      if (next.selectedSessionId !== selectedSessionId) {
+        setSelectedSessionId(next.selectedSessionId);
+        setPrompt("");
+      }
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `archive-error-${Date.now()}`,
+          role: "assistant",
+          content: error instanceof Error ? error.message : String(error),
+        },
+      ]);
+    }
   }
 
   async function sendPrompt(value: string) {
@@ -893,6 +1055,8 @@ export function ContentAgentChat({
           content: data.status === "failed" ? data.error ?? "Agent 执行失败" : data.output,
           actions: data.actions,
           dataSources: data.dataSources,
+          plan: data.plan,
+          executionTrace: data.executionTrace,
         },
       ]);
     } catch (err) {
@@ -928,11 +1092,14 @@ export function ContentAgentChat({
               content: "这个任务已经处理过，我已刷新当前状态。",
             },
           ]);
-          return;
+          return latest.action?.status === "EXECUTED";
         }
       }
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
       setMessages((current) => replaceAction(current, data.action));
+      return command === "reject"
+        ? data.action?.status === "REJECTED"
+        : data.action?.status === "EXECUTED";
     } catch (err) {
       setMessages((current) => [
         ...current,
@@ -942,6 +1109,7 @@ export function ContentAgentChat({
           content: err instanceof Error ? err.message : String(err),
         },
       ]);
+      return false;
     }
   }
 
@@ -966,6 +1134,19 @@ export function ContentAgentChat({
               </option>
             ))}
           </select>
+          {selectedSessionId !== "new" ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void archiveSession(selectedSessionId)}
+              disabled={running}
+              title="删除当前对话"
+              className="h-9 w-9 shrink-0 px-0 md:hidden"
+            >
+              <Trash2 className="h-4 w-4 text-red-600" aria-hidden="true" />
+              <span className="sr-only">删除当前对话</span>
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -1015,36 +1196,43 @@ export function ContentAgentChat({
 
         <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(240,247,255,0.75),rgba(248,251,255,0.35))] px-4 py-4 pr-3 md:px-5">
           <div className="w-full space-y-4 pb-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  "flex",
-                  message.role === "user" ? "justify-end" : "justify-start",
-                )}
-              >
+            {messages.map((message) => {
+              const hasReport = message.dataSources?.some((source) =>
+                ["diagnose_ozon_store", "analyze_ozon_competitors"].includes(source.toolName),
+              );
+              return (
                 <div
+                  key={message.id}
                   className={cn(
-                    "max-w-[94%] rounded-2xl px-4 py-3 text-sm leading-6",
-                    message.role === "user"
-                      ? "rounded-br-md bg-[#3478f6] text-white shadow-[0_10px_24px_rgba(52,120,246,0.18)]"
-                      : "rounded-bl-md border border-white bg-white text-[#35415a] shadow-[0_10px_28px_rgba(49,78,122,0.09)]",
+                    "flex",
+                    message.role === "user" ? "justify-end" : "justify-start",
                   )}
                 >
-                  <div className="whitespace-pre-wrap break-words">{message.content}</div>
-                  {message.role === "assistant" ? (
-                    <AgentInsightPanel sources={message.dataSources} />
-                  ) : null}
-                  {message.actions?.map((action) => (
-                    <ActionBubble
-                      key={action.id}
-                      action={action}
-                      onCommand={updateAction}
-                    />
-                  ))}
+                  <div className={cn("min-w-0", hasReport || message.actions?.length ? "w-full" : "max-w-[94%]")}>
+                    <div
+                      className={cn(
+                        "rounded-2xl px-4 py-3 text-sm leading-6",
+                        message.role === "user"
+                          ? "rounded-br-md bg-[#3478f6] text-white shadow-[0_10px_24px_rgba(52,120,246,0.18)]"
+                          : "rounded-bl-md border border-white bg-white text-[#35415a] shadow-[0_10px_28px_rgba(49,78,122,0.09)]",
+                      )}
+                    >
+                      <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                      {message.role === "assistant" ? <AgentInsightPanel sources={message.dataSources} /> : null}
+                    </div>
+                    {message.actions?.some((action) => action.type === "CONTENT_DRAFT") ? (
+                      <ContentDraftGroup
+                        actions={message.actions.filter((action) => action.type === "CONTENT_DRAFT")}
+                        onCommand={updateAction}
+                      />
+                    ) : null}
+                    {message.actions?.filter((action) => action.type !== "CONTENT_DRAFT").map((action) => (
+                      <ActionBubble key={action.id} action={action} onCommand={updateAction} />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {loadingHistory ? (
               <div className="flex justify-start">
                 <div className="inline-flex items-center gap-2 rounded-xl border border-[#f4dbc9] bg-[#fff7f1] px-4 py-3 text-sm font-semibold text-[#8d4d25] shadow-sm">
@@ -1072,7 +1260,11 @@ export function ContentAgentChat({
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (shouldSubmitChatKey({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: event.nativeEvent.isComposing,
+                })) {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
                 }
@@ -1105,6 +1297,7 @@ export function ContentAgentChat({
         running={running}
         onSelect={setSelectedSessionId}
         onNewChat={startNewChat}
+        onArchive={(sessionId) => void archiveSession(sessionId)}
       />
     </div>
   );
