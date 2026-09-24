@@ -103,6 +103,14 @@ export function assertOzonMutationSucceeded(value: unknown) {
   return { updatedCount, rejectedCount: 0 };
 }
 
+export function isUncertainOzonWriteError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/ozon_mutation_(?:rejected|partial)|ozon_import_task_failed|trusted_.*guardrail_failed/i.test(message)) {
+    return false;
+  }
+  return /timeout|timed out|socket hang up|econnreset|econnaborted|network|fetch failed|aborted/i.test(message);
+}
+
 function productIdFrom(action: { productId: string | null; payloadJson: unknown }) {
   const payload = asRecord(action.payloadJson);
   return numberField(action.productId) ?? numberField(payload.productId);
@@ -722,18 +730,23 @@ async function recoverContentDraftAfterError(params: {
   userId: string;
 }) {
   const application = await readContentDraftApplication(params).catch(() => null);
-  if (!application?.appliedFields.length) return null;
   const execution = {
     kind: "CONTENT_DRAFT",
     recovery: "readback_after_error",
     changedFields: params.changedFields,
-    appliedFields: application.appliedFields,
-    missingFields: application.missingFields,
+    appliedFields: application?.appliedFields ?? [],
+    missingFields: application?.missingFields ?? params.changedFields,
     ozonTaskId: params.response?.task_id == null ? null : String(params.response.task_id),
     importInfo: params.importInfo ?? null,
     verification: application,
     error: params.error instanceof Error ? params.error.message : String(params.error),
   };
+  if (!application?.appliedFields.length) {
+    if (isUncertainOzonWriteError(params.error)) {
+      throw new ActionVerificationPendingError(execution);
+    }
+    return null;
+  }
   if (!application.missingFields.length) {
     return markActionExecuted({
       tenantId: params.tenantId,

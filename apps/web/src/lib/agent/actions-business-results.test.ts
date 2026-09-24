@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assertOzonMutationSucceeded } from "./actions";
+import { assertOzonMutationSucceeded, isUncertainOzonWriteError } from "./actions";
 
 describe("Ozon mutation business results", () => {
   it("rejects HTTP 200 responses whose item was not updated", () => {
@@ -28,5 +28,10 @@ describe("Ozon mutation business results", () => {
     expect(() => assertOzonMutationSucceeded({ result: { items: [] } })).toThrow(
       "ozon_mutation_unknown",
     );
+  });
+
+  it("distinguishes uncertain transport failures from explicit business rejection", () => {
+    expect(isUncertainOzonWriteError(new Error("request timeout after socket hang up"))).toBe(true);
+    expect(isUncertainOzonWriteError(new Error("ozon_mutation_rejected:INVALID_STOCK"))).toBe(false);
   });
 });

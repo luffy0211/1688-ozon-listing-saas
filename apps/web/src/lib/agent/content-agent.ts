@@ -1725,8 +1725,6 @@ export async function runOzonContentAgent(params: {
         const store = await resolveStore(params.tenantId, storeId ?? params.storeId);
         if (runStoreId && store.id !== runStoreId) throw new Error("store_scope_mismatch");
         runStoreId = store.id;
-        if (runStoreId && store.id !== runStoreId) throw new Error("store_scope_mismatch");
-        runStoreId = store.id;
         const cached = readProductsByOfferId.get(toolOfferId);
         if (cached?.storeId === store.id) {
           toolCalls.push({
@@ -1871,6 +1869,8 @@ export async function runOzonContentAgent(params: {
       execute: async ({ storeId }) => {
         const at = new Date().toISOString();
         const store = await resolveStore(params.tenantId, storeId ?? params.storeId);
+        if (runStoreId && store.id !== runStoreId) throw new Error("store_scope_mismatch");
+        runStoreId = store.id;
         const client = new OzonClient({
           clientId: store.ozonClientId,
           apiKey: decryptSecret(store.ozonApiKey),
