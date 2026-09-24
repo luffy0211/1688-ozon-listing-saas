@@ -16,6 +16,13 @@ describe("getOzonAnalyticsSummary", () => {
           name: "Dress",
           visible: true,
           price: "1000",
+          description: "Seller API description",
+          primary_image: "https://example.test/main.jpg",
+          images: [
+            "https://example.test/main.jpg",
+            "https://example.test/detail-1.jpg",
+            "https://example.test/detail-2.jpg",
+          ],
           description_category_id: 17027904,
           type_id: 97311,
           sources: [{ sku: 99887766, source: "sds" }],
@@ -60,6 +67,17 @@ describe("getOzonAnalyticsSummary", () => {
       publicSku: "99887766",
       descriptionCategoryId: 17027904,
       typeId: 97311,
+      description: "Seller API description",
+      imageUrls: [
+        "https://example.test/main.jpg",
+        "https://example.test/detail-1.jpg",
+        "https://example.test/detail-2.jpg",
+      ],
+    });
+    expect(summary.orderDataStatus).toMatchObject({
+      state: "complete",
+      fbs: { state: "complete" },
+      fbo: { state: "complete" },
     });
   });
 });

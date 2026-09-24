@@ -40,6 +40,11 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
   pendingShipmentCount: 1,
   cancelledOrderCount: 1,
   grossRevenueRub: 10_000,
+  orderDataStatus: {
+    state: "complete",
+    fbs: { state: "complete" },
+    fbo: { state: "complete" },
+  },
   dailyOrders: [
     { date: "2026-09-01", fbs: 2, fbo: 1 },
     { date: "2026-09-02", fbs: 1, fbo: 0 },
@@ -303,6 +308,13 @@ describe("Ozon operations helpers", () => {
       title: "Current product",
       publicSku: "2",
       imageUrl: "https://ir.ozone.ru/s3/current.jpg",
+      imageUrls: [
+        "https://ir.ozone.ru/s3/current.jpg",
+        "https://ir.ozone.ru/s3/current-2.jpg",
+        "https://ir.ozone.ru/s3/current-3.jpg",
+      ],
+      description: "Current Seller API description",
+      descriptionReadState: "available",
       priceRub: 299,
       quantity: 0,
       revenueRub: 0,
@@ -314,10 +326,49 @@ describe("Ozon operations helpers", () => {
         sku: "2",
         title: "Current product",
         priceRub: 299,
-        imageUrls: ["https://ir.ozone.ru/s3/current.jpg"],
+        imageUrls: [
+          "https://ir.ozone.ru/s3/current.jpg",
+          "https://ir.ozone.ru/s3/current-2.jpg",
+          "https://ir.ozone.ru/s3/current-3.jpg",
+        ],
+        description: "Current Seller API description",
       },
       cached: true,
     });
+  });
+
+  it("does not turn failed order reads into zero-order diagnosis", () => {
+    const diagnosis = buildStoreDiagnosis({
+      current: summary({
+        fbsOrderCount: null,
+        fboOrderCount: 2,
+        grossRevenueRub: null,
+        pendingShipmentCount: null,
+        cancelledOrderCount: null,
+        orderDataStatus: {
+          state: "partial",
+          fbs: { state: "failed", errorKind: "timeout" },
+          fbo: { state: "complete" },
+        },
+        warnings: ["FBS 订单同步失败：request timeout"],
+      }) as never,
+      previous: summary(),
+      finance: {
+        transactionCount: 0,
+        salesAccrualRub: 0,
+        ozonNetPayoutRub: 0,
+        salesCommissionRub: 0,
+        deliveryFeesRub: 0,
+        serviceFeesRub: 0,
+        platformFeesRub: 0,
+      },
+    });
+
+    expect(diagnosis.current30d.orderCount).toBeNull();
+    expect(diagnosis.current30d.orderRevenueRub).toBeNull();
+    expect(diagnosis.comparison.orderCountChangeRate).toBeNull();
+    expect(diagnosis.issues).not.toContain("最近 30 天没有读取到订单");
+    expect(diagnosis.orderDataStatus.state).toBe("partial");
   });
 
   it("rebuilds content benchmarks from cached competitor details", () => {
