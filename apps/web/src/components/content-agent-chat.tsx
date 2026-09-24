@@ -393,6 +393,51 @@ export function sessionsAfterArchive(
   };
 }
 
+export function shouldApplyArchivedSessionResponse(
+  archivedSessionId: string,
+  selectedSessionId: string,
+) {
+  return selectedSessionId === archivedSessionId;
+}
+
+type RecoverableAgentRun = {
+  runId: string;
+  status: "running" | "failed" | "succeeded";
+  requestPrompt?: string;
+  output?: string | null;
+  error?: string | null;
+  plan: AgentTimelineStep[];
+  executionTrace: AgentTimelineStep[];
+  dataSources?: AgentInsightSource[];
+};
+
+export function recoverableAgentRun(value: unknown): RecoverableAgentRun | null {
+  const activeRun = asRecord(asRecord(value).activeRun);
+  const runId = typeof activeRun.runId === "string" ? activeRun.runId : "";
+  const status = activeRun.status;
+  if (!runId || !["running", "failed", "succeeded"].includes(String(status))) return null;
+  return {
+    runId,
+    status: status as RecoverableAgentRun["status"],
+    requestPrompt: typeof activeRun.requestPrompt === "string" ? activeRun.requestPrompt : undefined,
+    output: typeof activeRun.output === "string" ? activeRun.output : null,
+    error: typeof activeRun.error === "string" ? activeRun.error : null,
+    plan: Array.isArray(activeRun.plan) ? activeRun.plan as AgentTimelineStep[] : [],
+    executionTrace: Array.isArray(activeRun.executionTrace)
+      ? activeRun.executionTrace as AgentTimelineStep[]
+      : [],
+    dataSources: Array.isArray(activeRun.dataSources)
+      ? activeRun.dataSources as AgentInsightSource[]
+      : [],
+  };
+}
+
+export function actionNeedsPolling(action: Pick<ContentAgentActionView, "status" | "executionPhase">) {
+  return action.status === "APPROVED"
+    || (action.status === "BLOCKED"
+      && ["executing", "verification_pending"].includes(action.executionPhase ?? ""));
+}
+
 function sessionTitleFromPrompt(prompt: string) {
   const compact = prompt.trim().replace(/\s+/g, " ");
   return compact.length > 36 ? `${compact.slice(0, 36)}...` : compact || "Ozon Agent";
@@ -411,8 +456,8 @@ async function postJson(path: string, payload: unknown = {}) {
   return json.data;
 }
 
-async function getJson(path: string) {
-  const response = await fetch(path);
+async function getJson(path: string, signal?: AbortSignal) {
+  const response = await fetch(path, { signal });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(json.error?.message ?? "加载历史失败");
@@ -479,9 +524,10 @@ function runningAgentStatus(steps: AgentTimelineStep[]) {
 async function pollAgentRunTrace(
   runId: string,
   onUpdate: (trace: AgentTimelineStep[]) => void,
+  signal?: AbortSignal,
 ) {
   for (let attempt = 0; attempt < 240; attempt += 1) {
-    const data = await getJson(`/api/v1/agent/runs/${runId}/trace`);
+    const data = await getJson(`/api/v1/agent/runs/${runId}/trace`, signal);
     if (Array.isArray(data.executionTrace)) {
       onUpdate(data.executionTrace);
     }
@@ -490,7 +536,25 @@ async function pollAgentRunTrace(
     }
     await wait(1000);
   }
-  throw new Error("Agent 执行超时，请到任务中心查看结果。");
+  throw new Error("Agent 仍在后台处理，刷新页面可继续查看进度。");
+}
+
+async function pollAgentAction(
+  actionId: string,
+  onUpdate: (action: ContentAgentActionView) => void,
+  signal?: AbortSignal,
+) {
+  let latest: ContentAgentActionView | null = null;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const data = await getJson(`/api/v1/agent/actions/${actionId}`, signal);
+    if (data.action) {
+      latest = data.action;
+      onUpdate(latest!);
+      if (!actionNeedsPolling(latest!)) return latest;
+    }
+    await wait(1000);
+  }
+  return latest;
 }
 
 function replaceAction(messages: ChatMessage[], action: ContentAgentActionView): ChatMessage[] {
@@ -761,6 +825,7 @@ function SessionSidebar({
   sessions,
   selectedSessionId,
   running,
+  archivingSessionIds,
   onSelect,
   onNewChat,
   onArchive,
@@ -768,6 +833,7 @@ function SessionSidebar({
   sessions: SessionOption[];
   selectedSessionId: string;
   running: boolean;
+  archivingSessionIds: Set<string>;
   onSelect: (sessionId: string) => void;
   onNewChat: () => void;
   onArchive: (sessionId: string) => void;
@@ -860,7 +926,7 @@ function SessionSidebar({
             </button>
             <button
               type="button"
-              disabled={running}
+              disabled={running || archivingSessionIds.has(session.id)}
               aria-label={`管理对话：${session.title ?? session.id}`}
               title="更多"
               onClick={(event) => {
@@ -868,7 +934,7 @@ function SessionSidebar({
                 const rect = event.currentTarget.getBoundingClientRect();
                 openMenu(session.id, rect.right - 140, rect.bottom + 4);
               }}
-              className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-wait disabled:opacity-50"
             >
               <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -885,11 +951,12 @@ function SessionSidebar({
           <button
             type="button"
             role="menuitem"
+            disabled={archivingSessionIds.has(menu.sessionId)}
             onClick={() => {
               onArchive(menu.sessionId);
               setMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400"
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 disabled:cursor-wait disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
             删除对话
@@ -921,7 +988,17 @@ export function ContentAgentChat({
   const [running, setRunning] = useState(false);
   const [runningTrace, setRunningTrace] = useState<AgentTimelineStep[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(opensExistingSession);
+  const [archiveError, setArchiveError] = useState("");
+  const [archivingSessionIds, setArchivingSessionIds] = useState<Set<string>>(() => new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  const sessionListRef = useRef(sessionList);
+  const activeRunRef = useRef<{ sessionId: string; runId: string } | null>(null);
+  const directRunControllerRef = useRef<{ runId: string; controller: AbortController } | null>(null);
+  const actionPollControllersRef = useRef(new Map<string, AbortController>());
+  const archivingSessionIdsRef = useRef(new Set<string>());
+  selectedSessionIdRef.current = selectedSessionId;
+  sessionListRef.current = sessionList;
 
   const introMessage = useMemo(
     () => introMessageFor(agentConfig),
@@ -930,7 +1007,8 @@ export function ContentAgentChat({
   const pendingInitialActions = useMemo(
     () =>
       initialActions
-        .filter((action) => ["PENDING_APPROVAL", "APPROVED"].includes(action.status))
+        .filter((action) => ["PENDING_APPROVAL", "APPROVED"].includes(action.status)
+          || (action.status === "BLOCKED" && ["executing", "verification_pending", "manual_required"].includes(action.executionPhase ?? "")))
         .slice(0, 3),
     [initialActions],
   );
@@ -967,17 +1045,30 @@ export function ContentAgentChat({
   }, [messages, running, loadingHistory]);
 
   useEffect(() => {
+    const trackedRun = activeRunRef.current;
+    if (trackedRun && trackedRun.sessionId !== selectedSessionId) {
+      directRunControllerRef.current?.controller.abort();
+      directRunControllerRef.current = null;
+      activeRunRef.current = null;
+      setRunning(false);
+      setRunningTrace([]);
+    }
     if (selectedSessionId === "new") {
+      activeRunRef.current = null;
+      setRunning(false);
+      setRunningTrace([]);
       setLoadingHistory(false);
       setMessages([introMessage]);
       return;
     }
 
     let cancelled = false;
+    let recoveredRunId: string | null = null;
+    const controller = new AbortController();
     setLoadingHistory(true);
     setMessages([]);
     getJson(`/api/v1/agent/content/sessions/${selectedSessionId}/messages`)
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled) return;
         const loadedMessages = Array.isArray(data.messages)
           ? data.messages.map((message: PersistedChatMessage) => mapPersistedChatMessage(message))
@@ -986,9 +1077,75 @@ export function ContentAgentChat({
         if (data.session) {
           setSessionList((current) => upsertSession(current, data.session));
         }
+        setLoadingHistory(false);
+        const activeRun = recoverableAgentRun(data);
+        if (!activeRun || (activeRunRef.current?.sessionId === selectedSessionId
+          && activeRunRef.current.runId === activeRun.runId)) return;
+        if (activeRun.status === "failed") {
+          setMessages((current) => [
+            ...current.filter((message) => message.id !== `assistant-${activeRun.runId}`),
+            {
+              id: `assistant-${activeRun.runId}`,
+              role: "assistant",
+              content: activeRun.error ?? "Agent 执行失败",
+              requestPrompt: activeRun.requestPrompt,
+              dataSources: activeRun.dataSources,
+              plan: activeRun.plan,
+              executionTrace: activeRun.executionTrace,
+            },
+          ]);
+          return;
+        }
+        recoveredRunId = activeRun.runId;
+        activeRunRef.current = { sessionId: selectedSessionId, runId: activeRun.runId };
+        setRunningTrace(activeRun.executionTrace);
+        setRunning(true);
+        try {
+          const result = await pollAgentRunTrace(activeRun.runId, (trace) => {
+            if (!cancelled && activeRunRef.current?.sessionId === selectedSessionId
+              && activeRunRef.current.runId === activeRun.runId) setRunningTrace(trace);
+          }, controller.signal);
+          if (cancelled || selectedSessionIdRef.current !== selectedSessionId
+            || activeRunRef.current?.runId !== activeRun.runId) return;
+          setMessages((current) => [
+            ...current.filter((message) => message.id !== `assistant-${activeRun.runId}`),
+            {
+              id: `assistant-${activeRun.runId}`,
+              role: "assistant",
+              content: result.status === "failed" ? result.error ?? "Agent 执行失败" : result.output,
+              requestPrompt: activeRun.requestPrompt,
+              actions: result.actions,
+              dataSources: result.dataSources,
+              plan: result.plan,
+              executionTrace: result.executionTrace,
+            },
+          ]);
+        } catch (error) {
+          if (cancelled || error instanceof DOMException && error.name === "AbortError") return;
+          setMessages((current) => [
+            ...current,
+            {
+              id: `assistant-running-${activeRun.runId}`,
+              role: "assistant",
+              content: error instanceof Error ? error.message : String(error),
+              requestPrompt: activeRun.requestPrompt,
+              plan: activeRun.plan,
+              executionTrace: activeRun.executionTrace,
+            },
+          ]);
+        } finally {
+          if (activeRunRef.current?.sessionId === selectedSessionId
+            && activeRunRef.current.runId === activeRun.runId) {
+            activeRunRef.current = null;
+            if (!cancelled) {
+              setRunning(false);
+              setRunningTrace([]);
+            }
+          }
+        }
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (cancelled || err instanceof DOMException && err.name === "AbortError") return;
         setMessages([
           introMessage,
           {
@@ -1004,8 +1161,16 @@ export function ContentAgentChat({
 
     return () => {
       cancelled = true;
+      controller.abort();
+      if (recoveredRunId && activeRunRef.current?.sessionId === selectedSessionId
+        && activeRunRef.current.runId === recoveredRunId) activeRunRef.current = null;
     };
   }, [selectedSessionId, introMessage]);
+
+  useEffect(() => () => {
+    for (const controller of actionPollControllersRef.current.values()) controller.abort();
+    actionPollControllersRef.current.clear();
+  }, [selectedSessionId]);
 
   function startNewChat() {
     setSelectedSessionId("new");
@@ -1015,24 +1180,25 @@ export function ContentAgentChat({
   }
 
   async function archiveSession(sessionId: string) {
-    if (running || !window.confirm("删除这条历史对话？")) return;
+    if (running || archivingSessionIdsRef.current.has(sessionId) || !window.confirm("删除这条历史对话？")) return;
+    archivingSessionIdsRef.current.add(sessionId);
+    setArchivingSessionIds(new Set(archivingSessionIdsRef.current));
+    setArchiveError("");
     try {
       await deleteJson(`/api/v1/agent/content/sessions/${sessionId}`);
-      const next = sessionsAfterArchive(sessionList, sessionId, selectedSessionId);
+      const next = sessionsAfterArchive(sessionListRef.current, sessionId, selectedSessionIdRef.current);
+      sessionListRef.current = next.sessions;
       setSessionList(next.sessions);
-      if (next.selectedSessionId !== selectedSessionId) {
+      if (shouldApplyArchivedSessionResponse(sessionId, selectedSessionIdRef.current)) {
+        selectedSessionIdRef.current = next.selectedSessionId;
         setSelectedSessionId(next.selectedSessionId);
         setPrompt("");
       }
     } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `archive-error-${Date.now()}`,
-          role: "assistant",
-          content: error instanceof Error ? error.message : String(error),
-        },
-      ]);
+      setArchiveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      archivingSessionIdsRef.current.delete(sessionId);
+      setArchivingSessionIds(new Set(archivingSessionIdsRef.current));
     }
   }
 
@@ -1048,6 +1214,8 @@ export function ContentAgentChat({
     setPrompt("");
     setRunningTrace(buildPendingAgentExecutionTrace(content));
     setRunning(true);
+    let startedRunId: string | null = null;
+    let startedSessionId: string | null = null;
 
     try {
       const started = await postJson(
@@ -1057,6 +1225,10 @@ export function ContentAgentChat({
           storeId: selectedStoreId || null,
         },
       );
+      startedRunId = started.runId;
+      startedSessionId = started.sessionId;
+      const controller = new AbortController();
+      directRunControllerRef.current = { runId: started.runId, controller };
       if (Array.isArray(started.executionTrace)) {
         setRunningTrace(started.executionTrace);
       }
@@ -1073,10 +1245,20 @@ export function ContentAgentChat({
         }),
       );
       if (requestSessionId !== started.sessionId) {
+        selectedSessionIdRef.current = started.sessionId;
+        activeRunRef.current = { sessionId: started.sessionId, runId: started.runId };
         setSelectedSessionId(started.sessionId);
+      } else {
+        activeRunRef.current = { sessionId: started.sessionId, runId: started.runId };
       }
 
-      const data = await pollAgentRunTrace(started.runId, setRunningTrace);
+      const data = await pollAgentRunTrace(started.runId, (trace) => {
+        if (activeRunRef.current?.sessionId === started.sessionId
+          && activeRunRef.current?.runId === started.runId) setRunningTrace(trace);
+      }, controller.signal);
+      if (selectedSessionIdRef.current !== started.sessionId
+        || activeRunRef.current?.sessionId !== started.sessionId
+        || activeRunRef.current?.runId !== started.runId) return;
       setMessages((current) => [
         ...current,
         {
@@ -1091,6 +1273,7 @@ export function ContentAgentChat({
         },
       ]);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setMessages((current) => [
         ...current,
         {
@@ -1100,8 +1283,13 @@ export function ContentAgentChat({
         },
       ]);
     } finally {
-      setRunning(false);
-      setRunningTrace([]);
+      if (!startedRunId || (activeRunRef.current?.sessionId === startedSessionId
+        && activeRunRef.current.runId === startedRunId)) {
+        activeRunRef.current = null;
+        setRunning(false);
+        setRunningTrace([]);
+      }
+      if (directRunControllerRef.current?.runId === startedRunId) directRunControllerRef.current = null;
     }
   }
 
@@ -1128,6 +1316,17 @@ export function ContentAgentChat({
       }
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
       setMessages((current) => replaceAction(current, data.action));
+      if (data.queued === true && !actionPollControllersRef.current.has(actionId)) {
+        const controller = new AbortController();
+        actionPollControllersRef.current.set(actionId, controller);
+        void pollAgentAction(actionId, (action) => {
+          setMessages((current) => current.some((message) => message.actions?.some((item) => item.id === actionId))
+            ? replaceAction(current, action)
+            : current);
+        }, controller.signal)
+          .catch(() => null)
+          .finally(() => actionPollControllersRef.current.delete(actionId));
+      }
       return command === "reject"
         ? data.action?.status === "REJECTED"
         : data.queued === true || data.action?.status === "EXECUTED";
@@ -1170,7 +1369,7 @@ export function ContentAgentChat({
               type="button"
               variant="outline"
               onClick={() => void archiveSession(selectedSessionId)}
-              disabled={running}
+              disabled={running || archivingSessionIds.has(selectedSessionId)}
               title="删除当前对话"
               className="h-9 w-9 shrink-0 px-0 md:hidden"
             >
@@ -1202,6 +1401,12 @@ export function ContentAgentChat({
             </div>
           ) : null}
         </div>
+
+        {archiveError ? (
+          <div role="alert" className="mx-4 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {archiveError}
+          </div>
+        ) : null}
 
         {selectedSessionId === "new" && !loadingHistory && shouldShowCommandDeck(messages) ? (
           <AgentCommandDeck
@@ -1333,6 +1538,7 @@ export function ContentAgentChat({
         sessions={sessionList}
         selectedSessionId={selectedSessionId}
         running={running}
+        archivingSessionIds={archivingSessionIds}
         onSelect={setSelectedSessionId}
         onNewChat={startNewChat}
         onArchive={(sessionId) => void archiveSession(sessionId)}

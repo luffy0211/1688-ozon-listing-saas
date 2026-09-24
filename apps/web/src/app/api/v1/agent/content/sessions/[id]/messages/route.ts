@@ -88,12 +88,13 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
   const runIds = [
     ...new Set(
       messages
+        .filter((message) => message.role === "ASSISTANT")
         .map((message) => stringFromRecord(message.metaJson, "runId"))
         .filter((id): id is string => Boolean(id)),
     ),
   ];
 
-  const [runs, actions] = await Promise.all([
+  const [runs, actions, activeRun] = await Promise.all([
     runIds.length
       ? prisma.agentRun.findMany({
           where: {
@@ -114,9 +115,37 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           orderBy: { createdAt: "asc" },
         })
       : Promise.resolve([]),
+    prisma.agentRun.findFirst({
+      where: {
+        tenantId: requestSession.tenantId,
+        sessionId: params.id,
+        status: { in: ["RUNNING", "FAILED"] },
+        toolCallsJson: { path: ["agent"], equals: "ozon_content_v1" },
+        ...(runIds.length ? { id: { notIn: runIds } } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        input: true,
+        output: true,
+        error: true,
+        status: true,
+        toolCallsJson: true,
+        createdAt: true,
+      },
+    }),
   ]);
 
   const runsById = new Map(runs.map((run) => [run.id, run]));
+  const latestAssistantAt = messages.reduce<Date | null>(
+    (latest, message) => message.role === "ASSISTANT" && (!latest || message.createdAt > latest)
+      ? message.createdAt
+      : latest,
+    null,
+  );
+  const unresolvedRun = activeRun && (!latestAssistantAt || activeRun.createdAt > latestAssistantAt)
+    ? activeRun
+    : null;
   const actionsByRunId = new Map<string, typeof actions>();
   for (const action of actions) {
     if (!action.runId) continue;
@@ -152,6 +181,18 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
           : [],
       };
     }),
+    activeRun: unresolvedRun
+      ? {
+          runId: unresolvedRun.id,
+          status: unresolvedRun.status === "FAILED" ? "failed" : "running",
+          requestPrompt: unresolvedRun.input,
+          output: unresolvedRun.output,
+          error: unresolvedRun.error,
+          plan: arrayFromRun(unresolvedRun, "plan"),
+          executionTrace: arrayFromRun(unresolvedRun, "executionTrace"),
+          dataSources: dataSourcesFromRun(unresolvedRun),
+        }
+      : null,
   });
 }
 

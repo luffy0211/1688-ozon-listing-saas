@@ -68,7 +68,7 @@ export default async function ContentAgentPage() {
     prisma.agentAction.findMany({
       where: {
         tenantId: user.tenantId,
-        status: { in: ["PENDING_APPROVAL", "APPROVED"] },
+        status: { in: ["PENDING_APPROVAL", "APPROVED", "BLOCKED"] },
       },
       orderBy: { createdAt: "desc" },
       take: 30,
