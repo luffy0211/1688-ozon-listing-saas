@@ -30,6 +30,13 @@ function firstImage(value: unknown): string | null {
   return null;
 }
 
+function imageUrls(detail: OzonProductInfoItem | undefined) {
+  return [...new Set([
+    ...(typeof detail?.primary_image === "string" ? [detail.primary_image] : []),
+    ...(detail?.images ?? []),
+  ].filter((item) => typeof item === "string" && item.trim()))];
+}
+
 function dayKey(value?: string): string {
   const d = value ? new Date(value) : new Date();
   const safe = Number.isNaN(d.getTime()) ? new Date() : d;
@@ -186,6 +193,10 @@ function normalizeProducts(
         reservedStock,
         priceRub: detail?.price ? toMoney(detail.price) : null,
         imageUrl: firstImage(detail?.primary_image) ?? firstImage(detail?.images) ?? null,
+        imageUrls: imageUrls(detail),
+        description: typeof detail?.description === "string" && detail.description.trim()
+          ? detail.description.trim()
+          : null,
         publicSku: detail?.sources?.find((source) => source.sku)?.sku
           ? String(detail.sources.find((source) => source.sku)!.sku)
           : null,
@@ -209,6 +220,15 @@ function warningMessage(error: unknown): string {
     return `${error.path} 返回 ${error.status}${error.code ? ` / ${error.code}` : ""}`;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function orderErrorKind(error: unknown) {
+  if (error instanceof OzonApiError && [401, 403].includes(error.status)) return "permission" as const;
+  const message = warningMessage(error).toLowerCase();
+  if (/timeout|timed out|abort/.test(message)) return "timeout" as const;
+  if (/network|fetch failed|econn|enotfound|socket/.test(message)) return "network" as const;
+  if (error instanceof OzonApiError) return "api" as const;
+  return "unknown" as const;
 }
 
 async function optionalOzonCall<T>(
@@ -269,23 +289,28 @@ export async function getOzonAnalyticsSummary(params: {
     )
   ).flat();
 
-  const [fbsPostings, fboPostings] = await Promise.all([
-    optionalOzonCall(
-      "FBS 订单",
-      params.client.listFbsPostings({ since: params.since, to: params.to }),
-      [],
-      warnings,
-    ),
-    optionalOzonCall(
-      "FBO 订单",
-      params.client.listFboPostings({ since: params.since, to: params.to }),
-      [],
-      warnings,
-    ),
+  const [fbsResult, fboResult] = await Promise.allSettled([
+    params.client.listFbsPostings({ since: params.since, to: params.to }),
+    params.client.listFboPostings({ since: params.since, to: params.to }),
   ]);
+  if (fbsResult.status === "rejected") warnings.push(`FBS 订单同步失败：${warningMessage(fbsResult.reason)}`);
+  if (fboResult.status === "rejected") warnings.push(`FBO 订单同步失败：${warningMessage(fboResult.reason)}`);
+  const fbsPostings = fbsResult.status === "fulfilled" ? fbsResult.value : [];
+  const fboPostings = fboResult.status === "fulfilled" ? fboResult.value : [];
 
   const products = normalizeProducts(productList.items, details, stocks);
   const orderSummary = summarizeOrders(params.since, params.to, fbsPostings, fboPostings);
+  const ordersComplete = fbsResult.status === "fulfilled" && fboResult.status === "fulfilled";
+  const ordersUnavailable = fbsResult.status === "rejected" && fboResult.status === "rejected";
+  const orderDataStatus = {
+    state: ordersComplete ? "complete" as const : ordersUnavailable ? "unavailable" as const : "partial" as const,
+    fbs: fbsResult.status === "fulfilled"
+      ? { state: "complete" as const }
+      : { state: "failed" as const, errorKind: orderErrorKind(fbsResult.reason) },
+    fbo: fboResult.status === "fulfilled"
+      ? { state: "complete" as const }
+      : { state: "failed" as const, errorKind: orderErrorKind(fboResult.reason) },
+  };
   const visibilityComplete = products.every((product) => product.visible !== null);
   const stockComplete = products.every((product) => product.stock !== null);
 
@@ -301,11 +326,13 @@ export async function getOzonAnalyticsSummary(params: {
     lowStockCount: stockComplete
       ? products.filter((p) => (p.stock ?? 0) <= LOW_STOCK_THRESHOLD).length
       : null,
-    fbsOrderCount: fbsPostings.length,
-    fboOrderCount: fboPostings.length,
-    pendingShipmentCount: orderSummary.pendingShipmentCount,
-    cancelledOrderCount: orderSummary.cancelledOrderCount,
-    grossRevenueRub: orderSummary.grossRevenueRub,
+    fbsOrderCount: fbsResult.status === "fulfilled" ? fbsPostings.length : null,
+    fboOrderCount: fboResult.status === "fulfilled" ? fboPostings.length : null,
+    pendingShipmentCount: ordersComplete ? orderSummary.pendingShipmentCount : null,
+    cancelledOrderCount: ordersComplete ? orderSummary.cancelledOrderCount : null,
+    grossRevenueRub: ordersComplete ? orderSummary.grossRevenueRub : null,
+    orderDataStatus,
+    orderAmountBasis: "payout_with_sale_price_fallback",
     dailyOrders: orderSummary.dailyOrders,
     topProducts: orderSummary.topProducts,
     products,

@@ -29,11 +29,13 @@ export type OzonAnalyticsView = {
     archivedProductCount: number;
     totalStock: number | null;
     lowStockCount: number | null;
-    fbsOrderCount: number;
-    fboOrderCount: number;
-    pendingShipmentCount: number;
-    cancelledOrderCount: number;
-    grossRevenueRub: string;
+    fbsOrderCount: number | null;
+    fboOrderCount: number | null;
+    pendingShipmentCount: number | null;
+    cancelledOrderCount: number | null;
+    grossRevenueRub: string | null;
+    orderDataStatus: NonNullable<OzonAnalyticsSummary["orderDataStatus"]>;
+    orderAmountBasis: NonNullable<OzonAnalyticsSummary["orderAmountBasis"]> | null;
     dailyOrders: Array<{ date: string; fbs: number; fbo: number }>;
     topProducts: Array<{
       offerId: string;
@@ -98,6 +100,26 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function nullableNumber(value: unknown, fallback: number) {
   return value === null ? null : typeof value === "number" ? value : fallback;
+}
+
+function orderDataStatus(value: unknown): NonNullable<OzonAnalyticsSummary["orderDataStatus"]> {
+  const status = asRecord(value);
+  const channel = (input: unknown) => {
+    const item = asRecord(input);
+    if (item.state === "complete") return { state: "complete" as const };
+    if (item.state !== "failed") return { state: "unknown" as const };
+    const errorKind = ["permission", "timeout", "network", "api", "unknown"].includes(String(item.errorKind))
+      ? item.errorKind as "permission" | "timeout" | "network" | "api" | "unknown"
+      : "unknown" as const;
+    return { state: "failed" as const, errorKind };
+  };
+  return ["complete", "partial", "unavailable"].includes(String(status.state))
+    ? {
+        state: status.state as "complete" | "partial" | "unavailable",
+        fbs: channel(status.fbs),
+        fbo: channel(status.fbo),
+      }
+    : { state: "unknown", fbs: { state: "unknown" }, fbo: { state: "unknown" } };
 }
 
 export function formatOzonSyncError(error: unknown): OzonSyncErrorView {
@@ -228,34 +250,43 @@ export async function getOzonAnalyticsView(params: {
     prisma.ozonDraft.count({ where: { tenantId: params.tenantId, status: "COMPILED" } }),
     prisma.publishRun.count({ where: { tenantId: params.tenantId, status: "submitted" } }),
   ]);
+  const rawSnapshot = asRecord(snapshot?.rawJson);
+  const orders = orderDataStatus(rawSnapshot.orderDataStatus);
+  const knownOrders = orders.state !== "unknown";
+  const latestSnapshot = snapshot ? {
+    id: snapshot.id,
+    syncedAt: snapshot.syncedAt.toISOString(),
+    periodFrom: snapshot.periodFrom.toISOString(),
+    periodTo: snapshot.periodTo.toISOString(),
+    productCount: snapshot.productCount,
+    visibleProductCount: nullableNumber(rawSnapshot.visibleProductCount, snapshot.visibleProductCount),
+    archivedProductCount: snapshot.archivedProductCount,
+    totalStock: nullableNumber(rawSnapshot.totalStock, snapshot.totalStock),
+    lowStockCount: nullableNumber(rawSnapshot.lowStockCount, snapshot.lowStockCount),
+    fbsOrderCount: knownOrders ? nullableNumber(rawSnapshot.fbsOrderCount, snapshot.fbsOrderCount) : null,
+    fboOrderCount: knownOrders ? nullableNumber(rawSnapshot.fboOrderCount, snapshot.fboOrderCount) : null,
+    pendingShipmentCount: knownOrders
+      ? nullableNumber(rawSnapshot.pendingShipmentCount, snapshot.pendingShipmentCount)
+      : null,
+    cancelledOrderCount: knownOrders
+      ? nullableNumber(rawSnapshot.cancelledOrderCount, snapshot.cancelledOrderCount)
+      : null,
+    grossRevenueRub: knownOrders && rawSnapshot.grossRevenueRub !== null
+      ? snapshot.grossRevenueRub.toString()
+      : null,
+    orderDataStatus: orders,
+    orderAmountBasis: rawSnapshot.orderAmountBasis === "payout_with_sale_price_fallback"
+      ? "payout_with_sale_price_fallback" as const
+      : null,
+    dailyOrders: serializeDailyOrders(snapshot.dailyOrdersJson),
+    topProducts: serializeTopProducts(snapshot.rawJson),
+    error: snapshot.error,
+  } : null;
 
   return {
     store,
     stores,
-    latestSnapshot: snapshot
-      ? {
-          id: snapshot.id,
-          syncedAt: snapshot.syncedAt.toISOString(),
-          periodFrom: snapshot.periodFrom.toISOString(),
-          periodTo: snapshot.periodTo.toISOString(),
-          productCount: snapshot.productCount,
-          visibleProductCount: nullableNumber(
-            asRecord(snapshot.rawJson).visibleProductCount,
-            snapshot.visibleProductCount,
-          ),
-          archivedProductCount: snapshot.archivedProductCount,
-          totalStock: nullableNumber(asRecord(snapshot.rawJson).totalStock, snapshot.totalStock),
-          lowStockCount: nullableNumber(asRecord(snapshot.rawJson).lowStockCount, snapshot.lowStockCount),
-          fbsOrderCount: snapshot.fbsOrderCount,
-          fboOrderCount: snapshot.fboOrderCount,
-          pendingShipmentCount: snapshot.pendingShipmentCount,
-          cancelledOrderCount: snapshot.cancelledOrderCount,
-          grossRevenueRub: snapshot.grossRevenueRub.toString(),
-          dailyOrders: serializeDailyOrders(snapshot.dailyOrdersJson),
-          topProducts: serializeTopProducts(snapshot.rawJson),
-          error: snapshot.error,
-        }
-      : null,
+    latestSnapshot,
     products: products.map((product) => ({
       id: product.id,
       productId: product.productId,
@@ -412,11 +443,11 @@ async function saveOzonAnalyticsSnapshot(params: {
       archivedProductCount: params.summary.archivedProductCount,
       totalStock: params.summary.totalStock ?? 0,
       lowStockCount: params.summary.lowStockCount ?? 0,
-      fbsOrderCount: params.summary.fbsOrderCount,
-      fboOrderCount: params.summary.fboOrderCount,
-      pendingShipmentCount: params.summary.pendingShipmentCount,
-      cancelledOrderCount: params.summary.cancelledOrderCount,
-      grossRevenueRub: new Prisma.Decimal(params.summary.grossRevenueRub),
+      fbsOrderCount: params.summary.fbsOrderCount ?? 0,
+      fboOrderCount: params.summary.fboOrderCount ?? 0,
+      pendingShipmentCount: params.summary.pendingShipmentCount ?? 0,
+      cancelledOrderCount: params.summary.cancelledOrderCount ?? 0,
+      grossRevenueRub: new Prisma.Decimal(params.summary.grossRevenueRub ?? 0),
       dailyOrdersJson: params.summary.dailyOrders as never,
       rawJson: params.summary as never,
       error: params.summary.warnings?.length ? params.summary.warnings.join("\n") : null,

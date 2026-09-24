@@ -83,10 +83,12 @@ export function summarizeFinanceTransactions(transactions: FinanceLike[]) {
 }
 
 function orderCount(summary: OzonAnalyticsSummary) {
+  if (summary.fbsOrderCount === null || summary.fboOrderCount === null) return null;
   return summary.fbsOrderCount + summary.fboOrderCount;
 }
 
-function changeRate(current: number, previous: number) {
+function changeRate(current: number | null, previous: number | null) {
+  if (current === null || previous === null) return null;
   return previous > 0 ? (current - previous) / previous : null;
 }
 
@@ -96,6 +98,11 @@ export function buildStoreDiagnosis(params: {
   finance: FinanceSummary;
   capturedAt?: string;
 }) {
+  const currentOrderDataStatus = params.current.orderDataStatus ?? {
+    state: "unknown" as const,
+    fbs: { state: "unknown" as const },
+    fbo: { state: "unknown" as const },
+  };
   const currentOrders = orderCount(params.current);
   const previousOrders = orderCount(params.previous);
   const visibleGap = params.current.visibleProductCount === null
@@ -111,10 +118,10 @@ export function buildStoreDiagnosis(params: {
       ? [`${params.current.lowStockCount} 个商品库存不高于 5`]
       : []),
     ...((visibleGap ?? 0) > 0 ? [`${visibleGap} 个商品当前不可见且未归档`] : []),
-    ...(params.current.cancelledOrderCount > 0
+    ...((params.current.cancelledOrderCount ?? 0) > 0
       ? [`${params.current.cancelledOrderCount} 个订单处于取消状态`]
       : []),
-    ...(currentOrders === 0 ? ["最近 30 天没有读取到订单"] : []),
+    ...(currentOrders === 0 ? ["最近 30 天没有订单"] : []),
   ];
 
   return {
@@ -133,8 +140,9 @@ export function buildStoreDiagnosis(params: {
     },
     last7d: {
       orderCount: params.current.dailyOrders
-        .slice(-7)
-        .reduce((sum, day) => sum + day.fbs + day.fbo, 0),
+        && currentOrderDataStatus.state === "complete"
+        ? params.current.dailyOrders.slice(-7).reduce((sum, day) => sum + day.fbs + day.fbo, 0)
+        : null,
     },
     previous30d: {
       orderCount: previousOrders,
@@ -148,6 +156,8 @@ export function buildStoreDiagnosis(params: {
       ),
     },
     finance: params.finance,
+    orderDataStatus: currentOrderDataStatus,
+    orderAmountBasis: params.current.orderAmountBasis ?? null,
     issues,
     warnings: [...(params.current.warnings ?? []), ...(params.previous.warnings ?? [])],
   };
@@ -229,13 +239,19 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
       })
       .map((items) => items[0]!)
       .map((item) => {
-        const imageUrl = ozonCdnImageUrl(item.imageUrl);
+        const imageUrls = (item.imageUrls ?? []).flatMap((value) => ozonCdnImageUrl(value) ?? []);
+        const imageUrl = imageUrls[0] ?? ozonCdnImageUrl(item.imageUrl);
         return {
           offerId: item.offerId,
           title: item.name!,
           publicSku: item.publicSku,
           ...(imageUrl ? { imageUrl } : {}),
-          priceRub: item.priceRub,
+          ...(imageUrls.length ? { imageUrls, imageReadState: "not_read" as const } : {}),
+          ...(item.description !== undefined ? {
+            description: item.description,
+            descriptionReadState: item.description ? "available" as const : "not_read" as const,
+          } : {}),
+          ...(item.priceRub !== undefined ? { priceRub: item.priceRub } : {}),
           quantity: sales.get(item.offerId)?.quantity ?? 0,
           revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
           descriptionCategoryId: item.descriptionCategoryId ?? null,
@@ -249,13 +265,19 @@ export function selectCompetitorTargets(summary: OzonAnalyticsSummary) {
   return pool
     .slice(0, 5)
     .map((item) => {
-      const imageUrl = ozonCdnImageUrl(item.imageUrl);
+      const imageUrls = (item.imageUrls ?? []).flatMap((value) => ozonCdnImageUrl(value) ?? []);
+      const imageUrl = imageUrls[0] ?? ozonCdnImageUrl(item.imageUrl);
       return {
         offerId: item.offerId,
         title: item.name!,
         publicSku: item.publicSku,
         ...(imageUrl ? { imageUrl } : {}),
-        priceRub: item.priceRub,
+        ...(imageUrls.length ? { imageUrls, imageReadState: "not_read" as const } : {}),
+        ...(item.description !== undefined ? {
+          description: item.description,
+          descriptionReadState: item.description ? "available" as const : "not_read" as const,
+        } : {}),
+        ...(item.priceRub !== undefined ? { priceRub: item.priceRub } : {}),
         quantity: sales.get(item.offerId)?.quantity ?? 0,
         revenueRub: sales.get(item.offerId)?.revenueRub ?? 0,
         descriptionCategoryId: item.descriptionCategoryId ?? null,
@@ -277,6 +299,76 @@ function competitorCategoryKey(value: {
 
 function textField(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function attributeTextById(attributes: unknown, id: number) {
+  if (!Array.isArray(attributes)) return null;
+  const item = attributes.map(record).find((attribute) => Number(attribute.id) === id);
+  const values = item && Array.isArray(item.values) ? item.values.map(record) : [];
+  return values.map((value) => textField(value.value)).find(Boolean) ?? null;
+}
+
+function detailImageUrls(info: OzonProductInfoItem | null) {
+  return [...new Set([
+    ...(info?.primary_image ? [info.primary_image] : []),
+    ...(info?.images ?? []),
+  ].flatMap((value) => ozonCdnImageUrl(value) ?? []))];
+}
+
+export async function hydrateOwnProductTargets(
+  client: Pick<OzonClient, "getProductInfoList" | "getProductInfoAttributes">,
+  targets: OzonCompetitorTarget[],
+) {
+  if (!targets.length) return { targets, warnings: [] as string[] };
+  const offerIds = targets.map((target) => target.offerId);
+  const [infoResult, attributeResult] = await Promise.allSettled([
+    client.getProductInfoList({ offerIds }),
+    client.getProductInfoAttributes({ offerIds }),
+  ]);
+  const infoByOffer = new Map(
+    (infoResult.status === "fulfilled" ? infoResult.value : []).map((item) => [item.offer_id, item]),
+  );
+  const attributeByOffer = new Map(
+    (attributeResult.status === "fulfilled" ? attributeResult.value : []).map((item) => [item.offer_id, item]),
+  );
+  const warnings = [
+    ...(infoResult.status === "rejected" ? [`自家商品详情读取失败：${String(infoResult.reason)}`] : []),
+    ...(attributeResult.status === "rejected" ? [`自家商品描述读取失败：${String(attributeResult.reason)}`] : []),
+  ];
+  return {
+    targets: targets.map((target) => {
+      const info = infoByOffer.get(target.offerId) ?? null;
+      const attributes = attributeByOffer.get(target.offerId) ?? null;
+      const description = textField(attributes?.description) ??
+        attributeTextById(attributes?.attributes, 4191) ??
+        textField(info?.description) ??
+        target.description ?? null;
+      const infoImages = detailImageUrls(info);
+      const attributeImages = detailImageUrls(attributes);
+      const apiImages = infoImages.length ? infoImages : attributeImages;
+      const images = apiImages.length
+        ? apiImages
+          : target.imageUrls ?? [];
+      return {
+        ...target,
+        title: textField(info?.name) ?? textField(attributes?.name) ?? target.title,
+        imageUrls: images,
+        imageReadState: apiImages.length
+          ? "available" as const
+          : infoResult.status === "rejected"
+            ? "read_failed" as const
+            : "missing" as const,
+        ...(images[0] ? { imageUrl: images[0] } : {}),
+        description,
+        descriptionReadState: description
+          ? "available" as const
+          : attributeResult.status === "rejected"
+            ? "read_failed" as const
+            : "missing" as const,
+      };
+    }),
+    warnings,
+  };
 }
 
 export function targetsWithoutCompetitorEvidence(
@@ -379,6 +471,12 @@ export function selectCompetitorDiagnosisTargets(
       offerId: product.offerId,
       title: product.name,
       publicSku: product.publicSku,
+      imageUrl: product.imageUrl,
+      ...(product.imageUrls?.length ? { imageUrls: product.imageUrls, imageReadState: "not_read" as const } : {}),
+      ...(product.description !== undefined ? {
+        description: product.description,
+        descriptionReadState: product.description ? "available" as const : "not_read" as const,
+      } : {}),
       quantity: 0,
       revenueRub: 0,
       descriptionCategoryId: product.descriptionCategoryId,
@@ -714,6 +812,7 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
         },
         mainImage: {
           ownImageCount: ownProduct?.imageUrls.length ?? 0,
+          ownReadState: textField(target.imageReadState) ?? "not_read",
           competitorMedianImageCount: medianNullable(competitors.map((product) => product.imageUrls.length)),
         },
         price: {
@@ -728,11 +827,13 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
           note: "Ozon 未返回真实销量；这里用评分、评价数和搜索位置作为热度代理。",
         },
         themes: {
+          ownTerms: topTerms([ownProduct?.title ?? "", ownProduct?.description ?? ""], 8),
           titleTerms,
           descriptionTerms,
         },
         description: {
           ownAvailable: Boolean(ownProduct?.description),
+          ownReadState: textField(target.descriptionReadState) ?? "not_read",
           competitorAvailableCount: competitors.filter((product) => product.description).length,
           samples: competitors.flatMap((product) =>
             product.description ? [{ sku: product.sku, text: descriptionSummary(product.description) }] : [],
@@ -1052,6 +1153,9 @@ export async function analyzeOzonCompetitors(params: {
   });
   let targets: OzonCompetitorTarget[] = selectCompetitorTargets(summary);
   const warnings = [...(summary.warnings ?? [])];
+  const ownDetails = await hydrateOwnProductTargets(client, targets);
+  targets = ownDetails.targets;
+  warnings.push(...ownDetails.warnings);
   if (targets.length) {
     try {
       targets = attachCompetitorCategoryLabels(await client.getCategoryTree(), targets);

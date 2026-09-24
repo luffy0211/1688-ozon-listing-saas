@@ -432,9 +432,17 @@ function compareRows(sample: Record<string, unknown>) {
   const competitorTitle = shortText(competitor.title, "本次未拿到竞品标题");
   const ownTitle = shortText(own.title, shortText(sample.offerId));
   const ownImageCount = numberValue(mainImage.ownImageCount) ?? numberValue(own.imageCount) ?? 0;
+  const ownImageReadState = stringValue(mainImage.ownReadState) ?? "not_read";
   const competitorImageCount = numberValue(mainImage.competitorMedianImageCount);
+  const ownTerms = termLabels(themes.ownTerms).join("、");
   const titleTerms = termLabels(themes.titleTerms).join("、");
   const descriptionTerms = termLabels(themes.descriptionTerms).join("、");
+  const ownDescriptionReadState = stringValue(description.ownReadState) ?? "not_read";
+  const ownDescription = description.ownAvailable
+    ? "已有简介"
+    : ownDescriptionReadState === "missing"
+      ? "确认未填写简介"
+      : "暂未获取简介";
   return [
     {
       label: "标题",
@@ -446,9 +454,13 @@ function compareRows(sample: Record<string, unknown>) {
     },
     {
       label: "主图",
-      own: `${ownImageCount}张图${ownImageCount < 8 ? "，未达8张" : ""}`,
+      own: ownImageReadState === "available" || ownImageReadState === "missing"
+        ? `${ownImageCount}张图${ownImageCount < 8 ? "，未达8张" : ""}`
+        : "暂未获取完整图片",
       competitor: competitorImageCount === null ? "竞品图片数未采到" : `竞品中位${competitorImageCount}张`,
-      action: ownImageCount < 8 ? "补图到8张以上，优先补视频/视频封面" : "主图数量先不动，检查清晰度",
+      action: ownImageReadState === "available" || ownImageReadState === "missing"
+        ? ownImageCount < 8 ? "补图到8张以上，优先补视频/视频封面" : "主图数量先不动，检查清晰度"
+        : "先重新读取商品图片，再判断是否补图",
     },
     {
       label: "价格",
@@ -464,15 +476,19 @@ function compareRows(sample: Record<string, unknown>) {
     },
     {
       label: "关键词",
-      own: titleTerms || "自家关键词弱",
+      own: ownTerms || "自家关键词暂未识别",
       competitor: descriptionTerms || titleTerms || "竞品关键词未采到",
       action: "把高频俄语词自然写进标题和简介",
     },
     {
       label: "简介",
-      own: description.ownAvailable ? "已有简介" : "简介为空",
+      own: ownDescription,
       competitor: `竞品${numberValue(description.competitorAvailableCount) ?? 0}个有简介`,
-      action: description.ownAvailable ? "优化表达，不复制竞品文案" : "补100-500字俄语简介",
+      action: description.ownAvailable
+        ? "优化表达，不复制竞品文案"
+        : ownDescriptionReadState === "missing"
+          ? "补100-500字俄语简介"
+          : "先重新读取商品简介，再决定是否补充",
     },
   ];
 }
@@ -502,6 +518,9 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
           const competitors = arrayValue(sample.competitors).map(asRecord);
           const firstCompetitor = competitors[0];
           const competitorUrl = safeExternalUrl(firstCompetitor?.url);
+          const ownImageReadState = stringValue(
+            asRecord(asRecord(sample.comparison).mainImage).ownReadState,
+          );
           return (
             <div key={`${stringValue(sample.offerId) ?? index}`} className="overflow-hidden rounded-xl border border-[#ccebe6] bg-white">
               <div className="grid gap-3 border-b border-[#e4f4f1] bg-[#f8fffd] p-3 lg:grid-cols-[1fr_1fr]">
@@ -509,7 +528,9 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
                   {stringValue(own.imageUrl) ? (
                     <img src={displayProductImageUrl(stringValue(own.imageUrl)!)} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
                   ) : (
-                    <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">自家无图</div>
+                    <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">
+                      {ownImageReadState === "missing" ? "自家无图" : "图片暂未获取"}
+                    </div>
                   )}
                   <div className="min-w-0">
                     <div className="text-[11px] font-bold text-[#087f78]">自家商品 · {stringValue(sample.categoryName) ?? "未知类目"}</div>

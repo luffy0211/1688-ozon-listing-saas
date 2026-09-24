@@ -417,9 +417,17 @@ export type OzonAnalyticsProduct = {
   reservedStock: number | null;
   priceRub: number | null;
   imageUrl: string | null;
+  imageUrls?: string[];
+  description?: string | null;
   publicSku: string | null;
   descriptionCategoryId: number | null;
   typeId: number | null;
+};
+
+export type OzonOrderDataStatus = {
+  state: "complete" | "partial" | "unavailable" | "unknown";
+  fbs: { state: "complete" | "failed" | "unknown"; errorKind?: "permission" | "timeout" | "network" | "api" | "unknown" };
+  fbo: { state: "complete" | "failed" | "unknown"; errorKind?: "permission" | "timeout" | "network" | "api" | "unknown" };
 };
 
 export type OzonOrderSummary = {
@@ -446,11 +454,13 @@ export type OzonAnalyticsSummary = {
   archivedProductCount: number;
   totalStock: number | null;
   lowStockCount: number | null;
-  fbsOrderCount: number;
-  fboOrderCount: number;
-  pendingShipmentCount: number;
-  cancelledOrderCount: number;
-  grossRevenueRub: number;
+  fbsOrderCount: number | null;
+  fboOrderCount: number | null;
+  pendingShipmentCount: number | null;
+  cancelledOrderCount: number | null;
+  grossRevenueRub: number | null;
+  orderDataStatus?: OzonOrderDataStatus;
+  orderAmountBasis?: "payout_with_sale_price_fallback";
   dailyOrders: OzonOrderSummary["dailyOrders"];
   topProducts: OzonOrderSummary["topProducts"];
   products: OzonAnalyticsProduct[];
