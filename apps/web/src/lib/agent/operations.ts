@@ -301,6 +301,15 @@ function textField(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+export function targetsForCompetitorCategory(
+  targets: OzonCompetitorTarget[],
+  category: { descriptionCategoryId: number; typeId: number } | null | undefined,
+) {
+  return category
+    ? targets.filter((target) => target.descriptionCategoryId === category.descriptionCategoryId && target.typeId === category.typeId)
+    : targets;
+}
+
 function attributeTextById(attributes: unknown, id: number) {
   if (!Array.isArray(attributes)) return null;
   const item = attributes.map(record).find((attribute) => Number(attribute.id) === id);
@@ -774,6 +783,9 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
     const descriptionTerms = topTerms(competitors.map((product) => product.description ?? ""), 8);
     return [{
       offerId: textField(target.offerId) ?? ownProduct?.sku ?? null,
+      descriptionCategoryId: Number(target.descriptionCategoryId) || null,
+      typeId: Number(target.typeId) || null,
+      capturedAt: textField(item.capturedAt),
       categoryName: textField(category.name) ?? textField(target.categoryNameRu) ?? textField(target.title),
       own: ownProduct ? {
         title: ownProduct.title,
@@ -1142,6 +1154,7 @@ export async function analyzeOzonCompetitors(params: {
   storeId?: string | null;
   competitorsPerCategory: number;
   refreshEvidence?: boolean;
+  targetCategory?: { descriptionCategoryId: number; typeId: number } | null;
 }) {
   const store = await resolveStore(params.tenantId, params.storeId);
   const client = clientFor(store);
@@ -1151,7 +1164,10 @@ export async function analyzeOzonCompetitors(params: {
     since: addDays(now, -29),
     to: now,
   });
-  let targets: OzonCompetitorTarget[] = selectCompetitorTargets(summary);
+  let targets: OzonCompetitorTarget[] = targetsForCompetitorCategory(
+    selectCompetitorTargets(summary),
+    params.targetCategory,
+  );
   const warnings = [...(summary.warnings ?? [])];
   const ownDetails = await hydrateOwnProductTargets(client, targets);
   targets = ownDetails.targets;
@@ -1353,6 +1369,7 @@ export async function analyzeOzonCompetitors(params: {
       ownProduct: result.ownProduct,
       competitors,
       benchmarks: result.benchmarks,
+      capturedAt: now.toISOString(),
       cached: false,
     });
   }

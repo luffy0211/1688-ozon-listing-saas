@@ -80,7 +80,7 @@ describe("agent insight presentation", () => {
       showStoreDiagnosis: true,
       showContentDiagnosis: true,
       showContentProducts: true,
-      showCompetitorComparison: false,
+      showCompetitorComparison: true,
     });
   });
 
@@ -89,7 +89,7 @@ describe("agent insight presentation", () => {
       showStoreDiagnosis: false,
       showContentDiagnosis: true,
       showContentProducts: true,
-      showCompetitorComparison: false,
+      showCompetitorComparison: true,
     });
   });
 
@@ -100,7 +100,7 @@ describe("agent insight presentation", () => {
       showStoreDiagnosis: false,
       showContentDiagnosis: true,
       showContentProducts: false,
-      showCompetitorComparison: false,
+      showCompetitorComparison: true,
     });
   });
 
@@ -184,6 +184,25 @@ describe("agent insight presentation", () => {
     expect(html).toContain(
       "/api/v1/image-proxy?url=https%3A%2F%2Fir.ozone.ru%2Fs3%2Fmultimedia-competitor.jpg",
     );
+  });
+
+  it("shows old competitor evidence and lets the user decide whether to refresh", () => {
+    const onRun = () => undefined;
+    const html = renderToStaticMarkup(createElement(AgentInsightPanel, {
+      sources: [{ ...competitorSource, contentDiagnosis: {
+        samples: [{
+          ...((competitorSource.contentDiagnosis as { samples: Record<string, unknown>[] }).samples[0]),
+          capturedAt: "2020-01-01T00:00:00.000Z",
+        }],
+      } }],
+      requestPrompt: "优化商品内容",
+      actions: [],
+      onRun,
+    }));
+
+    expect(html).toContain("竞品数据已超过 7 天");
+    expect(html).toContain("更新竞品");
+    expect(html).toContain("竞品商品");
   });
 
   it("shows unread own content as unavailable instead of claiming it is empty", () => {

@@ -15,6 +15,7 @@ import {
   summarizeFinanceTransactions,
   hydrateOwnProductTargets,
   targetsWithoutCompetitorEvidence,
+  targetsForCompetitorCategory,
 } from "./operations";
 
 const categoryTree = [
@@ -57,6 +58,15 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("Ozon operations helpers", () => {
+  it("limits a targeted optimization to the same Ozon category", () => {
+    const targets = [
+      { descriptionCategoryId: 10, typeId: 20 },
+      { descriptionCategoryId: 10, typeId: 21 },
+    ];
+    expect(targetsForCompetitorCategory(targets as never, { descriptionCategoryId: 10, typeId: 20 }))
+      .toEqual([targets[0]]);
+    expect(targetsForCompetitorCategory(targets as never, null)).toEqual(targets);
+  });
   it("falls back only for categories without crawler evidence", () => {
     const targets = [
       { descriptionCategoryId: 10, typeId: 20, offerId: "a" },
@@ -234,7 +244,8 @@ describe("Ozon operations helpers", () => {
     });
 
     const diagnosis = await buildCompetitorContentDiagnosis([{
-      target: { offerId: "offer-1", title: "Поло", categoryNameRu: "Поло" },
+      target: { offerId: "offer-1", title: "Поло", categoryNameRu: "Поло", descriptionCategoryId: 10, typeId: 20 },
+      capturedAt: "2026-09-01T00:00:00.000Z",
       category: { name: "Поло" },
       ownProduct: product("own", { priceRub: 999, reviewCount: 2 }),
       competitors: [
@@ -250,6 +261,9 @@ describe("Ozon operations helpers", () => {
       samples: [
         expect.objectContaining({
           offerId: "offer-1",
+          descriptionCategoryId: 10,
+          typeId: 20,
+          capturedAt: "2026-09-01T00:00:00.000Z",
           comparison: expect.objectContaining({
             price: { ownRub: 999, competitorMedianRub: 1490 },
             heat: expect.objectContaining({ ownReviewCount: 2, competitorMedianReviewCount: 60 }),
