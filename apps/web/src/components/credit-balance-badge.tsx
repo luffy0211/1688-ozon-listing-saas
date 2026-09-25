@@ -34,8 +34,12 @@ export function CreditBalanceBadge() {
     }
 
     loadBalance();
+    window.addEventListener("credits:changed", loadBalance);
+    window.addEventListener("focus", loadBalance);
     return () => {
       cancelled = true;
+      window.removeEventListener("credits:changed", loadBalance);
+      window.removeEventListener("focus", loadBalance);
     };
   }, []);
 
@@ -44,11 +48,11 @@ export function CreditBalanceBadge() {
   return (
     <span
       aria-busy={state.status === "loading"}
-      className="inline-flex h-9 w-[88px] items-center justify-center gap-1.5 rounded-xl border border-[#dbe6fb] bg-white px-3 text-xs font-semibold text-[#52627b] shadow-[0_4px_14px_rgba(55,84,130,0.08)]"
+      className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-[#dbe6fb] bg-white px-2 text-xs font-semibold text-[#52627b] shadow-[0_4px_14px_rgba(55,84,130,0.08)]"
     >
       <Coins className="h-3.5 w-3.5 text-[#3478f6]" aria-hidden="true" />
-      <span>积分</span>
-      <span className="font-bold text-[#17223d]">{state.balance ?? "-"}</span>
+      <span className="hidden sm:inline">积分</span>
+      <span className="font-bold text-[#17223d]">{state.balance?.toLocaleString("zh-CN") ?? "-"}</span>
     </span>
   );
 }

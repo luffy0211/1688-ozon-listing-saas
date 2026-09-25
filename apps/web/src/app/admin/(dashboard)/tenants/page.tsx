@@ -1,4 +1,5 @@
 import { prisma } from "@saas/db";
+import { AdminTenantCreator } from "@/components/admin-tenant-creator";
 import { EmptyState, MetricCard, PageHeader, Table } from "@/components/ui";
 
 export default async function AdminTenantsPage() {
@@ -23,6 +24,7 @@ export default async function AdminTenantsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="租户管理" description="查看租户、用户、店铺、商品和任务数量。" />
+      <AdminTenantCreator />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard title="租户" value={tenants.length} />
         <MetricCard title="用户" value={users} />

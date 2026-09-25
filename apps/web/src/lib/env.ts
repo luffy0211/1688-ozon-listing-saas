@@ -36,6 +36,7 @@ export const env = {
     process.env.AGENT_COMPETITOR_CACHE_HOURS ?? "24",
   ),
   tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
+  apifyApiToken: process.env.APIFY_API_TOKEN ?? "",
   ozonCrawlerPython: process.env.OZON_CRAWLER_PYTHON ?? "python",
   ozonCrawlerScript: process.env.OZON_CRAWLER_SCRIPT ?? "",
   ozonCrawlerCookieJar: process.env.OZON_CRAWLER_COOKIE_JAR ?? "",

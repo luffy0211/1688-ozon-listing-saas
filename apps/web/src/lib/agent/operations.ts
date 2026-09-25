@@ -22,11 +22,8 @@ import {
   type OzonCompetitorTarget,
   type OzonPublicProduct,
 } from "./ozon-public-crawler";
-import {
-  crawlOzonCompetitorsWithProcess,
-  ozonCrawlerConfigured,
-} from "./ozon-crawler-process";
-import { searchOzonIndexedCompetitors, uniqueUsableIndexedCompetitors } from "./ozon-search-index";
+import { uniqueUsableIndexedCompetitors } from "./ozon-search-index";
+import { searchOzonApifyCompetitors } from "./apify-ozon";
 import { analyzeProductImagesWithVision } from "./image-vision";
 import { buildProductInvestigationEvidence } from "./product-investigation";
 
@@ -380,20 +377,6 @@ export async function hydrateOwnProductTargets(
   };
 }
 
-export function targetsWithoutCompetitorEvidence(
-  targets: OzonCompetitorTarget[],
-  results: Pick<OzonCategoryCompetitorResult, "target" | "competitors">[],
-) {
-  const covered = new Set(results.flatMap((result) => {
-    const key = result.competitors.length ? competitorCategoryKey(result.target) : null;
-    return key ? [key] : [];
-  }));
-  return targets.filter((target) => {
-    const key = competitorCategoryKey(target);
-    return !key || !covered.has(key);
-  });
-}
-
 export function summarizeCompetitorEvidence(params: {
   targets: OzonCompetitorTarget[];
   reports: unknown[];
@@ -700,7 +683,7 @@ export function cachedReportForTarget(value: unknown, target: OzonCompetitorTarg
 
 export function cachedCompetitorReport(value: unknown, minimumCompetitors = 1) {
   const payload = record(value);
-  const report = ["ozon_search_index", "ozon_http_crawler"].includes(String(payload.source)) &&
+  const report = ["ozon_search_index", "ozon_http_crawler", "apify_ozon_scraper"].includes(String(payload.source)) &&
     payload.detailScope === COMPETITOR_DETAIL_SCOPE &&
     Array.isArray(payload.competitors) &&
     payload.competitors.length > 0 &&
@@ -1215,73 +1198,22 @@ export async function analyzeOzonCompetitors(params: {
   }
 
   let crawled: OzonCategoryCompetitorResult[] = [];
-  const defaultEvidenceSource = ozonCrawlerConfigured() ? "ozon_http_crawler" : "ozon_search_index";
-  const sourceByCategory = new Map<string, "ozon_http_crawler" | "ozon_search_index">();
-  const shouldCollectMissingEvidence = pending.length && (
-    params.refreshEvidence ||
-    ozonCrawlerConfigured() ||
-    Boolean(env.tavilyApiKey)
-  );
-  if (shouldCollectMissingEvidence) {
+  if (pending.length && env.apifyApiToken) {
     const ownSkus = new Set(
       summary.products.map((item) => item.publicSku).filter((sku): sku is string => Boolean(sku)),
     );
-    const searchIndexed = (searchTargets: OzonCompetitorTarget[]) => searchOzonIndexedCompetitors({
-      apiKey: env.tavilyApiKey,
-      targets: searchTargets,
+    crawled = await searchOzonApifyCompetitors({
+      apiToken: env.apifyApiToken,
+      targets: pending,
       ownSkus,
       limitPerProduct: params.competitorsPerCategory,
     });
-    if (ozonCrawlerConfigured()) {
-      try {
-        crawled = await crawlOzonCompetitorsWithProcess({
-          requestId: `${store.id}-${now.getTime()}`,
-          targets: pending,
-          ownSkus,
-          limitPerCategory: params.competitorsPerCategory,
-        });
-        crawled.forEach((result) => {
-          const key = competitorCategoryKey(result.target);
-          if (key) sourceByCategory.set(key, "ozon_http_crawler");
-        });
-      } catch (error) {
-        warnings.push(`Ozon HTTP 采集失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-      const fallbackTargets = targetsWithoutCompetitorEvidence(pending, crawled);
-      if (fallbackTargets.length && env.tavilyApiKey) {
-        try {
-          const fallback = await searchIndexed(fallbackTargets);
-          const fallbackKeys = new Set(fallbackTargets.map(competitorCategoryKey).filter(Boolean));
-          crawled = [
-            ...crawled.filter((result) => !fallbackKeys.has(competitorCategoryKey(result.target))),
-            ...fallback,
-          ];
-          fallback.forEach((result) => {
-            const key = competitorCategoryKey(result.target);
-            if (key) sourceByCategory.set(key, "ozon_search_index");
-          });
-          warnings.push(`${fallbackTargets.length} 个本地采集失败类目已回退使用 Tavily 搜索索引证据`);
-        } catch (fallbackError) {
-          warnings.push(`Tavily 回退采集失败：${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
-        }
-      }
-    } else {
-      try {
-        crawled = await searchIndexed(pending);
-        crawled.forEach((result) => {
-          const key = competitorCategoryKey(result.target);
-          if (key) sourceByCategory.set(key, "ozon_search_index");
-        });
-      } catch (error) {
-        warnings.push(`Ozon 搜索索引采集失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
   } else if (pending.length) {
-    warnings.push(`${pending.length} 个类目没有历史竞品证据，且没有配置 Ozon 采集器或 Tavily。`);
+    warnings.push(`${pending.length} 个类目没有历史竞品证据，且没有配置 Apify。`);
   }
 
   for (const result of crawled) {
-    const resultSource = sourceByCategory.get(competitorCategoryKey(result.target) ?? "") ?? defaultEvidenceSource;
+    const resultSource = "apify_ozon_scraper";
     warnings.push(...result.warnings.map((warning) => `${result.target.offerId}：${warning}`));
     const competitors = result.competitors;
     if (!result.category || !competitors.length) {
@@ -1387,7 +1319,9 @@ export async function analyzeOzonCompetitors(params: {
   const contentDiagnosis = await buildCompetitorContentDiagnosis(reports);
 
   const reportSources = new Set(reports.map((report) => String(record(report).source)));
-  const source = reportSources.has("ozon_http_crawler") && reportSources.has("ozon_search_index")
+  const source = reportSources.has("apify_ozon_scraper")
+    ? "Apify Ozon 商品采集"
+    : reportSources.has("ozon_http_crawler") && reportSources.has("ozon_search_index")
     ? "本地 Ozon 纯 HTTP 采集器 + Tavily 搜索索引回退"
     : reportSources.has("ozon_http_crawler")
       ? "本地 Ozon 纯 HTTP 采集器"
