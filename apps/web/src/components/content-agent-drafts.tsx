@@ -73,16 +73,35 @@ export function initialSelectedDraftIds(
     .map((action) => action.id);
 }
 
-export function contentDraftStatusLabel(status: string) {
+export function contentDraftStatusLabel(status: string, error?: string | null) {
+  if (status === "BLOCKED") {
+    if (error === "execution_in_progress") return "正在执行";
+    if (error === "result_pending_verification") return "核对结果中";
+    return "需要处理";
+  }
   const labels: Record<string, string> = {
     PENDING_APPROVAL: "待确认",
     APPROVED: "待执行",
     EXECUTED: "已执行",
     REJECTED: "已拒绝",
     FAILED: "执行失败",
-    BLOCKED: "处理中",
   };
   return labels[status] ?? status;
+}
+
+export function contentDraftStatusNotice(action: Pick<DraftAction, "status" | "error">) {
+  if (action.status === "BLOCKED" && action.error === "execution_in_progress") {
+    return { tone: "progress", message: "正在写入 Ozon，完成后自动显示结果。" };
+  }
+  if (action.status === "BLOCKED" && action.error === "result_pending_verification") {
+    return { tone: "progress", message: "Ozon 已接收，正在核对修改结果。" };
+  }
+  if (action.status === "FAILED" || (action.status === "BLOCKED" && action.error)) {
+    return { tone: "error", message: action.status === "FAILED"
+      ? "执行失败，请查看任务详情。"
+      : "任务未完成，请查看任务详情。" };
+  }
+  return null;
 }
 
 export function draftSuggestionGroups(value: unknown) {
@@ -290,6 +309,7 @@ export function ContentDraftGroup({
   const isActiveBusy = busyIds.has(activeAction.id);
   const canEdit = activeAction.status === "PENDING_APPROVAL" && !isActiveBusy;
   const validationError = errors[activeAction.id] || (canEdit ? validateDraftSuggestions(activeSuggestions) : null);
+  const statusNotice = contentDraftStatusNotice(activeAction);
 
   return (
     <section className="mt-3 overflow-hidden rounded-xl border border-[#dce6f3] bg-white shadow-[0_8px_22px_rgba(49,78,122,0.07)]">
@@ -355,7 +375,7 @@ export function ContentDraftGroup({
                       {active ? <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" aria-hidden="true" /> : <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      <Badge tone={statusTone(action.status)}>{contentDraftStatusLabel(action.status)}</Badge>
+                      <Badge tone={statusTone(action.status)}>{contentDraftStatusLabel(action.status, action.error)}</Badge>
                       {executableFieldLabels(action).map((label) => <Badge key={label}>{label}</Badge>)}
                     </div>
                     {action.offerId ? <div className="mt-1 truncate text-[11px] text-[#8290a8]">{action.offerId}</div> : null}
@@ -373,7 +393,7 @@ export function ContentDraftGroup({
               <div className="mt-1 text-xs text-[#667085]">{activeAction.offerId ?? "未提供 offerId"}</div>
             </div>
             <div className="flex gap-1.5">
-              <Badge tone={statusTone(activeAction.status)}>{contentDraftStatusLabel(activeAction.status)}</Badge>
+              <Badge tone={statusTone(activeAction.status)}>{contentDraftStatusLabel(activeAction.status, activeAction.error)}</Badge>
               <Badge tone={riskTone(activeAction.riskLevel)}>{riskLabel(activeAction.riskLevel)}</Badge>
             </div>
           </div>
@@ -441,7 +461,14 @@ export function ContentDraftGroup({
               草案已在其他页面处理，本页修改未提交。当前显示服务端实际内容。
             </div>
           ) : null}
-          {activeAction.error ? <div role="alert" className="mt-3 text-sm font-medium text-red-600">{activeAction.error}</div> : null}
+          {statusNotice ? (
+            <div
+              role={statusNotice.tone === "error" ? "alert" : "status"}
+              className={cn("mt-3 text-sm font-medium", statusNotice.tone === "error" ? "text-red-600" : "text-blue-700")}
+            >
+              {statusNotice.message}
+            </div>
+          ) : null}
 
           <div className="mt-4 flex flex-wrap gap-2 border-t border-[#e3ebf5] pt-3">
             {activeAction.status === "PENDING_APPROVAL" ? (
