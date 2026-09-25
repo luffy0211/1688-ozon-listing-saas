@@ -14,7 +14,7 @@ import {
 } from "@saas/ozon";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
+import { CREDIT_USAGE_FEATURES, consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
 import { createAgentActions } from "./actions";
 import { extractOfferId } from "./chat-input";
 import { redactSensitiveText } from "./policy";
@@ -226,6 +226,7 @@ async function chargeContentAgentFeature(params: {
   referenceType: string;
   referenceId: string;
   idempotencyKey: string;
+  amount?: number;
 }) {
   return consumeTenantCredits({
     tenantId: params.tenantId,
@@ -234,6 +235,7 @@ async function chargeContentAgentFeature(params: {
     referenceType: params.referenceType,
     referenceId: params.referenceId,
     idempotencyKey: params.idempotencyKey,
+    amount: params.amount,
   });
 }
 
@@ -244,6 +246,7 @@ async function refundContentAgentFeature(params: {
   referenceType: string;
   referenceId: string;
   idempotencyKey: string;
+  amount?: number;
 }) {
   return refundTenantCredits({
     tenantId: params.tenantId,
@@ -252,7 +255,12 @@ async function refundContentAgentFeature(params: {
     referenceType: params.referenceType,
     referenceId: params.referenceId,
     idempotencyKey: params.idempotencyKey,
+    amount: params.amount,
   });
+}
+
+export function competitorAnalysisCreditCost(categoryCount: number) {
+  return categoryCount * CREDIT_USAGE_FEATURES.competitor_analysis.cost;
 }
 
 export type NormalizedProductContent = {
@@ -711,7 +719,7 @@ function buildInstructions(offerId: string | null) {
     "竞品差距优先分析标题、主图、价格、热度代理、主题关键词、简介内容。销量不可见时，用评分、评价数和搜索位置作为热度代理，并避免称为真实销量。",
     "店铺诊断返回 lowContentRatingProducts 时，按评分从低到高说明 Ozon 官方改进条件，并在本轮调查上限内读取与用户目标最相关的商品。没有真实新图片或明确属性值时只建议，不创建图片或属性写动作。",
     "用户要求重新采集竞品分析时，每个类目分析竞品数量允许 1 至 10 个；未说明时默认每个类目 1 个。必须调用 analyze_ozon_competitors；该工具统计自家店铺全部未归档 Ozon 官方类目，每个类目选择一个代表商品获取竞品证据，再用类目经验诊断该类目的全部自家商品。用户要求基于已保存、之前、历史竞品分析时，优先使用系统预读的竞品记忆，不要重新采集。竞品结论必须带页面证据，不得复制竞品整段文案。",
-    "竞品分析默认复用已经保存的证据；只有用户明确要求重新采集或刷新竞品时才调用本地 Ozon 采集器，采集器不可用时才回退 Tavily。",
+    "竞品分析先复用已保存的同类目证据；缺失时或用户明确要求更新时，按自家店铺的 Ozon 类目通过 Apify 采集。超过 7 天的证据仍可复用，只提醒用户决定是否更新。",
     "竞品分析工具返回的是给店铺诊断使用的证据。回复优先转成标题、主图、价格、热度、关键词、简介的业务差距，不要把主回答写成属性冲突报告。",
     "竞品分析和店铺诊断默认不要围绕属性写报告，重点分析标题、主图、价格、热度代理、主题标签、简介内容；属性只能作为辅助证据，用户明确要求属性时再提。",
     "工具返回 contentDiagnosis 时，优先使用里面的竞品样本、字段对比和视觉分析结果；把结论写成运营能看懂的差距和动作。",
@@ -1401,18 +1409,9 @@ export async function runOzonContentAgent(params: {
     }) {
       const at = new Date().toISOString();
       const creditKey = `agent-tool:${runRecord.id}:analyze_ozon_competitors`;
-      let charged = false;
+      let chargedAmount = 0;
       startToolProgress("analyze_ozon_competitors");
       try {
-        await chargeContentAgentFeature({
-          tenantId: params.tenantId,
-          userId: params.userId,
-          feature: "competitor_analysis",
-          referenceType: "agent_run_tool",
-          referenceId: `${runRecord.id}:analyze_ozon_competitors`,
-          idempotencyKey: creditKey,
-        });
-        charged = true;
         const requestedStoreId =
           optionalStoreId(params.storeId) ?? optionalStoreId(paramsForRun.storeId);
         const focusInfo = rawRecord(offerId ? readProductsByOfferId.get(offerId)?.rawInfo : null);
@@ -1426,6 +1425,19 @@ export async function runOzonContentAgent(params: {
           competitorsPerCategory: competitorsPerCategory ?? 1,
           refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
           targetCategory,
+          onBillableCategories: async (count) => {
+            const amount = competitorAnalysisCreditCost(count);
+            await chargeContentAgentFeature({
+              tenantId: params.tenantId,
+              userId: params.userId,
+              feature: "competitor_analysis",
+              amount,
+              referenceType: "agent_run_tool",
+              referenceId: `${runRecord.id}:analyze_ozon_competitors`,
+              idempotencyKey: creditKey,
+            });
+            chargedAmount = amount;
+          },
         });
         latestCompetitorReports = result.reports;
         const focusedProduct = offerId ? readProductsByOfferId.get(offerId) : null;
@@ -1495,7 +1507,7 @@ export async function runOzonContentAgent(params: {
             : null,
         };
       } catch (error) {
-        if (charged) {
+        if (chargedAmount) {
           await refundContentAgentFeature({
             tenantId: params.tenantId,
             userId: params.userId,
@@ -1503,6 +1515,7 @@ export async function runOzonContentAgent(params: {
             referenceType: "agent_run_tool",
             referenceId: `${runRecord.id}:analyze_ozon_competitors`,
             idempotencyKey: `refund:${creditKey}`,
+            amount: chargedAmount,
           }).catch(() => null);
         }
         const message = error instanceof Error ? error.message : String(error);

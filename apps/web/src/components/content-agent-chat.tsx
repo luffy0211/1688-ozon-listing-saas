@@ -1324,6 +1324,7 @@ export function ContentAgentChat({
         },
       ]);
     } finally {
+      window.dispatchEvent(new Event("credits:changed"));
       if (!startedRunId || (activeRunRef.current?.sessionId === startedSessionId
         && activeRunRef.current.runId === startedRunId)) {
         activeRunRef.current = null;
@@ -1356,6 +1357,7 @@ export function ContentAgentChat({
         }
       }
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
+      window.dispatchEvent(new Event("credits:changed"));
       setMessages((current) => replaceAction(current, data.action));
       if (data.queued === true) startActionPolling(actionId);
       return command === "reject"

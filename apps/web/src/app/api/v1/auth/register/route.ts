@@ -39,35 +39,33 @@ export async function POST(req: NextRequest) {
       return fail("email_taken", "该邮箱已注册");
     }
 
-    // 首个用户自动成为该租户的 owner，便于初始化配置
-    const tenantUserCount = await prisma.user.count({
-      where: { tenantId: invite.tenantId },
-    });
-    const role: Role = tenantUserCount === 0 ? "owner" : (invite.role as Role);
+    const user = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.invite.updateMany({
+        where: { id: invite.id, usedCount: { lt: invite.maxUses } },
+        data: { usedCount: { increment: 1 } },
+      });
+      if (claimed.count !== 1) throw new Error("invite_claimed");
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash: hashPassword(password),
-        name: name ?? null,
+      // 首个用户自动成为该租户的 owner，便于初始化配置。
+      const tenantUserCount = await tx.user.count({ where: { tenantId: invite.tenantId } });
+      const role: Role = tenantUserCount === 0 ? "owner" : (invite.role as Role);
+      const created = await tx.user.create({
+        data: {
+          email,
+          passwordHash: hashPassword(password),
+          name: name ?? null,
+          tenantId: invite.tenantId,
+          role,
+        },
+      });
+      await tx.auditLog.create({ data: {
         tenantId: invite.tenantId,
-        role,
-      },
-    });
-
-    await prisma.invite.update({
-      where: { id: invite.id },
-      data: { usedCount: { increment: 1 } },
-    });
-
-    await prisma.auditLog.create({
-      data: {
-        tenantId: invite.tenantId,
-        userId: user.id,
+        userId: created.id,
         action: "auth.register",
         entityType: "user",
-        entityId: user.id,
-      },
+        entityId: created.id,
+      } });
+      return created;
     });
 
     const token = await signSession({
@@ -94,7 +92,10 @@ export async function POST(req: NextRequest) {
     });
     return res;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "注册失败";
-    return fail("service_unavailable", message, [], 503);
+    if (error instanceof Error && error.message === "invite_claimed") {
+      return fail("invalid_invite", "邀请码已被使用完");
+    }
+    console.error("registration failed", error);
+    return fail("service_unavailable", "注册失败，请稍后重试", [], 503);
   }
 }

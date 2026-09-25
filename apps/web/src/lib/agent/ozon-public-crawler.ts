@@ -51,7 +51,7 @@ export function ozonCdnImageUrl(value: unknown): string | null {
   try {
     const url = new URL(value);
     return url.protocol === "https:" &&
-      url.hostname === "ir.ozone.ru" &&
+      /^(?:ir|ir-\d+)\.ozone\.ru$/i.test(url.hostname) &&
       /\.(?:avif|gif|jpe?g|png|webp)$/i.test(url.pathname)
       ? url.toString()
       : null;

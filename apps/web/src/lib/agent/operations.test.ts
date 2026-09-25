@@ -5,6 +5,7 @@ import {
   buildCompetitorContentDiagnosis,
   buildStoreDiagnosis,
   cachedReportForTarget,
+  countBillableCompetitorCategories,
   cachedCompetitorReport,
   countUniqueCompetitors,
   lowContentRatingProducts,
@@ -14,7 +15,6 @@ import {
   summarizeProductRecommendations,
   summarizeFinanceTransactions,
   hydrateOwnProductTargets,
-  targetsWithoutCompetitorEvidence,
   targetsForCompetitorCategory,
 } from "./operations";
 
@@ -58,6 +58,14 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("Ozon operations helpers", () => {
+  it("does not bill categories that have no cache and cannot be collected", () => {
+    const pending = [
+      { descriptionCategoryId: 10, typeId: 20, categoryNameRu: "Поло" },
+      { descriptionCategoryId: 10, typeId: null, categoryNameRu: null },
+    ];
+    expect(countBillableCompetitorCategories([{}], pending as never, false)).toBe(1);
+    expect(countBillableCompetitorCategories([{}], pending as never, true)).toBe(2);
+  });
   it("limits a targeted optimization to the same Ozon category", () => {
     const targets = [
       { descriptionCategoryId: 10, typeId: 20 },
@@ -67,17 +75,6 @@ describe("Ozon operations helpers", () => {
       .toEqual([targets[0]]);
     expect(targetsForCompetitorCategory(targets as never, null)).toEqual(targets);
   });
-  it("falls back only for categories without crawler evidence", () => {
-    const targets = [
-      { descriptionCategoryId: 10, typeId: 20, offerId: "a" },
-      { descriptionCategoryId: 10, typeId: 30, offerId: "b" },
-    ];
-    const results = [{ target: targets[0], competitors: [{ sku: "competitor-a" }] }];
-
-    expect(targetsWithoutCompetitorEvidence(targets as never, results as never))
-      .toEqual([targets[1]]);
-  });
-
   it("summarizes competitor evidence quality and crawler blocking risks", () => {
     const targets = [
       { descriptionCategoryId: 10, typeId: 20, offerId: "a", title: "Поло" },
@@ -314,10 +311,18 @@ describe("Ozon operations helpers", () => {
       ownProduct: { ...imageLessProduct, sku: "own" },
       competitors: [imageLessProduct],
     })).not.toBeNull();
+    expect(cachedCompetitorReport({
+      source: "apify_ozon_scraper",
+      detailScope: "category_search_index_attributes_description_v3",
+      category: { url: "https://www.ozon.ru/search/?text=polo" },
+      ownProduct: { ...imageLessProduct, sku: "own" },
+      competitors: [imageLessProduct],
+    })).not.toBeNull();
   });
 
   it("rebuilds cached own-product data for the current category target", () => {
     const report = cachedReportForTarget({
+      capturedAt: "2026-09-01T00:00:00.000Z",
       target: { offerId: "old", title: "Old product", publicSku: "1" },
       ownProduct: { sku: "1", title: "Old product", imageUrls: ["https://ir.ozone.ru/s3/old.jpg"] },
       competitors: [],
@@ -352,6 +357,7 @@ describe("Ozon operations helpers", () => {
         description: "Current Seller API description",
       },
       cached: true,
+      capturedAt: "2026-09-01T00:00:00.000Z",
     });
   });
 
