@@ -15,6 +15,7 @@ import {
 import { env } from "@/lib/env";
 import {
   buildCompetitorBenchmarks,
+  inferOzonCategoryName,
   isUsableCompetitorEvidence,
   ownOzonProduct,
   ozonCdnImageUrl,
@@ -724,6 +725,16 @@ export function countUniqueCompetitors(reports: unknown[]) {
   })).size;
 }
 
+export function countBillableCompetitorCategories(
+  cachedReports: unknown[],
+  pending: OzonCompetitorTarget[],
+  apifyConfigured: boolean,
+) {
+  return cachedReports.length + (apifyConfigured
+    ? pending.filter((target) => target.descriptionCategoryId && target.typeId && inferOzonCategoryName(target)).length
+    : 0);
+}
+
 function words(value: string | null | undefined) {
   return String(value ?? "")
     .toLocaleLowerCase("ru-RU")
@@ -1138,6 +1149,7 @@ export async function analyzeOzonCompetitors(params: {
   competitorsPerCategory: number;
   refreshEvidence?: boolean;
   targetCategory?: { descriptionCategoryId: number; typeId: number } | null;
+  onBillableCategories?: (count: number) => Promise<void>;
 }) {
   const store = await resolveStore(params.tenantId, params.storeId);
   const client = clientFor(store);
@@ -1196,6 +1208,9 @@ export async function analyzeOzonCompetitors(params: {
     }
     pending.push(target);
   }
+
+  const billableCount = countBillableCompetitorCategories(reports, pending, Boolean(env.apifyApiToken));
+  if (billableCount) await params.onBillableCategories?.(billableCount);
 
   let crawled: OzonCategoryCompetitorResult[] = [];
   if (pending.length && env.apifyApiToken) {

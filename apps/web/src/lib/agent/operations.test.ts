@@ -5,6 +5,7 @@ import {
   buildCompetitorContentDiagnosis,
   buildStoreDiagnosis,
   cachedReportForTarget,
+  countBillableCompetitorCategories,
   cachedCompetitorReport,
   countUniqueCompetitors,
   lowContentRatingProducts,
@@ -57,6 +58,14 @@ const summary = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("Ozon operations helpers", () => {
+  it("does not bill categories that have no cache and cannot be collected", () => {
+    const pending = [
+      { descriptionCategoryId: 10, typeId: 20, categoryNameRu: "Поло" },
+      { descriptionCategoryId: 10, typeId: null, categoryNameRu: null },
+    ];
+    expect(countBillableCompetitorCategories([{}], pending as never, false)).toBe(1);
+    expect(countBillableCompetitorCategories([{}], pending as never, true)).toBe(2);
+  });
   it("limits a targeted optimization to the same Ozon category", () => {
     const targets = [
       { descriptionCategoryId: 10, typeId: 20 },

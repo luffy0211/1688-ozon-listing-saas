@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  competitorAnalysisCreditCost,
   competitorsPerCategoryFromPrompt,
   competitorMemoryContextFromReports,
   categoryExperienceSummary,
@@ -19,6 +20,14 @@ import {
   shouldRefreshCompetitorEvidence,
   shouldCreateFallbackContentDraft,
 } from "./content-agent";
+
+describe("competitor analysis credits", () => {
+  it("charges the current 50-credit unit for each own-store category", () => {
+    expect(competitorAnalysisCreditCost(0)).toBe(0);
+    expect(competitorAnalysisCreditCost(1)).toBe(50);
+    expect(competitorAnalysisCreditCost(5)).toBe(250);
+  });
+});
 
 describe("contentAgentModelSettings", () => {
   it("uses DeepSeek chat for thinking models that cannot replay reasoning_content", () => {

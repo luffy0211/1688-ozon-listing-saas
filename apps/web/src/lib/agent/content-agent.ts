@@ -14,7 +14,7 @@ import {
 } from "@saas/ozon";
 import { z } from "zod";
 import { env } from "@/lib/env";
-import { consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
+import { CREDIT_USAGE_FEATURES, consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
 import { createAgentActions } from "./actions";
 import { extractOfferId } from "./chat-input";
 import { redactSensitiveText } from "./policy";
@@ -226,6 +226,7 @@ async function chargeContentAgentFeature(params: {
   referenceType: string;
   referenceId: string;
   idempotencyKey: string;
+  amount?: number;
 }) {
   return consumeTenantCredits({
     tenantId: params.tenantId,
@@ -234,6 +235,7 @@ async function chargeContentAgentFeature(params: {
     referenceType: params.referenceType,
     referenceId: params.referenceId,
     idempotencyKey: params.idempotencyKey,
+    amount: params.amount,
   });
 }
 
@@ -244,6 +246,7 @@ async function refundContentAgentFeature(params: {
   referenceType: string;
   referenceId: string;
   idempotencyKey: string;
+  amount?: number;
 }) {
   return refundTenantCredits({
     tenantId: params.tenantId,
@@ -252,7 +255,12 @@ async function refundContentAgentFeature(params: {
     referenceType: params.referenceType,
     referenceId: params.referenceId,
     idempotencyKey: params.idempotencyKey,
+    amount: params.amount,
   });
+}
+
+export function competitorAnalysisCreditCost(categoryCount: number) {
+  return categoryCount * CREDIT_USAGE_FEATURES.competitor_analysis.cost;
 }
 
 export type NormalizedProductContent = {
@@ -1401,18 +1409,9 @@ export async function runOzonContentAgent(params: {
     }) {
       const at = new Date().toISOString();
       const creditKey = `agent-tool:${runRecord.id}:analyze_ozon_competitors`;
-      let charged = false;
+      let chargedAmount = 0;
       startToolProgress("analyze_ozon_competitors");
       try {
-        await chargeContentAgentFeature({
-          tenantId: params.tenantId,
-          userId: params.userId,
-          feature: "competitor_analysis",
-          referenceType: "agent_run_tool",
-          referenceId: `${runRecord.id}:analyze_ozon_competitors`,
-          idempotencyKey: creditKey,
-        });
-        charged = true;
         const requestedStoreId =
           optionalStoreId(params.storeId) ?? optionalStoreId(paramsForRun.storeId);
         const focusInfo = rawRecord(offerId ? readProductsByOfferId.get(offerId)?.rawInfo : null);
@@ -1426,6 +1425,19 @@ export async function runOzonContentAgent(params: {
           competitorsPerCategory: competitorsPerCategory ?? 1,
           refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
           targetCategory,
+          onBillableCategories: async (count) => {
+            const amount = competitorAnalysisCreditCost(count);
+            await chargeContentAgentFeature({
+              tenantId: params.tenantId,
+              userId: params.userId,
+              feature: "competitor_analysis",
+              amount,
+              referenceType: "agent_run_tool",
+              referenceId: `${runRecord.id}:analyze_ozon_competitors`,
+              idempotencyKey: creditKey,
+            });
+            chargedAmount = amount;
+          },
         });
         latestCompetitorReports = result.reports;
         const focusedProduct = offerId ? readProductsByOfferId.get(offerId) : null;
@@ -1495,7 +1507,7 @@ export async function runOzonContentAgent(params: {
             : null,
         };
       } catch (error) {
-        if (charged) {
+        if (chargedAmount) {
           await refundContentAgentFeature({
             tenantId: params.tenantId,
             userId: params.userId,
@@ -1503,6 +1515,7 @@ export async function runOzonContentAgent(params: {
             referenceType: "agent_run_tool",
             referenceId: `${runRecord.id}:analyze_ozon_competitors`,
             idempotencyKey: `refund:${creditKey}`,
+            amount: chargedAmount,
           }).catch(() => null);
         }
         const message = error instanceof Error ? error.message : String(error);
