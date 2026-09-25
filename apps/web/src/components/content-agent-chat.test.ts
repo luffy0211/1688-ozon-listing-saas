@@ -1,16 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   attributeChangesFromPayload,
   actionNeedsPolling,
   initialContentAgentSessionId,
   mapPersistedChatMessage,
+  pollAgentAction,
   recoverableAgentRun,
+  resumableActionIds,
   sessionsAfterArchive,
   shouldApplyArchivedSessionResponse,
   shouldShowCommandDeck,
 } from "./content-agent-chat";
 import {
   contentDraftStatusLabel,
+  contentDraftStatusNotice,
   displayedDraftSuggestions,
   draftSuggestionGroups,
   initialSelectedDraftIds,
@@ -24,6 +27,41 @@ describe("content agent action preview", () => {
     expect(actionNeedsPolling({ status: "BLOCKED", executionPhase: "verification_pending" })).toBe(true);
     expect(actionNeedsPolling({ status: "BLOCKED", executionPhase: "manual_required" })).toBe(false);
     expect(actionNeedsPolling({ status: "EXECUTED" })).toBe(false);
+  });
+
+  it("resumes only unfinished actions when reopening a conversation", () => {
+    expect(resumableActionIds([
+      { actions: [
+        { id: "approved", status: "APPROVED" },
+        { id: "writing", status: "BLOCKED", executionPhase: "executing" },
+        { id: "done", status: "EXECUTED" },
+      ] },
+      { actions: [{ id: "writing", status: "BLOCKED", executionPhase: "executing" }] },
+    ])).toEqual(["approved", "writing"]);
+  });
+
+  it("reconnects after a temporary request failure and updates the completed action", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new Error("temporary network error"))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { action: { id: "a1", status: "BLOCKED", executionPhase: "executing" } } }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { action: { id: "a1", status: "EXECUTED" } } }),
+      } as Response);
+    const updates: string[] = [];
+    try {
+      const polling = pollAgentAction("a1", (action) => updates.push(action.status));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect((await polling)?.status).toBe("EXECUTED");
+      expect(updates).toEqual(["BLOCKED", "EXECUTED"]);
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("returns every attribute change needed for approval", () => {
@@ -85,6 +123,8 @@ describe("content agent draft review", () => {
 
   it("uses user-facing Chinese action statuses", () => {
     expect(contentDraftStatusLabel("PENDING_APPROVAL")).toBe("待确认");
+    expect(contentDraftStatusLabel("BLOCKED", "execution_in_progress")).toBe("正在执行");
+    expect(contentDraftStatusLabel("BLOCKED", "result_pending_verification")).toBe("核对结果中");
     expect(contentDraftStatusLabel("EXECUTED")).toBe("已执行");
     expect(contentDraftStatusLabel("FAILED")).toBe("执行失败");
   });
@@ -114,6 +154,22 @@ describe("content agent draft review", () => {
       { field: "title", suggestedRu: "有效标题" },
       { field: "description", suggestedRu: "有效描述" },
     ])).toBeNull();
+  });
+
+  it("treats an in-progress write as progress rather than an error", () => {
+    expect(contentDraftStatusNotice({ status: "BLOCKED", error: "execution_in_progress" })).toEqual({
+      tone: "progress",
+      message: "正在写入 Ozon，完成后自动显示结果。",
+    });
+    expect(contentDraftStatusNotice({ status: "BLOCKED", error: "result_pending_verification" })).toEqual({
+      tone: "progress",
+      message: "Ozon 已接收，正在核对修改结果。",
+    });
+    expect(contentDraftStatusNotice({ status: "EXECUTED", error: null })).toBeNull();
+    expect(contentDraftStatusNotice({ status: "FAILED", error: "write_failed" })).toEqual({
+      tone: "error",
+      message: "执行失败，请查看任务详情。",
+    });
   });
 
   it("rejects an overlong or duplicated executable field as a whole", () => {

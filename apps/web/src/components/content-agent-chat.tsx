@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -17,7 +17,7 @@ import {
   AgentInsightPanel,
   type AgentInsightSource,
 } from "./agent-insight-panel";
-import { ContentDraftGroup } from "./content-agent-drafts";
+import { ContentDraftGroup, contentDraftStatusLabel, contentDraftStatusNotice } from "./content-agent-drafts";
 import { buildPendingAgentExecutionTrace } from "@/lib/agent/execution-trace";
 import type { AgentExecutionStep as AgentTimelineStep } from "@/lib/agent/execution-trace";
 import { validateContentDraftEdits } from "@/lib/agent/content-draft-edits";
@@ -146,7 +146,7 @@ export function attributeChangesFromPayload(payload: unknown) {
 }
 
 function toneForStatus(status: string) {
-  if (status === "APPROVED") return "green";
+  if (status === "EXECUTED") return "green";
   if (status === "REJECTED" || status === "FAILED") return "red";
   if (status === "BLOCKED") return "amber";
   if (status === "PENDING_APPROVAL") return "amber";
@@ -438,6 +438,14 @@ export function actionNeedsPolling(action: Pick<ContentAgentActionView, "status"
       && ["executing", "verification_pending"].includes(action.executionPhase ?? ""));
 }
 
+export function resumableActionIds(messages: Array<{
+  actions?: Array<Pick<ContentAgentActionView, "id" | "status" | "executionPhase">>;
+}>) {
+  return [...new Set(messages.flatMap((message) =>
+    (message.actions ?? []).filter(actionNeedsPolling).map((action) => action.id),
+  ))];
+}
+
 function sessionTitleFromPrompt(prompt: string) {
   const compact = prompt.trim().replace(/\s+/g, " ");
   return compact.length > 36 ? `${compact.slice(0, 36)}...` : compact || "Ozon Agent";
@@ -539,20 +547,27 @@ async function pollAgentRunTrace(
   throw new Error("Agent 仍在后台处理，刷新页面可继续查看进度。");
 }
 
-async function pollAgentAction(
+export async function pollAgentAction(
   actionId: string,
   onUpdate: (action: ContentAgentActionView) => void,
   signal?: AbortSignal,
 ) {
   let latest: ContentAgentActionView | null = null;
-  for (let attempt = 0; attempt < 120; attempt += 1) {
-    const data = await getJson(`/api/v1/agent/actions/${actionId}`, signal);
-    if (data.action) {
-      latest = data.action;
-      onUpdate(latest!);
-      if (!actionNeedsPolling(latest!)) return latest;
+  let retryDelay = 2000;
+  while (!signal?.aborted) {
+    try {
+      const data = await getJson(`/api/v1/agent/actions/${actionId}`, signal);
+      if (data.action) {
+        latest = data.action;
+        onUpdate(latest!);
+        if (!actionNeedsPolling(latest!)) return latest;
+      }
+      retryDelay = 2000;
+    } catch {
+      if (signal?.aborted) break;
+      retryDelay = Math.min(retryDelay * 2, 30_000);
     }
-    await wait(1000);
+    await wait(retryDelay);
   }
   return latest;
 }
@@ -578,7 +593,8 @@ function ActionBubble({
   })));
   const payload = asRecord(action.payload);
   const executionSummary = actionExecutionSummary(action);
-  const actionError = friendlyActionError(action.error);
+  const statusNotice = contentDraftStatusNotice(action);
+  const actionError = statusNotice?.tone === "progress" ? "" : friendlyActionError(action.error);
   const attributeChanges = attributeChangesFromPayload(action.payload);
   const isCompetitorBatch = action.type === "BULK_PRODUCT_UPDATE" && payload.source === "competitor_attribute_playbook";
   const ruleConditions = Array.isArray(asRecord(payload.rule).all)
@@ -608,7 +624,7 @@ function ActionBubble({
   return (
     <section className="mt-3 rounded-xl border border-[#dfe8f4] bg-[#f8fbff] p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={toneForStatus(action.status)}>{action.status}</Badge>
+        <Badge tone={toneForStatus(action.status)}>{contentDraftStatusLabel(action.status, action.error)}</Badge>
         <Badge tone={toneForRisk(action.riskLevel)}>{action.riskLevel}</Badge>
         <span className="rounded-md bg-[#26334d] px-2 py-1 text-xs font-semibold text-white">{actionTypeLabel(action.type)}</span>
       </div>
@@ -622,7 +638,9 @@ function ActionBubble({
           {executionSummary}
         </div>
       ) : null}
-      {actionError ? <div className="mt-2 text-xs text-red-600">{actionError}</div> : null}
+      {statusNotice?.tone === "progress" ? (
+        <div role="status" className="mt-2 text-xs text-blue-700">{statusNotice.message}</div>
+      ) : actionError ? <div className="mt-2 text-xs text-red-600">{actionError}</div> : null}
 
       {ruleConditions.length ? (
         <div className="mt-3 border-t border-gray-100 pt-2 text-xs text-gray-700">
@@ -1029,6 +1047,22 @@ export function ContentAgentChat({
             : []),
         ],
   );
+  const startActionPolling = useCallback((actionId: string) => {
+    if (actionPollControllersRef.current.has(actionId)) return;
+    const controller = new AbortController();
+    actionPollControllersRef.current.set(actionId, controller);
+    void pollAgentAction(actionId, (action) => {
+      setMessages((current) => current.some((message) => message.actions?.some((item) => item.id === actionId))
+        ? replaceAction(current, action)
+        : current);
+    }, controller.signal)
+      .catch(() => null)
+      .finally(() => {
+        if (actionPollControllersRef.current.get(actionId) === controller) {
+          actionPollControllersRef.current.delete(actionId);
+        }
+      });
+  }, []);
   const canSubmit = agentConfig.configured && stores.length > 0 && !loadingHistory;
   const inputStatus = !agentConfig.configured
     ? "模型未配置，不能发送"
@@ -1043,6 +1077,12 @@ export function ContentAgentChat({
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ block: "end" });
   }, [messages, running, loadingHistory]);
+
+  useEffect(() => {
+    if (!opensExistingSession) {
+      resumableActionIds([{ actions: pendingInitialActions }]).forEach(startActionPolling);
+    }
+  }, [opensExistingSession, pendingInitialActions, startActionPolling]);
 
   useEffect(() => {
     const trackedRun = activeRunRef.current;
@@ -1074,6 +1114,7 @@ export function ContentAgentChat({
           ? data.messages.map((message: PersistedChatMessage) => mapPersistedChatMessage(message))
           : [];
         setMessages(loadedMessages.length ? loadedMessages : [introMessage]);
+        resumableActionIds(loadedMessages).forEach(startActionPolling);
         if (data.session) {
           setSessionList((current) => upsertSession(current, data.session));
         }
@@ -1165,7 +1206,7 @@ export function ContentAgentChat({
       if (recoveredRunId && activeRunRef.current?.sessionId === selectedSessionId
         && activeRunRef.current.runId === recoveredRunId) activeRunRef.current = null;
     };
-  }, [selectedSessionId, introMessage]);
+  }, [selectedSessionId, introMessage, startActionPolling]);
 
   useEffect(() => () => {
     for (const controller of actionPollControllersRef.current.values()) controller.abort();
@@ -1316,17 +1357,7 @@ export function ContentAgentChat({
       }
       const data = await postJson(`/api/v1/agent/actions/${actionId}/${command}`, payload);
       setMessages((current) => replaceAction(current, data.action));
-      if (data.queued === true && !actionPollControllersRef.current.has(actionId)) {
-        const controller = new AbortController();
-        actionPollControllersRef.current.set(actionId, controller);
-        void pollAgentAction(actionId, (action) => {
-          setMessages((current) => current.some((message) => message.actions?.some((item) => item.id === actionId))
-            ? replaceAction(current, action)
-            : current);
-        }, controller.signal)
-          .catch(() => null)
-          .finally(() => actionPollControllersRef.current.delete(actionId));
-      }
+      if (data.queued === true) startActionPolling(actionId);
       return command === "reject"
         ? data.action?.status === "REJECTED"
         : data.queued === true || data.action?.status === "EXECUTED";
