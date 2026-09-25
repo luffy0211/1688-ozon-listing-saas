@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   competitorAnalysisCreditCost,
+  contentDraftCategoryFromProduct,
   competitorsPerCategoryFromPrompt,
   competitorMemoryContextFromReports,
   categoryExperienceSummary,
@@ -19,6 +20,7 @@ import {
   shouldRunCompetitorAnalysisForDiagnosis,
   shouldRefreshCompetitorEvidence,
   shouldCreateFallbackContentDraft,
+  selectContentDraftTarget,
 } from "./content-agent";
 
 describe("competitor analysis credits", () => {
@@ -228,6 +230,26 @@ describe("content agent tool enforcement helpers", () => {
     expect(matchingCompetitorReports({ rawInfo: {} }, reports)).toEqual([]);
   });
 
+  it("only analyzes the diagnosed product's category when drafting content", () => {
+    expect(contentDraftCategoryFromProduct({ rawInfo: { description_category_id: 10, type_id: 20 } }))
+      .toEqual({ descriptionCategoryId: 10, typeId: 20 });
+    expect(contentDraftCategoryFromProduct({ rawInfo: { description_category_id: 10 } }))
+      .toBeNull();
+    expect(contentDraftCategoryFromProduct({ rawInfo: { description_category_id: "Infinity", type_id: 20 } }))
+      .toBeNull();
+  });
+
+  it("prefers a product with a title or description issue over an image-only issue", () => {
+    expect(selectContentDraftTarget([
+      { offerId: "IMAGE", recommendations: ["Добавьте фотографии"] },
+      { offerId: "COPY", recommendations: ["Заполните описание"] },
+    ])).toBe("COPY");
+    expect(selectContentDraftTarget([
+      { offerId: "IMAGE", recommendations: ["Добавьте фотографии"] },
+    ])).toBe("IMAGE");
+    expect(selectContentDraftTarget([])).toBeNull();
+  });
+
   it("reads the requested competitor count per category", () => {
     expect(competitorsPerCategoryFromPrompt("每个类目分析 8 个竞品")).toBe(8);
     expect(competitorsPerCategoryFromPrompt("分析五个同类竞品")).toBe(5);
@@ -263,7 +285,8 @@ describe("content agent tool enforcement helpers", () => {
     );
     expect(shouldRunCompetitorAnalysisForDiagnosis("给我的店铺做一次完整诊断")).toBe(false);
     expect(competitorsPerCategoryFromPrompt("给我的店铺做一次完整诊断")).toBeNull();
-    expect(shouldCreateFallbackContentDraft("给我的店铺做一次完整诊断", null)).toBe(false);
+    expect(shouldCreateFallbackContentDraft("给我的店铺做一次完整诊断", null)).toBe(true);
+    expect(shouldCreateFallbackContentDraft("给店铺做诊断，只看库存", null)).toBe(false);
     expect(requiredOzonToolsForPrompt("给我的店铺做一次完整诊断", null)).toEqual([
       "diagnose_ozon_store",
       "record_diagnosis_findings",

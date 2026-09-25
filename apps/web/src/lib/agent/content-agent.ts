@@ -298,17 +298,32 @@ export function productContentForDraft(
 }
 
 export function matchingCompetitorReports(product: Pick<NormalizedProductContent, "rawInfo">, reports: unknown[]) {
-  const info = rawRecord(product.rawInfo);
-  const categoryId = Number(info.description_category_id);
-  const typeId = Number(info.type_id);
-  if (!categoryId || !typeId) return [];
+  const category = contentDraftCategoryFromProduct(product);
+  if (!category) return [];
   return reports.filter((report) => {
     const target = rawRecord(rawRecord(report).target);
     const competitors = rawRecord(report).competitors;
-    return Number(target.descriptionCategoryId) === categoryId &&
-      Number(target.typeId) === typeId &&
+    return Number(target.descriptionCategoryId) === category.descriptionCategoryId &&
+      Number(target.typeId) === category.typeId &&
       Array.isArray(competitors) && competitors.length > 0;
   });
+}
+
+export function contentDraftCategoryFromProduct(product: Pick<NormalizedProductContent, "rawInfo">) {
+  const info = rawRecord(product.rawInfo);
+  const descriptionCategoryId = Number(info.description_category_id);
+  const typeId = Number(info.type_id);
+  return Number.isSafeInteger(descriptionCategoryId) && descriptionCategoryId > 0 &&
+    Number.isSafeInteger(typeId) && typeId > 0
+    ? { descriptionCategoryId, typeId }
+    : null;
+}
+
+export function selectContentDraftTarget(products: ReadonlyArray<{ offerId: string; recommendations: string[] }>) {
+  // ponytail: prefer copy-related rating hints; use structured issue types if Ozon exposes them.
+  const copyIssue = /title|name|description|annotation|назван|описан|заголов|标题|描述|简介/i;
+  return (products.find((product) => product.recommendations.some((item) => copyIssue.test(item)))
+    ?? products[0])?.offerId ?? null;
 }
 
 export class ContentAgentConfigurationError extends Error {
@@ -717,7 +732,7 @@ function buildInstructions(offerId: string | null) {
     "店铺诊断回复面向电商运营人员，不要输出 source、toolCalls、categoryKey、typeId、descriptionCategoryId、hasCrawlerBlocked、insufficientCategoryCount、uniqueCompetitorCount、HTTP 错误、缓存等技术字段。技术细节只留在追踪日志。",
     "店铺诊断主回答固定用业务结构：一句话结论、重点问题、建议动作、待确认草案。实际读取过竞品时再增加同类竞品差距。每段尽量短，让用户一眼判断下一步。",
     "竞品差距优先分析标题、主图、价格、热度代理、主题关键词、简介内容。销量不可见时，用评分、评价数和搜索位置作为热度代理，并避免称为真实销量。",
-    "店铺诊断返回 lowContentRatingProducts 时，按评分从低到高说明 Ozon 官方改进条件，并在本轮调查上限内读取与用户目标最相关的商品。没有真实新图片或明确属性值时只建议，不创建图片或属性写动作。",
+    "店铺诊断返回 lowContentRatingProducts 时，按评分从低到高说明 Ozon 官方改进条件，并在本轮调查上限内读取与用户目标最相关的商品。若已读取低分商品及同类竞品证据，标题或描述有可靠改进时必须调用 propose_content_draft 生成待确认草案；没有可改内容时明确说明原因。没有真实新图片或明确属性值时只建议，不创建图片或属性写动作。",
     "用户要求重新采集竞品分析时，每个类目分析竞品数量允许 1 至 10 个；未说明时默认每个类目 1 个。必须调用 analyze_ozon_competitors；该工具统计自家店铺全部未归档 Ozon 官方类目，每个类目选择一个代表商品获取竞品证据，再用类目经验诊断该类目的全部自家商品。用户要求基于已保存、之前、历史竞品分析时，优先使用系统预读的竞品记忆，不要重新采集。竞品结论必须带页面证据，不得复制竞品整段文案。",
     "竞品分析先复用已保存的同类目证据；缺失时或用户明确要求更新时，按自家店铺的 Ozon 类目通过 Apify 采集。超过 7 天的证据仍可复用，只提醒用户决定是否更新。",
     "竞品分析工具返回的是给店铺诊断使用的证据。回复优先转成标题、主图、价格、热度、关键词、简介的业务差距，不要把主回答写成属性冲突报告。",
@@ -930,7 +945,8 @@ function shouldRequireContentDraft(prompt: string, offerId: string | null) {
 
 export function shouldCreateFallbackContentDraft(prompt: string, offerId: string | null) {
   return shouldRequireContentDraft(prompt, offerId) ||
-    (!offerId && contentOptimizationIntent(prompt));
+    (!offerId && (contentOptimizationIntent(prompt) ||
+      (storeDiagnosisIntent(prompt) && !/(?:只|仅|单独).{0,12}(?:库存|可见性|订单|物流|发货|活动)/.test(prompt))));
 }
 
 function hasSuccessfulToolCall(toolCalls: ToolCallLog[], toolName: string) {
@@ -1329,6 +1345,8 @@ export async function runOzonContentAgent(params: {
     let latestPromotionCandidateActionId: number | null = null;
     let preloadedContext = "";
     let fallbackDraftOutput: string | null = null;
+    let contentDraftBlocker: string | null = null;
+    let contentDraftCreated = false;
 
     async function readStoreSnapshot(storeId: string | null | undefined) {
       const at = new Date().toISOString();
@@ -1414,10 +1432,8 @@ export async function runOzonContentAgent(params: {
       try {
         const requestedStoreId =
           optionalStoreId(params.storeId) ?? optionalStoreId(paramsForRun.storeId);
-        const focusInfo = rawRecord(offerId ? readProductsByOfferId.get(offerId)?.rawInfo : null);
-        const targetCategory = Number(focusInfo.description_category_id) > 0 && Number(focusInfo.type_id) > 0
-          ? { descriptionCategoryId: Number(focusInfo.description_category_id), typeId: Number(focusInfo.type_id) }
-          : null;
+        const focusProduct = readProductsByOfferId.get(offerId ?? latestLowContentOfferId ?? "");
+        const targetCategory = focusProduct ? contentDraftCategoryFromProduct(focusProduct) : null;
         const result = await analyzeOzonCompetitors({
           tenantId: params.tenantId,
           userId: params.userId,
@@ -1440,7 +1456,7 @@ export async function runOzonContentAgent(params: {
           },
         });
         latestCompetitorReports = result.reports;
-        const focusedProduct = offerId ? readProductsByOfferId.get(offerId) : null;
+        const focusedProduct = focusProduct;
         const focusedReports = focusedProduct
           ? matchingCompetitorReports(focusedProduct, result.reports)
           : result.reports;
@@ -1558,7 +1574,7 @@ export async function runOzonContentAgent(params: {
         if (runStoreId && result.store.id !== runStoreId) throw new Error("store_scope_mismatch");
         runStoreId = result.store.id;
         addDiagnosisEvidence(result.productInvestigation.evidence);
-        latestLowContentOfferId = result.lowContentRatingProducts[0]?.offerId ?? null;
+        latestLowContentOfferId = selectContentDraftTarget(result.lowContentRatingProducts);
         toolCalls.push({
           name: "diagnose_ozon_store",
           at,
@@ -2047,6 +2063,7 @@ export async function runOzonContentAgent(params: {
           ],
         });
         createdActionIds.push(...created.map((item) => item.id));
+        contentDraftCreated = contentDraftCreated || created.length > 0;
         toolCalls.push({
           name: "propose_content_draft",
           at: new Date().toISOString(),
@@ -2200,9 +2217,28 @@ export async function runOzonContentAgent(params: {
 
     if (requiredToolName === "diagnose_ozon_store") {
       const diagnosis = await runStoreDiagnosis(params.storeId ?? null);
-      const competitors = needsContentEvidence
-        ? await runCompetitorAnalysis({ storeId: params.storeId ?? null, throwOnError: false })
+      const prepareContentDraft = shouldCreateFallbackContentDraft(prompt, offerId);
+      const contentTarget = prepareContentDraft && latestLowContentOfferId
+        ? await readProductContent(latestLowContentOfferId, diagnosis.store.id).catch(() => null)
         : null;
+      const competitors = contentTarget?.found && !contentTarget.archived && contentDraftCategoryFromProduct(contentTarget)
+        ? await runCompetitorAnalysis({ storeId: diagnosis.store.id, throwOnError: false })
+        : null;
+      if (!prepareContentDraft) {
+        contentDraftBlocker = null;
+      } else if (!diagnosis.contentRatingDataAvailable) {
+        contentDraftBlocker = "Ozon 内容评分暂不可用，无法确定优先优化商品。";
+      } else if (!latestLowContentOfferId) {
+        contentDraftBlocker = "本次没有发现低内容评分商品。";
+      } else if (!contentTarget?.found) {
+        contentDraftBlocker = "低分商品的实时信息读取失败。";
+      } else if (contentTarget.archived) {
+        contentDraftBlocker = "低分商品已归档，暂不创建内容修改草案。";
+      } else if (!contentDraftCategoryFromProduct(contentTarget)) {
+        contentDraftBlocker = "Ozon 未返回该商品的完整类目，无法查找同类竞品。";
+      } else if (!matchingCompetitorReports(contentTarget, latestCompetitorReports).length) {
+        contentDraftBlocker = "该商品暂时没有可用的同类竞品数据。";
+      }
       preloadedContext = [
         planContext,
         competitorMemoryContext,
@@ -2219,7 +2255,9 @@ export async function runOzonContentAgent(params: {
           lowStockProducts: diagnosis.lowStockProducts,
           lowContentRatingProducts: diagnosis.lowContentRatingProducts,
         }),
+        contentTarget?.found ? `本轮内容优化商品：${JSON.stringify({ offerId: contentTarget.offerId, name: contentTarget.name, description: contentTarget.description, attributes: contentTarget.attributes })}` : "",
         competitors ? `同类竞品参考：${JSON.stringify({ contentDiagnosis: competitors.contentDiagnosis, error: "error" in competitors ? competitors.error : null })}` : "",
+        contentDraftBlocker ? `内容草案暂不可生成：${contentDraftBlocker}` : "",
       ].filter(Boolean).join("\n");
     } else if (requiredToolName === "analyze_ozon_competitors") {
       const competitors = await runCompetitorAnalysis({
@@ -2255,9 +2293,20 @@ export async function runOzonContentAgent(params: {
       ].filter(Boolean).join("\n");
     } else if (requiredToolName === "get_ozon_product_content" && offerId) {
       const product = await readProductContent(offerId, params.storeId);
-      const competitors = needsContentEvidence
+      const competitors = needsContentEvidence && product.found && !product.archived && contentDraftCategoryFromProduct(product)
         ? await runCompetitorAnalysis({ storeId: product.storeId, throwOnError: false })
         : null;
+      if (needsContentEvidence) {
+        contentDraftBlocker = !product.found
+          ? "该商品的实时信息读取失败。"
+          : product.archived
+            ? "该商品已归档，暂不创建内容修改草案。"
+            : !contentDraftCategoryFromProduct(product)
+              ? "Ozon 未返回该商品的完整类目，无法查找同类竞品。"
+              : !matchingCompetitorReports(product, latestCompetitorReports).length
+                ? "该商品暂时没有可用的同类竞品数据。"
+                : null;
+      }
       preloadedContext = [
         planContext,
         competitorMemoryContext,
@@ -2270,6 +2319,7 @@ export async function runOzonContentAgent(params: {
         `当前标题：${product.name ?? "未知"}`,
         `当前描述：${product.description ?? "未知"}`,
         competitors ? `同类竞品参考：${JSON.stringify({ contentDiagnosis: competitors.contentDiagnosis, error: "error" in competitors ? competitors.error : null })}` : "",
+        contentDraftBlocker ? `内容草案暂不可生成：${contentDraftBlocker}` : "",
       ].filter(Boolean).join("\n");
     } else {
       preloadedContext = [
@@ -2281,7 +2331,7 @@ export async function runOzonContentAgent(params: {
 
     const preloadedToolNames = new Set(
       requiredToolName === "diagnose_ozon_store"
-        ? ["diagnose_ozon_store"]
+        ? ["diagnose_ozon_store", "analyze_ozon_competitors"]
         : requiredToolName === "analyze_ozon_competitors"
           ? ["analyze_ozon_competitors"]
           : [],
@@ -2379,16 +2429,20 @@ export async function runOzonContentAgent(params: {
     if (
       !createdActionIds.length &&
       !offerId &&
-      (contentOptimizationIntent(prompt) || storeDiagnosisIntent(prompt)) &&
+      shouldCreateFallbackContentDraft(prompt, offerId) &&
       latestLowContentOfferId &&
       !hasFoundProduct(latestProductContent)
     ) {
       await readProductContent(latestLowContentOfferId, params.storeId).catch(() => null);
     }
 
-    const productForDraftRecovery = latestProductContent as NormalizedProductContent | null;
+    const productForDraftRecovery = (offerId
+      ? readProductsByOfferId.get(offerId)
+      : latestLowContentOfferId
+        ? readProductsByOfferId.get(latestLowContentOfferId)
+        : latestProductContent) as NormalizedProductContent | null;
     if (
-      !createdActionIds.length &&
+      !contentDraftCreated &&
       hasFoundProduct(productForDraftRecovery) &&
       matchingCompetitorReports(productForDraftRecovery, latestCompetitorReports).length > 0 &&
       shouldCreateFallbackContentDraft(prompt, offerId)
@@ -2424,6 +2478,7 @@ export async function runOzonContentAgent(params: {
         ].join("\n\n"),
         { maxTurns: 4 },
       ).catch((error) => {
+        contentDraftBlocker = "内容草案生成或保存失败，商品尚未修改。";
         toolCalls.push({
           name: "propose_content_draft",
           at: new Date().toISOString(),
@@ -2440,9 +2495,9 @@ export async function runOzonContentAgent(params: {
       }
     }
 
-    const productForFallbackDraft = latestProductContent as NormalizedProductContent | null;
+    const productForFallbackDraft = productForDraftRecovery;
     if (
-      !createdActionIds.length &&
+      !contentDraftCreated &&
       hasFoundProduct(productForFallbackDraft) &&
       matchingCompetitorReports(productForFallbackDraft, latestCompetitorReports).length > 0 &&
       shouldCreateFallbackContentDraft(prompt, offerId)
@@ -2473,6 +2528,7 @@ export async function runOzonContentAgent(params: {
           ],
         });
         createdActionIds.push(...created.map((item) => item.id));
+        contentDraftCreated = contentDraftCreated || created.length > 0;
         toolCalls.push({
           name: "propose_content_draft",
           at: new Date().toISOString(),
@@ -2503,13 +2559,17 @@ export async function runOzonContentAgent(params: {
       fallbackPromotionPolicyOutput ??
       fallbackDraftOutput ??
       String(result.finalOutput ?? "Agent 没有返回内容。");
+    const outputWithDraftStatus = !contentDraftCreated &&
+      shouldCreateFallbackContentDraft(prompt, offerId)
+      ? `${output}\n\n未生成内容草案：${contentDraftBlocker ?? "本轮没有找到有依据的标题或描述修改。"}`
+      : output;
     const missingRequiredTools = requiredToolNames.filter(
       (toolName) => !requiredToolSatisfied(toolCalls, toolName),
     );
     const blockedMissingTool = missingRequiredTools.length > 0;
     const guardedOutput = blockedMissingTool && requiredToolName
       ? blockedMissingToolOutput(missingRequiredTools.join("、"))
-      : output;
+      : outputWithDraftStatus;
     const dataSources = contentAgentDataSourcesFromToolCalls(toolCalls);
     const executionTrace = buildAgentExecutionTrace({
       plan: agentPlan,

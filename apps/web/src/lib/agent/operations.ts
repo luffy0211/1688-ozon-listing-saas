@@ -170,7 +170,7 @@ export function lowContentRatingProducts(
   return products
     .flatMap((product) => {
       const rating = product.publicSku ? bySku.get(product.publicSku) : null;
-      if (!rating || rating.rating >= threshold) return [];
+      if (product.archived || !rating || rating.rating >= threshold) return [];
       const recommendations = new Set<string>();
       rating.groups.forEach((group) => {
         group.conditions

@@ -796,6 +796,7 @@ describe("Ozon operations helpers", () => {
         [
           { productId: "1", offerId: "good", name: "Good", publicSku: "100", imageUrl: null },
           { productId: "2", offerId: "low", name: "Low", publicSku: "200", imageUrl: "low.jpg" },
+          { productId: "3", offerId: "archived", name: "Archived", publicSku: "300", archived: true },
         ] as never,
         [
           { sku: 100, rating: 85, groups: [] },
@@ -814,6 +815,7 @@ describe("Ozon operations helpers", () => {
               },
             ],
           },
+          { sku: 300, rating: 10, groups: [] },
         ],
         70,
       ),
