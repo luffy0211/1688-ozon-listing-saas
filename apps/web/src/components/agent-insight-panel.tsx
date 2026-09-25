@@ -79,7 +79,7 @@ export function insightPresentationFor(
     ),
     showContentDiagnosis,
     showContentProducts: showContentDiagnosis && !hasContentDraft,
-    showCompetitorComparison: competitorFocused || showContentDiagnosis,
+    showCompetitorComparison: competitorFocused || showContentDiagnosis || broadStoreDiagnosis,
   };
 }
 
@@ -495,12 +495,13 @@ function compareRows(sample: Record<string, unknown>) {
 
 function CompetitorBusinessComparison({ source, onRun }: { source?: AgentInsightSource | null; onRun?: (prompt: string) => void }) {
   const samples = contentSamples(source).slice(0, 4);
-  if (!source) return null;
   if (!samples.length) {
     return (
       <div className="rounded-2xl border border-[#ccebe6] bg-[#f3fcfa] p-4">
         <div className="text-sm font-black text-[#075e5a]">同类竞品对比</div>
-        <div className="mt-2 text-sm text-gray-600">本次没有拿到有效竞品页面，暂不生成竞品结论。</div>
+        <div className="mt-2 text-sm text-gray-600">{source
+          ? "本次没有拿到有效竞品页面，暂时无法对比。"
+          : "本次未取得同类竞品数据，暂时无法对比。"}</div>
       </div>
     );
   }
@@ -627,7 +628,7 @@ function OperationsDiagnosisReport({
 }) {
   const diagnosis = sources.find((source) => source.status === "ok" && source.toolName === "diagnose_ozon_store");
   const competitor = sources.find((source) => source.status === "ok" && source.toolName === "analyze_ozon_competitors");
-  if (!diagnosis && !competitor) return null;
+  if (!diagnosis && !competitor && !presentation.showCompetitorComparison) return null;
   const draftCount = actions.filter((action) => action.type === "CONTENT_DRAFT").length;
   return (
     <div className="space-y-3">
