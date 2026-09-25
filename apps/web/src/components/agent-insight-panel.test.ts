@@ -186,6 +186,13 @@ describe("agent insight presentation", () => {
     );
   });
 
+  it("shows the competitor section for a deep diagnosis even without competitor data", () => {
+    expect(insightPresentationFor("给我的店铺做一次深度诊断", []).showCompetitorComparison).toBe(true);
+    const html = renderPanel("请对当前店铺做完整诊断，找出内容评分最低的商品，给出建议，并为最紧急的商品生成待确认优化方案。");
+    expect(html).toContain("同类竞品对比");
+    expect(html).toContain("暂时无法对比");
+  });
+
   it("shows old competitor evidence and lets the user decide whether to refresh", () => {
     const onRun = () => undefined;
     const html = renderToStaticMarkup(createElement(AgentInsightPanel, {
