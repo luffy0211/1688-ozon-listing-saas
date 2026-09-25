@@ -79,7 +79,7 @@ export function insightPresentationFor(
     ),
     showContentDiagnosis,
     showContentProducts: showContentDiagnosis && !hasContentDraft,
-    showCompetitorComparison: competitorFocused,
+    showCompetitorComparison: competitorFocused || showContentDiagnosis,
   };
 }
 
@@ -493,7 +493,7 @@ function compareRows(sample: Record<string, unknown>) {
   ];
 }
 
-function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource | null }) {
+function CompetitorBusinessComparison({ source, onRun }: { source?: AgentInsightSource | null; onRun?: (prompt: string) => void }) {
   const samples = contentSamples(source).slice(0, 4);
   if (!source) return null;
   if (!samples.length) {
@@ -512,6 +512,16 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
         </div>
         <span className="text-xs font-semibold text-[#087f78]">自家商品 / 竞品参考 / Agent建议</span>
       </div>
+      {samples.some((sample) => {
+        const capturedAt = stringValue(sample.capturedAt);
+        const timestamp = capturedAt ? Date.parse(capturedAt) : NaN;
+        return Number.isFinite(timestamp) && Date.now() - timestamp > 7 * 24 * 60 * 60 * 1000;
+      }) ? (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <span>竞品数据已超过 7 天，当前仍可参考。是否更新由你决定。</span>
+          {onRun ? <Button type="button" onClick={() => onRun("重新采集竞品分析，每个类目 1 个")}>更新竞品</Button> : null}
+        </div>
+      ) : null}
       <div className="mt-3 space-y-4">
         {samples.map((sample, index) => {
           const own = asRecord(sample.own);
@@ -534,6 +544,7 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
                   )}
                   <div className="min-w-0">
                     <div className="text-[11px] font-bold text-[#087f78]">自家商品 · {stringValue(sample.categoryName) ?? "未知类目"}</div>
+                    <div className="text-[11px] text-gray-500">本类目代表商品</div>
                     <div className="mt-1 break-all text-xs font-black text-gray-950">{stringValue(sample.offerId) ?? "-"}</div>
                     <div className="mt-1 line-clamp-2 text-xs text-gray-600">{shortText(own.title, "未命名商品")}</div>
                     <div className="mt-1 text-[11px] text-gray-500">价格 {rub(own.priceRub)} · 评价 {numberValue(own.reviewCount) ?? "-"}</div>
@@ -582,6 +593,19 @@ function CompetitorBusinessComparison({ source }: { source?: AgentInsightSource 
                   <div className="font-semibold text-gray-950">{row.action}</div>
                 </div>
               ))}
+              {competitors.length > 1 ? (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-[#edf7f5] px-3 py-2 text-xs">
+                  <span className="font-bold text-[#075e5a]">更多参考商品</span>
+                  {competitors.slice(1).map((item, competitorIndex) => {
+                    const url = safeExternalUrl(item.url);
+                    return url ? (
+                      <a key={url} href={url} target="_blank" rel="noreferrer" className="max-w-48 truncate text-[#087f78] underline" title={stringValue(item.title) ?? undefined}>
+                        {shortText(item.title, `竞品 ${competitorIndex + 2}`)} · {rub(item.priceRub)}
+                      </a>
+                    ) : null;
+                  })}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -612,7 +636,7 @@ function OperationsDiagnosisReport({
         <ContentDiagnosisOverview source={diagnosis} draftCount={draftCount} />
       ) : null}
       {presentation.showContentProducts ? <PriorityProducts source={diagnosis} onRun={onRun} /> : null}
-      {presentation.showCompetitorComparison ? <CompetitorBusinessComparison source={competitor} /> : null}
+      {presentation.showCompetitorComparison ? <CompetitorBusinessComparison source={competitor} onRun={onRun} /> : null}
     </div>
   );
 }

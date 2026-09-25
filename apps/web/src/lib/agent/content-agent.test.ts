@@ -9,6 +9,7 @@ import {
   buildAgentInput,
   fallbackPromotionPolicyFromPrompt,
   fallbackContentDraftSuggestion,
+  matchingCompetitorReports,
   normalizeOzonProductContent,
   optionalStoreId,
   productContentForDraft,
@@ -201,6 +202,21 @@ describe("content agent tool enforcement helpers", () => {
     expect(shouldRefreshCompetitorEvidence("使用之前采集的信息做全店诊断")).toBe(false);
     expect(shouldRefreshCompetitorEvidence("重新采集竞品，每个类目5个")).toBe(true);
     expect(shouldRefreshCompetitorEvidence("刷新竞品数据，每个类目5个")).toBe(true);
+    expect(shouldRefreshCompetitorEvidence("内容优化使用一周前的竞品")).toBe(false);
+    expect(shouldRefreshCompetitorEvidence("重新采集竞品分析，每个类目 1 个")).toBe(true);
+    expect(requiredOzonToolForPrompt("重新采集竞品分析，每个类目 1 个", null))
+      .toBe("analyze_ozon_competitors");
+  });
+
+  it("uses only competitor reports from the product's exact Ozon category", () => {
+    const reports = [
+      { target: { descriptionCategoryId: 10, typeId: 20 }, competitors: [{ sku: "MATCH" }] },
+      { target: { descriptionCategoryId: 10, typeId: 21 }, competitors: [{ sku: "OTHER" }] },
+      { target: { descriptionCategoryId: 10, typeId: 20 }, competitors: [] },
+    ];
+    expect(matchingCompetitorReports({ rawInfo: { description_category_id: 10, type_id: 20 } }, reports))
+      .toEqual([reports[0]]);
+    expect(matchingCompetitorReports({ rawInfo: {} }, reports)).toEqual([]);
   });
 
   it("reads the requested competitor count per category", () => {
@@ -221,6 +237,11 @@ describe("content agent tool enforcement helpers", () => {
     expect(requiredOzonToolForPrompt("查一下 offerId SKU-123 的商品状态", "SKU-123")).toBe(
       "get_ozon_product_content",
     );
+  });
+
+  it("treats editing product copy without an offerId as a content task", () => {
+    expect(requiredOzonToolForPrompt("帮我修改店铺商品标题", null)).toBe("diagnose_ozon_store");
+    expect(requiredOzonToolForPrompt("完善商品简介", null)).toBe("diagnose_ozon_store");
   });
 
   it("does not require Ozon tools for plain chat", () => {
