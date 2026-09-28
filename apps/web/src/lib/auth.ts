@@ -1,12 +1,14 @@
 import { SignJWT, jwtVerify } from "jose";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { prisma } from "@saas/db";
+import { z } from "zod";
 import {
   randomBytes,
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
-import { env } from "./env";
+import { assertProductionSecrets, env } from "./env";
 
 export type Role = "owner" | "operator" | "admin";
 
@@ -18,23 +20,41 @@ export type SessionPayload = {
 };
 
 const SESSION_COOKIE = "session";
-const secret = new TextEncoder().encode(env.sessionSecret);
+const sessionSchema = z.object({
+  userId: z.string().min(1).max(128),
+  tenantId: z.string().min(1).max(128).nullable(),
+  role: z.enum(["owner", "operator", "admin"]),
+  email: z.string().max(254).email(),
+}).refine((session) => session.role === "admin" || session.tenantId !== null);
 
 export async function signSession(payload: SessionPayload): Promise<string> {
-  return new SignJWT({ ...payload })
+  assertProductionSecrets();
+  return new SignJWT(sessionSchema.parse(payload))
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("7d")
-    .sign(secret);
+    .sign(new TextEncoder().encode(env.sessionSecret));
 }
 
 export async function verifySession(
   token: string | undefined,
 ): Promise<SessionPayload | null> {
-  if (!token) return null;
+  if (!token || token.length > 4096) return null;
   try {
-    const { payload } = await jwtVerify(token, secret);
-    return payload as unknown as SessionPayload;
+    assertProductionSecrets();
+    const { payload } = await jwtVerify(token, new TextEncoder().encode(env.sessionSecret), {
+      algorithms: ["HS256"], requiredClaims: ["exp", "iat"], maxTokenAge: "7d",
+    });
+    const parsed = sessionSchema.safeParse(payload);
+    if (!parsed.success) return null;
+    const session = parsed.data;
+    // No disable flag or revocation store exists: re-check current membership and role.
+    const user = await prisma.user.findFirst({
+      where: { id: session.userId, tenantId: session.tenantId },
+      select: { id: true, tenantId: true, role: true, email: true },
+    });
+    if (!user || user.tenantId !== session.tenantId || user.role !== session.role || user.email !== session.email) return null;
+    return session;
   } catch {
     return null;
   }
@@ -48,6 +68,7 @@ export function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
+  if (!/^[0-9a-f]{32}:[0-9a-f]{128}$/i.test(stored)) return false;
   const [salt, hash] = stored.split(":");
   if (!salt || !hash) return false;
   const expected = Buffer.from(hash, "hex");
