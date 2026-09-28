@@ -5,11 +5,13 @@ import {
   initialContentAgentSessionId,
   mapPersistedChatMessage,
   pollAgentAction,
+  pollAgentRunTrace,
   recoverableAgentRun,
   resumableActionIds,
   sessionsAfterArchive,
   shouldApplyArchivedSessionResponse,
   shouldShowCommandDeck,
+  startContentAgentRun,
 } from "./content-agent-chat";
 import {
   contentDraftStatusLabel,
@@ -21,6 +23,56 @@ import {
 } from "./content-agent-drafts";
 
 describe("content agent action preview", () => {
+  it.each(["content_agent_queue_unavailable", "content_agent_run_in_progress"])("reconnects to persisted tasks after %s", async (code) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false, status: code === "content_agent_run_in_progress" ? 409 : 503,
+      json: async () => ({ error: { code, message: "already saved", details: [{ sessionId: "session-1", runId: "run-1" }] } }),
+    } as Response);
+    try {
+      expect(await startContentAgentRun("new", { prompt: "test", storeId: "store" })).toMatchObject({ sessionId: "session-1", runId: "run-1", status: "running" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { fetchMock.mockRestore(); }
+  });
+
+  it("cancels diagnosis polling during a retry delay", async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    try {
+      const result = pollAgentRunTrace("run-1", () => undefined, controller.signal).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await Promise.race([result, Promise.resolve("still waiting")])).toMatchObject({ name: "AbortError" });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { fetchMock.mockRestore(); vi.useRealTimers(); }
+  });
+  it("keeps a long diagnosis connected across transient network failures", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("offline");
+      return { ok: true, json: async () => ({ data: {
+        status: calls > 245 ? "succeeded" : "running", executionTrace: [],
+      } }) } as Response;
+    });
+    try {
+      const result = pollAgentRunTrace("run-1", () => undefined).catch((error) => ({ error }));
+      await vi.advanceTimersByTimeAsync(1_000_000);
+      expect((await result).status).toBe("succeeded");
+    } finally { fetchMock.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it("stops diagnosis polling when access is revoked", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false, status: 403, json: async () => ({ error: { message: "forbidden" } }),
+    } as Response);
+    try {
+      await expect(pollAgentRunTrace("run-1", () => undefined)).rejects.toThrow("forbidden");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally { fetchMock.mockRestore(); }
+  });
   it("keeps polling queued actions until execution reaches a stable state", () => {
     expect(actionNeedsPolling({ status: "APPROVED" })).toBe(true);
     expect(actionNeedsPolling({ status: "BLOCKED", executionPhase: "executing" })).toBe(true);

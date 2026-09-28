@@ -1,9 +1,10 @@
 import type { NextRequest } from "next/server";
 import { prisma, decryptSecret } from "@saas/db";
-import { checkSubmitGuards, computeRequestHash, mockImportProducts, OzonClient } from "@saas/ozon";
+import { checkSubmitGuards, computeRequestHash, mockImportProducts, OzonClient, OzonApiError } from "@saas/ozon";
 import { ok, fail, unauthorized, forbidden, notFound } from "@/lib/api";
 import { consumeTenantCredits, CreditAdjustmentError, refundTenantCredits } from "@/lib/credits";
 import { sessionFromRequest } from "@/lib/request-session";
+import { claimPublishRun } from "@/lib/agent/publish-claim";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
     include: { product: { include: { productAssets: true } }, store: true },
   });
   if (!draft) return notFound("草稿不存在");
+  if (draft.store.tenantId !== tenantId || draft.product.tenantId !== tenantId) return forbidden();
   if (draft.status !== "COMPILED") {
     return fail("invalid_state", "只有已生成待确认的草稿可以上架", [], 409);
   }
@@ -62,6 +64,22 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
   if (!guard.ok) {
     return fail("submit_guard_failed", guard.failures.join("; "), guard.failures, 422);
   }
+  if (request.items.length !== 1 || asRecord(request.items[0]).offer_id !== draft.product.offerId) {
+    return fail("product_identity_mismatch", "草稿中的商品与当前商品不一致，请重新生成", [], 422);
+  }
+
+  const client = process.env.ENABLE_REAL_OZON_SUBMIT === "true"
+    ? new OzonClient({ clientId: draft.store.ozonClientId, apiKey: decryptSecret(draft.store.ozonApiKey) })
+    : null;
+  let run;
+  try {
+    run = await claimPublishRun({ tenantId, draftId: draft.id, storeId: draft.storeId, requestHash, request });
+  } catch (error) {
+    if (error instanceof Error && error.message === "duplicate_submission") {
+      return fail("duplicate_submission", "该商品正在提交或已提交，请查看上架记录", [], 409);
+    }
+    throw error;
+  }
 
   const creditReference = {
     referenceType: "ozon_draft_publish",
@@ -76,44 +94,46 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       ...creditReference,
     });
   } catch (error) {
+    // No external request has started, so releasing this reservation is safe.
+    await prisma.publishRun.deleteMany({ where: { id: run.id, tenantId, status: "submitting" } });
     if (error instanceof CreditAdjustmentError) {
       return fail(error.code, error.message, [], error.status);
     }
     throw error;
   }
 
+  let response: { task_id: number | string } | undefined;
   try {
-    const response =
-      process.env.ENABLE_REAL_OZON_SUBMIT === "true"
-        ? await new OzonClient({
-            clientId: draft.store.ozonClientId,
-            apiKey: decryptSecret(draft.store.ozonApiKey),
-          }).importProducts(request as never)
-        : mockImportProducts(request as never);
-    const run = await prisma.publishRun.create({
+    response = client ? await client.importProducts(request as never) : mockImportProducts(request as never);
+    await prisma.publishRun.update({
+      where: { id: run.id, tenantId },
       data: {
-        tenantId,
-        draftId: draft.id,
-        storeId: draft.storeId,
-        requestHash,
         ozonTaskId: String(response.task_id),
         status: "submitted",
-        requestJson: request as never,
         responseJson: response as never,
       },
     });
     await prisma.ozonDraft.update({
-      where: { id: draft.id },
+      where: { id: draft.id, tenantId },
       data: { status: "SUBMITTED" },
     });
     await prisma.sourceProduct.update({
-      where: { id: draft.productId },
+      where: { id: draft.productId, tenantId },
       data: { status: "submitted" },
     });
 
-    return ok({ publishRunId: run.id, ozonTaskId: run.ozonTaskId });
+    return ok({ publishRunId: run.id, ozonTaskId: String(response.task_id) });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const rejected = !response && error instanceof OzonApiError
+      && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status);
+    if (!rejected) {
+      await prisma.publishRun.update({
+        where: { id: run.id, tenantId },
+        data: { status: "pending_verification", error: message, ...(response ? { ozonTaskId: String(response.task_id) } : {}) },
+      });
+      return ok({ publishRunId: run.id, status: "pending_verification", message: "提交结果待核实，请勿重复上架" }, 202);
+    }
     await refundTenantCredits({
       tenantId,
       feature: "listing_publish",
@@ -121,19 +141,15 @@ export async function POST(req: NextRequest, props: { params: Promise<{ id: stri
       ...creditReference,
       idempotencyKey: `refund:${creditReference.idempotencyKey}`,
     }).catch(() => null);
-    await prisma.publishRun.create({
+    await prisma.publishRun.update({
+      where: { id: run.id, tenantId },
       data: {
-        tenantId,
-        draftId: draft.id,
-        storeId: draft.storeId,
-        requestHash,
         status: "failed",
-        requestJson: request as never,
         error: message,
       },
     });
     await prisma.ozonDraft.update({
-      where: { id: draft.id },
+      where: { id: draft.id, tenantId },
       data: { status: "FAILED", error: message },
     });
     return fail("ozon_submit_failed", message, [], 502);

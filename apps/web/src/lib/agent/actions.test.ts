@@ -77,7 +77,10 @@ beforeEach(() => {
     ozonClientId: "client-1",
     ozonApiKey: "plain-key",
   });
-  ozonClientMock.getProductInfoList.mockResolvedValue([{ id: 1 }]);
+  ozonClientMock.getProductInfoList.mockReset().mockImplementation(async ({ productIds }) => [{
+    id: productIds?.length ? Number(productIds[0]) : 5853386614,
+    offer_id: productIds?.length ? `SKU-${productIds[0]}` : "SKU-1",
+  }]);
   ozonClientMock.getProductInfoAttributes.mockResolvedValue([{
     offer_id: "SKU-1",
     name: "Новое название",

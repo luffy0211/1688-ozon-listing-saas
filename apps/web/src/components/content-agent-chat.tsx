@@ -459,16 +459,30 @@ async function postJson(path: string, payload: unknown = {}) {
   });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(json.error?.message ?? "请求失败");
+    throw Object.assign(new Error(json.error?.message ?? "请求失败"), { code: json.error?.code, details: json.error?.details });
   }
   return json.data;
+}
+
+export async function startContentAgentRun(sessionId: string, payload: { prompt: string; storeId: string | null }) {
+  try {
+    return await postJson(`/api/v1/agent/content/sessions/${sessionId}/messages/start`, payload);
+  } catch (error) {
+    const { code, details } = asRecord(error);
+    const saved = Array.isArray(details) ? asRecord(details[0]) : {};
+    if (["content_agent_queue_unavailable", "content_agent_run_in_progress"].includes(String(code))
+      && typeof saved.sessionId === "string" && typeof saved.runId === "string") {
+      return { sessionId: saved.sessionId, runId: saved.runId, status: "running" };
+    }
+    throw error;
+  }
 }
 
 async function getJson(path: string, signal?: AbortSignal) {
   const response = await fetch(path, { signal });
   const json = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(json.error?.message ?? "加载历史失败");
+    throw Object.assign(new Error(json.error?.message ?? "加载历史失败"), { status: response.status });
   }
   return json.data;
 }
@@ -480,8 +494,13 @@ async function deleteJson(path: string) {
   return json.data;
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function wait(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException("Polling cancelled", "AbortError")); return; }
+    const abort = () => { clearTimeout(timer); reject(new DOMException("Polling cancelled", "AbortError")); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, ms);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 const runningToolLabels: Record<string, string> = {
@@ -529,22 +548,25 @@ function runningAgentStatus(steps: AgentTimelineStep[]) {
   );
 }
 
-async function pollAgentRunTrace(
+export async function pollAgentRunTrace(
   runId: string,
   onUpdate: (trace: AgentTimelineStep[]) => void,
   signal?: AbortSignal,
 ) {
-  for (let attempt = 0; attempt < 240; attempt += 1) {
-    const data = await getJson(`/api/v1/agent/runs/${runId}/trace`, signal);
-    if (Array.isArray(data.executionTrace)) {
-      onUpdate(data.executionTrace);
+  let delay = 2000;
+  while (!signal?.aborted) {
+    try {
+      const data = await getJson(`/api/v1/agent/runs/${runId}/trace`, signal);
+      if (Array.isArray(data.executionTrace)) onUpdate(data.executionTrace);
+      if (data.status === "succeeded" || data.status === "failed") return data;
+      delay = 2000;
+    } catch (error) {
+      if (signal?.aborted || [401, 403, 404, 410].includes(Number(asRecord(error).status))) throw error;
+      delay = Math.min(delay * 2, 30_000);
     }
-    if (data.status === "succeeded" || data.status === "failed") {
-      return data;
-    }
-    await wait(1000);
+    await wait(delay, signal);
   }
-  throw new Error("Agent 仍在后台处理，刷新页面可继续查看进度。");
+  throw new DOMException("Polling cancelled", "AbortError");
 }
 
 export async function pollAgentAction(
@@ -563,11 +585,11 @@ export async function pollAgentAction(
         if (!actionNeedsPolling(latest!)) return latest;
       }
       retryDelay = 2000;
-    } catch {
-      if (signal?.aborted) break;
+    } catch (error) {
+      if (signal?.aborted || [401, 403, 404, 410].includes(Number(asRecord(error).status))) throw error;
       retryDelay = Math.min(retryDelay * 2, 30_000);
     }
-    await wait(retryDelay);
+    await wait(retryDelay, signal);
   }
   return latest;
 }
@@ -1259,8 +1281,8 @@ export function ContentAgentChat({
     let startedSessionId: string | null = null;
 
     try {
-      const started = await postJson(
-        `/api/v1/agent/content/sessions/${requestSessionId}/messages/start`,
+      const started = await startContentAgentRun(
+        requestSessionId,
         {
           prompt: content,
           storeId: selectedStoreId || null,

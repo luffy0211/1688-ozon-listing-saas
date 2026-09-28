@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button, cn } from "./ui";
 import { displayProductImageUrl } from "@/lib/product-image";
+import { contentOptimizationRequested, contentWorkExcluded, competitorWorkExcluded, operationalTaskOnly } from "@/lib/agent/task-scope";
 
 export type AgentInsightSource = {
   toolName: string;
@@ -71,7 +72,7 @@ export function insightPresentationFor(
   const storeDiagnosis = /(?:店铺|经营|运营).{0,8}(?:诊断|体检|分析)|(?:诊断|体检|分析).{0,8}(?:店铺|经营|运营)/i.test(requestPrompt);
   const broadStoreDiagnosis = storeDiagnosis && /(?:完整|全面|深度|全部|所有)/i.test(requestPrompt);
   const hasContentDraft = actions.some((action) => action.type === "CONTENT_DRAFT");
-  const showContentDiagnosis = contentFocused;
+  const showContentDiagnosis = !contentWorkExcluded(requestPrompt) && (contentFocused || contentOptimizationRequested(requestPrompt));
 
   return {
     showStoreDiagnosis: broadStoreDiagnosis || (
@@ -79,7 +80,8 @@ export function insightPresentationFor(
     ),
     showContentDiagnosis,
     showContentProducts: showContentDiagnosis && !hasContentDraft,
-    showCompetitorComparison: competitorFocused || showContentDiagnosis || broadStoreDiagnosis,
+    showCompetitorComparison: !competitorWorkExcluded(requestPrompt) && !operationalTaskOnly(requestPrompt)
+      && (competitorFocused || showContentDiagnosis || (broadStoreDiagnosis && !contentWorkExcluded(requestPrompt))),
   };
 }
 

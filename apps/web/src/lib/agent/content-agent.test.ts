@@ -383,6 +383,18 @@ describe("content agent tool enforcement helpers", () => {
     expect(context).toContain("Поло 2个 ozon_http_crawler");
   });
 
+  it("includes Apify evidence only for the selected store", () => {
+    const reports = ["store-a", "store-b"].map((storeId) => ({
+      title: `竞品分析：${storeId}`,
+      createdAt: new Date("2026-09-28T00:00:00Z"),
+      reportJson: { storeId, source: "apify_ozon_scraper", target: { offerId: storeId },
+        category: { name: storeId }, competitors: [{ sku: "competitor" }] },
+    }));
+    const context = competitorMemoryContextFromReports(reports, "store-a");
+    expect(context).toContain("store-a 1个 apify_ozon_scraper");
+    expect(context).not.toContain("store-b");
+  });
+
   it("shows the full-store competitor diagnosis product count", () => {
     const sources = contentAgentDataSourcesFromToolCalls([{
       name: "analyze_ozon_competitors",

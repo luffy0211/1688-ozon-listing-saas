@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "dev": "tsx watch --tsconfig tsconfig.json src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "start:agent-only": "node --import tsx src/agent-only.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit"
   },

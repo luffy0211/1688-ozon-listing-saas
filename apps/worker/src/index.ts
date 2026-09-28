@@ -30,6 +30,7 @@ import type { RussianClothingAttributes } from "./listing-content";
 import { translateWithOpenAiCompatible } from "./translate-text";
 import { matchOzonCategoryWithModel } from "./ozon-category-match";
 import { processAgentQueueJob, type AgentQueueJob } from "./agent-recovery";
+import { claimPublishRun } from "../../web/src/lib/agent/publish-claim";
 
 type JsonRecord = Record<string, unknown>;
 type ProductAssetLike = {
@@ -339,7 +340,7 @@ async function runStep<T>(
   }
 }
 
-async function submitDraft(params: {
+export async function submitDraft(params: {
   tenantId: string;
   productId: string;
   draftId: string;
@@ -355,70 +356,70 @@ async function submitDraft(params: {
   }
 
   const requestHash = computeRequestHash(params.storeId, params.request);
-  const duplicate = await prisma.publishRun.findUnique({
-    where: { storeId_requestHash: { storeId: params.storeId, requestHash } },
+  const run = await claimPublishRun({
+    tenantId: params.tenantId, draftId: params.draftId, storeId: params.storeId, requestHash, request: params.request,
   });
-  if (duplicate) {
-    throw new Error("同一店铺同一草稿已提交过，禁止重复上架");
-  }
-
-  await consumeListingPublishCredits({
-    tenantId: params.tenantId,
-    draftId: params.draftId,
-    storeId: params.storeId,
-    requestHash,
-  });
-
+  let charged = false;
+  let submissionStarted = false;
+  let response: Awaited<ReturnType<OzonClient["importProducts"]>> | undefined;
+  let taskId: string | undefined;
   try {
-    const response =
-      process.env.ENABLE_REAL_OZON_SUBMIT === "true"
-        ? await new OzonClient({
-            clientId: params.store.ozonClientId,
-            apiKey: decryptSecret(params.store.ozonApiKey),
-          }).importProducts(params.request as never)
-        : mockImportProducts(params.request as never);
-    const run = await prisma.publishRun.create({
+    await consumeListingPublishCredits({
+      tenantId: params.tenantId, draftId: params.draftId, storeId: params.storeId, requestHash,
+    });
+    charged = true;
+    const client = process.env.ENABLE_REAL_OZON_SUBMIT === "true" ? new OzonClient({
+      clientId: params.store.ozonClientId, apiKey: decryptSecret(params.store.ozonApiKey),
+    }) : null;
+    submissionStarted = true;
+    response = client ? await client.importProducts(params.request as never) : mockImportProducts(params.request as never);
+    if (!response.task_id) throw new Error("missing_ozon_task_id");
+    taskId = String(response.task_id);
+    await prisma.publishRun.update({
+      where: { id: run.id, tenantId: params.tenantId },
       data: {
-        tenantId: params.tenantId,
-        draftId: params.draftId,
-        storeId: params.storeId,
-        requestHash,
-        ozonTaskId: String(response.task_id),
+        ozonTaskId: taskId,
         status: "submitted",
-        requestJson: params.request as never,
         responseJson: response as never,
       },
     });
     await prisma.ozonDraft.update({
-      where: { id: params.draftId },
+      where: { id: params.draftId, tenantId: params.tenantId },
       data: { status: "SUBMITTED" },
     });
     await prisma.sourceProduct.update({
-      where: { id: params.productId },
+      where: { id: params.productId, tenantId: params.tenantId },
       data: { status: "submitted" },
     });
-    return { publishRunId: run.id, ozonTaskId: run.ozonTaskId };
+    return { publishRunId: run.id, ozonTaskId: taskId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await refundListingPublishCredits({
-      tenantId: params.tenantId,
-      draftId: params.draftId,
-      storeId: params.storeId,
-      requestHash,
-    }).catch(() => null);
-    await prisma.publishRun.create({
+    if (submissionStarted) {
+      await prisma.publishRun.update({
+        where: { id: run.id, tenantId: params.tenantId },
+        data: {
+          status: taskId ? "submitted" : "pending_verification", ozonTaskId: taskId,
+          responseJson: response as never, error: `result_pending_verification: ${message}`,
+        },
+      });
+      await prisma.sourceProduct.updateMany({
+        where: { id: params.productId, tenantId: params.tenantId },
+        data: { status: taskId ? "submitted" : "submission_pending" },
+      });
+      throw new Error(`result_pending_verification: publishRunId=${run.id}; ozonTaskId=${taskId ?? "unknown"}; 请核实 Ozon 结果，禁止重复提交。`);
+    }
+    if (charged) await refundListingPublishCredits({
+      tenantId: params.tenantId, draftId: params.draftId, storeId: params.storeId, requestHash,
+    });
+    await prisma.publishRun.update({
+      where: { id: run.id, tenantId: params.tenantId },
       data: {
-        tenantId: params.tenantId,
-        draftId: params.draftId,
-        storeId: params.storeId,
-        requestHash,
         status: "failed",
-        requestJson: params.request as never,
         error: message,
       },
     });
     await prisma.ozonDraft.update({
-      where: { id: params.draftId },
+      where: { id: params.draftId, tenantId: params.tenantId },
       data: { status: "FAILED", error: message },
     });
     throw error;
@@ -688,8 +689,8 @@ async function processListing(jobId: string, options: { autoPublish?: boolean } 
       where: { id: jobId },
       data: { status: "FAILED", error: message, finishedAt: new Date() },
     });
-    await prisma.sourceProduct.update({
-      where: { id: job.productId },
+    await prisma.sourceProduct.updateMany({
+      where: { id: job.productId, tenantId: job.tenantId, status: { notIn: ["submitted", "submission_pending"] } },
       data: { status: "failed" },
     });
     throw error;
@@ -709,7 +710,8 @@ const worker = new Worker(
   },
 );
 
-const agentQueue = new Queue<AgentQueueJob>("ozon-agent", {
+const agentQueueName = process.env.AGENT_QUEUE_NAME?.trim() || "ozon-agent";
+const agentQueue = new Queue<AgentQueueJob>(agentQueueName, {
   connection: { url: process.env.REDIS_URL ?? "redis://localhost:6379" },
   defaultJobOptions: {
     attempts: 1,
@@ -719,8 +721,8 @@ const agentQueue = new Queue<AgentQueueJob>("ozon-agent", {
 });
 
 const agentWorker = new Worker<AgentQueueJob>(
-  "ozon-agent",
-  (job) => processAgentQueueJob(job.name, job.data, agentQueue),
+  agentQueueName,
+  (job) => processAgentQueueJob(job.name, job.data, agentQueue, { stalledCounter: job.stalledCounter }),
   {
     connection: { url: process.env.REDIS_URL ?? "redis://localhost:6379" },
     concurrency: 2,

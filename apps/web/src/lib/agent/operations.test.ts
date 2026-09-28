@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("@saas/db", () => ({ prisma: {}, decryptSecret: vi.fn() }));
+vi.mock("@/lib/env", () => ({ env: {} }));
 import {
   attachCompetitorCategoryLabels,
   buildCompetitorBatchProposal,

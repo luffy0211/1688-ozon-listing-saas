@@ -130,6 +130,7 @@ export async function consumeTenantCredits(input: CreditUsageInput) {
   });
 }
 
+// Refund keys are refund:<original debit key>[:<settlement suffix>].
 export async function refundTenantCredits(input: CreditUsageInput) {
   const amount = input.amount ?? CREDIT_USAGE_FEATURES[input.feature].cost;
   validateUsageInput(input, amount);
@@ -195,8 +196,10 @@ async function writeCreditTransaction(input: {
     referenceType: input.referenceType,
     referenceId: input.referenceId,
   };
+  const isUsage = input.type === CreditTransactionType.USAGE_DEBIT ||
+    input.type === CreditTransactionType.USAGE_REFUND;
 
-  if (input.idempotencyKey) {
+  if (input.idempotencyKey && !isUsage) {
     const existing = await findExistingIdempotentTransaction(
       input.idempotencyKey,
       prisma,
@@ -207,6 +210,11 @@ async function writeCreditTransaction(input: {
 
   try {
     return await prisma.$transaction(async (tx) => {
+      if (isUsage) {
+        // Different refund keys must share a lock before checking the same debit's allowance.
+        const lockKey = `credit-usage:${JSON.stringify([input.tenantId, input.referenceType, input.referenceId])}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      }
       if (input.idempotencyKey) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.idempotencyKey}))`;
         const existing = await findExistingIdempotentTransaction(
@@ -215,6 +223,29 @@ async function writeCreditTransaction(input: {
           idempotencyExpectation,
         );
         if (existing) return existing;
+      }
+      if (input.type === CreditTransactionType.USAGE_DEBIT) {
+        const debits = await tx.creditTransaction.findMany({
+          where: {
+            tenantId: input.tenantId, referenceType: input.referenceType, referenceId: input.referenceId,
+            type: CreditTransactionType.USAGE_DEBIT,
+          },
+          select: { idempotencyKey: true },
+        });
+        if (debits.some((item) => item.idempotencyKey && (
+          input.idempotencyKey!.startsWith(`${item.idempotencyKey}:`) ||
+          item.idempotencyKey.startsWith(`${input.idempotencyKey}:`)
+        ))) {
+          throw new CreditAdjustmentError("idempotency_conflict", "扣费幂等键与已有退款关联存在歧义", 409);
+        }
+      }
+      if (input.type === CreditTransactionType.USAGE_REFUND) {
+        const { debit, refunded } = await usageRefundBalance(tx, {
+          ...idempotencyExpectation, idempotencyKey: input.idempotencyKey!,
+        });
+        if (input.amount + refunded > -debit.delta) {
+          throw new CreditAdjustmentError("refund_exceeds_debit", "累计退款不能超过原始扣费", 409);
+        }
       }
 
       const tenant = await tx.tenant.findUnique({
@@ -291,11 +322,51 @@ async function findExistingIdempotentTransaction(
   )) {
     throw new CreditAdjustmentError("idempotency_conflict", "幂等键已被其他积分流水使用", 409);
   }
+  if (expected?.type === CreditTransactionType.USAGE_DEBIT) {
+    const { refunded } = await usageRefundBalance(client, { ...expected, idempotencyKey });
+    if (refunded > 0) {
+      throw new CreditAdjustmentError("credit_debit_refunded", "原始扣费已退款，请发起新的任务", 409);
+    }
+  }
   return {
     account: transaction.account,
     transaction,
     idempotentReplay: true,
   };
+}
+
+async function usageRefundBalance(
+  client: Pick<typeof prisma, "creditTransaction">,
+  input: {
+    tenantId: string;
+    referenceType?: string;
+    referenceId?: string;
+    idempotencyKey: string;
+    type: CreditTransactionType;
+  },
+) {
+  const transactions = await client.creditTransaction.findMany({
+    where: {
+      tenantId: input.tenantId,
+      referenceType: input.referenceType,
+      referenceId: input.referenceId,
+      type: { in: [CreditTransactionType.USAGE_DEBIT, CreditTransactionType.USAGE_REFUND] },
+    },
+  });
+  const debits = transactions
+    .filter((item) => item.type === CreditTransactionType.USAGE_DEBIT && item.delta < 0 && item.idempotencyKey)
+    .sort((left, right) => right.idempotencyKey!.length - left.idempotencyKey!.length);
+  const refundOwner = (key: string | null) => debits.find((item) =>
+    key === `refund:${item.idempotencyKey}` || key?.startsWith(`refund:${item.idempotencyKey}:`));
+  const debit = input.type === CreditTransactionType.USAGE_DEBIT
+    ? debits.find((item) => item.idempotencyKey === input.idempotencyKey)
+    : refundOwner(input.idempotencyKey);
+  if (!debit) throw new CreditAdjustmentError("refund_debit_not_found", "未找到对应的原始扣费", 409);
+  // ponytail: scan one business reference; use explicit debit links if its ledger grows large.
+  const refunded = transactions
+    .filter((item) => item.type === CreditTransactionType.USAGE_REFUND && refundOwner(item.idempotencyKey)?.id === debit.id)
+    .reduce((sum, item) => sum + Math.max(0, item.delta), 0);
+  return { debit, refunded };
 }
 
 async function decrementCreditsIfAvailable(
