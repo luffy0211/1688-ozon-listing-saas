@@ -11,6 +11,7 @@ import {
   sessionsAfterArchive,
   shouldApplyArchivedSessionResponse,
   shouldShowCommandDeck,
+  isConversationNearBottom,
   startContentAgentRun,
 } from "./content-agent-chat";
 import {
@@ -23,6 +24,10 @@ import {
 } from "./content-agent-drafts";
 
 describe("content agent action preview", () => {
+  it("does not follow new updates while the merchant is reading comparison evidence", () => {
+    expect(isConversationNearBottom({ scrollHeight: 2000, scrollTop: 400, clientHeight: 700 })).toBe(false);
+    expect(isConversationNearBottom({ scrollHeight: 2000, scrollTop: 1260, clientHeight: 700 })).toBe(true);
+  });
   it.each(["content_agent_queue_unavailable", "content_agent_run_in_progress"])("reconnects to persisted tasks after %s", async (code) => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: false, status: code === "content_agent_run_in_progress" ? 409 : 503,

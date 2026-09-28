@@ -68,3 +68,52 @@ credentials must not be re-keyed without a separate migration plan.
 - Logout/password changes do not yet revoke already-issued session tokens.
 - Payments, recurring subscriptions, broader cost budgets, and backup/restore drills
   are not implemented by this fix. Do not advertise this branch as fully production-ready.
+
+## Inline Competitor Comparison (Local Only)
+
+- The conversation now compares actual main images, titles, prices, keywords and
+  descriptions. Category/product selectors and competitor thumbnails expose every
+  returned sample, without the former four-category/six-competitor display limits.
+- Full descriptions are additive to legacy summaries. Unknown values remain unknown;
+  extracted terms are not official tags, and reviews are not sales. Vision advice is
+  attached only to the corresponding analyzed image, with no added vision calls.
+- A pending draft shortcut requires an exact store and offer match. It focuses the
+  existing editor without executing or creating another action. Unsupported/missing
+  refresh identifiers cannot initiate a broader refresh.
+- A targeted refresh reads the explicit own product and confirms its official
+  category before collection or billing. Missing/mismatched products or categories
+  fail closed; the refresh count is tested against the actual Agent prompt parser.
+- Chat updates no longer force scrolling while reading evidence. Native image dialogs
+  support Escape and restore focus. Comparison changes preserve existing draft edits.
+
+Run the isolated frontend fixture (no database, Redis, Ozon or collection API):
+
+```powershell
+node tools/preview-competitor-ui.mjs
+# Open the printed loopback URL, normally http://127.0.0.1:5179/
+```
+
+The fixture is explicitly labelled demo data; it is not a production route and does
+not insert fake products into any database. Its buttons have local-only callbacks.
+Its example product photo is fetched from Unsplash. The Vite server binds to loopback.
+
+Browser regression, with browser-harness attached to an isolated local Chromium:
+
+```powershell
+$env:BU_CDP_URL='http://127.0.0.1:9224'
+$env:BU_NAME='local-competitor'
+$env:PYTHONUTF8='1'
+New-Item -ItemType Directory -Path test-results -Force | Out-Null
+Get-Content tests/ui/competitor-browser-qa.py -Raw | browser-harness
+```
+
+Verified category/competitor selection, description expansion, missing images and
+legacy summaries, zoom/Escape/focus restoration, exact draft selection, draft editing
+and preservation, and no horizontal overflow at 320/390/768/1440 pixels. Screenshots
+are generated under ignored `test-results/`. No live authenticated store execution
+was tested. Production build still warns about the missing database configuration;
+a successful build does not remove the local test prerequisites above.
+
+Current regression result: 72 files, 660 passed and 2 skipped. Workspace typecheck,
+Web production build and the isolated browser journey pass; production dependency
+audit reports no known vulnerabilities. Coverage percentage was not measured.

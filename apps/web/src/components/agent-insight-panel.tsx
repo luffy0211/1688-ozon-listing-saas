@@ -7,10 +7,11 @@ import {
   CircleAlert,
   Gauge,
   Megaphone,
-  ScanSearch,
   Sparkles,
 } from "lucide-react";
 import { Button, cn } from "./ui";
+import { CompetitorComparison, type ComparisonAction } from "./competitor-comparison";
+export { safeExternalUrl } from "./competitor-comparison";
 import { displayProductImageUrl } from "@/lib/product-image";
 import { contentOptimizationRequested, contentWorkExcluded, competitorWorkExcluded, operationalTaskOnly } from "@/lib/agent/task-scope";
 
@@ -51,9 +52,7 @@ export type AgentInsightSource = {
   error?: string | null;
 };
 
-type AgentInsightAction = {
-  type: string;
-};
+type AgentInsightAction = ComparisonAction;
 
 export type AgentInsightPresentation = {
   showStoreDiagnosis: boolean;
@@ -171,17 +170,6 @@ function stringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-export function safeExternalUrl(value: unknown) {
-  const text = stringValue(value);
-  if (!text) return null;
-  try {
-    const url = new URL(text);
-    return url.protocol === "http:" || url.protocol === "https:" ? text : null;
-  } catch {
-    return null;
-  }
-}
-
 function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -190,32 +178,9 @@ function arrayValue(value: unknown) {
   return Array.isArray(value) ? value : [];
 }
 
-function firstContentSample(source: AgentInsightSource) {
-  const diagnosis = asRecord(source.contentDiagnosis);
-  return asRecord(arrayValue(diagnosis.samples)[0]);
-}
-
-function contentSamples(source?: AgentInsightSource | null) {
-  const diagnosis = asRecord(source?.contentDiagnosis);
-  return arrayValue(diagnosis.samples).map(asRecord).filter((sample) => Object.keys(sample).length);
-}
-
-function termLabels(value: unknown) {
-  return arrayValue(value)
-    .map((item) => stringValue(asRecord(item).term))
-    .filter((item): item is string => Boolean(item))
-    .slice(0, 8);
-}
-
 function rub(value: unknown) {
   const number = numberValue(value);
   return number === null ? "-" : `${Math.round(number)} ₽`;
-}
-
-function shortText(value: unknown, fallback = "-") {
-  const text = stringValue(value);
-  if (!text) return fallback;
-  return text.length > 70 ? `${text.slice(0, 70)}...` : text;
 }
 
 function percentLabel(value: number | null | undefined) {
@@ -421,212 +386,20 @@ function PriorityProducts({
   );
 }
 
-function compareRows(sample: Record<string, unknown>) {
-  const comparison = asRecord(sample.comparison);
-  const title = asRecord(comparison.title);
-  const mainImage = asRecord(comparison.mainImage);
-  const price = asRecord(comparison.price);
-  const heat = asRecord(comparison.heat);
-  const themes = asRecord(comparison.themes);
-  const description = asRecord(comparison.description);
-  const own = asRecord(sample.own);
-  const competitor = asRecord(arrayValue(sample.competitors)[0]);
-  const competitorTitle = shortText(competitor.title, "本次未拿到竞品标题");
-  const ownTitle = shortText(own.title, shortText(sample.offerId));
-  const ownImageCount = numberValue(mainImage.ownImageCount) ?? numberValue(own.imageCount) ?? 0;
-  const ownImageReadState = stringValue(mainImage.ownReadState) ?? "not_read";
-  const competitorImageCount = numberValue(mainImage.competitorMedianImageCount);
-  const ownTerms = termLabels(themes.ownTerms).join("、");
-  const titleTerms = termLabels(themes.titleTerms).join("、");
-  const descriptionTerms = termLabels(themes.descriptionTerms).join("、");
-  const ownDescriptionReadState = stringValue(description.ownReadState) ?? "not_read";
-  const ownDescription = description.ownAvailable
-    ? "已有简介"
-    : ownDescriptionReadState === "missing"
-      ? "确认未填写简介"
-      : "暂未获取简介";
-  return [
-    {
-      label: "标题",
-      own: `${ownTitle}（${numberValue(title.ownLength) ?? "-"}字）`,
-      competitor: `${competitorTitle}（中位${numberValue(title.competitorMedianLength) ?? "-"}字）`,
-      action: (numberValue(title.ownLength) ?? 0) > (numberValue(title.competitorMedianLength) ?? 999)
-        ? "压缩标题，保留品类、颜色、版型和面料"
-        : "保留核心词，减少无效修饰",
-    },
-    {
-      label: "主图",
-      own: ownImageReadState === "available" || ownImageReadState === "missing"
-        ? `${ownImageCount}张图${ownImageCount < 8 ? "，未达8张" : ""}`
-        : "暂未获取完整图片",
-      competitor: competitorImageCount === null ? "竞品图片数未采到" : `竞品中位${competitorImageCount}张`,
-      action: ownImageReadState === "available" || ownImageReadState === "missing"
-        ? ownImageCount < 8 ? "补图到8张以上，优先补视频/视频封面" : "主图数量先不动，检查清晰度"
-        : "先重新读取商品图片，再判断是否补图",
-    },
-    {
-      label: "价格",
-      own: rub(price.ownRub),
-      competitor: numberValue(price.competitorMedianRub) === null ? "竞品价格未采到" : `竞品中位${rub(price.competitorMedianRub)}`,
-      action: numberValue(price.competitorMedianRub) === null ? "暂不按价格调整" : "只作为定价参考，确认利润后再改价",
-    },
-    {
-      label: "热度",
-      own: `评价${numberValue(heat.ownReviewCount) ?? "-"}，不是销量`,
-      competitor: `竞品评价中位${numberValue(heat.competitorMedianReviewCount) ?? "-"}，搜索位仅作参考`,
-      action: "Ozon不返回真实销量，先恢复可见性和内容分",
-    },
-    {
-      label: "关键词",
-      own: ownTerms || "自家关键词暂未识别",
-      competitor: descriptionTerms || titleTerms || "竞品关键词未采到",
-      action: "把高频俄语词自然写进标题和简介",
-    },
-    {
-      label: "简介",
-      own: ownDescription,
-      competitor: `竞品${numberValue(description.competitorAvailableCount) ?? 0}个有简介`,
-      action: description.ownAvailable
-        ? "优化表达，不复制竞品文案"
-        : ownDescriptionReadState === "missing"
-          ? "补100-500字俄语简介"
-          : "先重新读取商品简介，再决定是否补充",
-    },
-  ];
-}
-
-function CompetitorBusinessComparison({ source, onRun }: { source?: AgentInsightSource | null; onRun?: (prompt: string) => void }) {
-  const samples = contentSamples(source).slice(0, 4);
-  if (!samples.length) {
-    return (
-      <div className="rounded-2xl border border-[#ccebe6] bg-[#f3fcfa] p-4">
-        <div className="text-sm font-black text-[#075e5a]">同类竞品对比</div>
-        <div className="mt-2 text-sm text-gray-600">{source
-          ? "本次没有拿到有效竞品页面，暂时无法对比。"
-          : "本次未取得同类竞品数据，暂时无法对比。"}</div>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-2xl border border-[#ccebe6] bg-[#f3fcfa] p-4 shadow-[0_10px_28px_rgba(18,109,102,0.08)]">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm font-black text-[#075e5a]">
-          <ScanSearch className="h-4 w-4" aria-hidden="true" /> 同类竞品对比
-        </div>
-        <span className="text-xs font-semibold text-[#087f78]">自家商品 / 竞品参考 / Agent建议</span>
-      </div>
-      {samples.some((sample) => {
-        const capturedAt = stringValue(sample.capturedAt);
-        const timestamp = capturedAt ? Date.parse(capturedAt) : NaN;
-        return Number.isFinite(timestamp) && Date.now() - timestamp > 7 * 24 * 60 * 60 * 1000;
-      }) ? (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-l-2 border-amber-400 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          <span>竞品数据已超过 7 天，当前仍可参考。是否更新由你决定。</span>
-          {onRun ? <Button type="button" onClick={() => onRun("重新采集竞品分析，每个类目 1 个")}>更新竞品</Button> : null}
-        </div>
-      ) : null}
-      <div className="mt-3 space-y-4">
-        {samples.map((sample, index) => {
-          const own = asRecord(sample.own);
-          const competitors = arrayValue(sample.competitors).map(asRecord);
-          const firstCompetitor = competitors[0];
-          const competitorUrl = safeExternalUrl(firstCompetitor?.url);
-          const ownImageReadState = stringValue(
-            asRecord(asRecord(sample.comparison).mainImage).ownReadState,
-          );
-          return (
-            <div key={`${stringValue(sample.offerId) ?? index}`} className="overflow-hidden rounded-xl border border-[#ccebe6] bg-white">
-              <div className="grid gap-3 border-b border-[#e4f4f1] bg-[#f8fffd] p-3 lg:grid-cols-[1fr_1fr]">
-                <div className="grid grid-cols-[64px_1fr] gap-3">
-                  {stringValue(own.imageUrl) ? (
-                    <img src={displayProductImageUrl(stringValue(own.imageUrl)!)} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
-                  ) : (
-                    <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">
-                      {ownImageReadState === "missing" ? "自家无图" : "图片暂未获取"}
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-bold text-[#087f78]">自家商品 · {stringValue(sample.categoryName) ?? "未知类目"}</div>
-                    <div className="text-[11px] text-gray-500">本类目代表商品</div>
-                    <div className="mt-1 break-all text-xs font-black text-gray-950">{stringValue(sample.offerId) ?? "-"}</div>
-                    <div className="mt-1 line-clamp-2 text-xs text-gray-600">{shortText(own.title, "未命名商品")}</div>
-                    <div className="mt-1 text-[11px] text-gray-500">价格 {rub(own.priceRub)} · 评价 {numberValue(own.reviewCount) ?? "-"}</div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-[64px_1fr] gap-3">
-                  {stringValue(firstCompetitor?.imageUrl) ? (
-                    <img src={displayProductImageUrl(stringValue(firstCompetitor?.imageUrl)!)} alt="" className="h-20 w-16 rounded-lg border bg-white object-contain" />
-                  ) : (
-                    <div className="flex h-20 w-16 items-center justify-center rounded-lg border border-dashed bg-white text-[10px] text-gray-400">竞品无图</div>
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-bold text-[#087f78]">竞品参考</div>
-                    {competitorUrl ? (
-                      <a
-                        href={competitorUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 line-clamp-2 text-xs font-black text-gray-950 hover:text-[#087f78]"
-                      >
-                        {shortText(firstCompetitor?.title, "本类目暂无有效竞品")}
-                      </a>
-                    ) : (
-                      <div className="mt-1 line-clamp-2 text-xs font-black text-gray-950">
-                        {shortText(firstCompetitor?.title, "本类目暂无有效竞品")}
-                      </div>
-                    )}
-                    <div className="mt-1 text-[11px] text-gray-500">
-                      价格 {rub(firstCompetitor?.priceRub)} · 评分 {numberValue(firstCompetitor?.rating) ?? "-"} · 评价 {numberValue(firstCompetitor?.reviewCount) ?? "-"}
-                    </div>
-                    <div className="mt-1 line-clamp-1 text-[11px] text-gray-500">{shortText(firstCompetitor?.description, "暂无简介摘要")}</div>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-[70px_1fr_1fr_1fr] border-b border-[#e4f4f1] bg-[#ecfaf7] px-3 py-2 text-xs font-black text-[#075e5a]">
-                <div>对比项</div>
-                <div>自家商品</div>
-                <div>竞品参考</div>
-                <div>Agent 建议</div>
-              </div>
-              {compareRows(sample).map((row) => (
-                <div key={row.label} className="grid grid-cols-[70px_1fr_1fr_1fr] border-b border-[#edf7f5] px-3 py-2 text-xs last:border-b-0">
-                  <div className="font-bold text-[#075e5a]">{row.label}</div>
-                  <div className="text-gray-700">{row.own}</div>
-                  <div className="text-gray-700">{row.competitor}</div>
-                  <div className="font-semibold text-gray-950">{row.action}</div>
-                </div>
-              ))}
-              {competitors.length > 1 ? (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-[#edf7f5] px-3 py-2 text-xs">
-                  <span className="font-bold text-[#075e5a]">更多参考商品</span>
-                  {competitors.slice(1).map((item, competitorIndex) => {
-                    const url = safeExternalUrl(item.url);
-                    return url ? (
-                      <a key={url} href={url} target="_blank" rel="noreferrer" className="max-w-48 truncate text-[#087f78] underline" title={stringValue(item.title) ?? undefined}>
-                        {shortText(item.title, `竞品 ${competitorIndex + 2}`)} · {rub(item.priceRub)}
-                      </a>
-                    ) : null;
-                  })}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function OperationsDiagnosisReport({
   sources,
   presentation,
   actions,
   onRun,
+  onOpenDraft,
+  activeStoreId,
 }: {
   sources: AgentInsightSource[];
   presentation: AgentInsightPresentation;
   actions: AgentInsightAction[];
   onRun?: (prompt: string) => void;
+  onOpenDraft?: (id: string) => void;
+  activeStoreId?: string;
 }) {
   const diagnosis = sources.find((source) => source.status === "ok" && source.toolName === "diagnose_ozon_store");
   const competitor = sources.find((source) => source.status === "ok" && source.toolName === "analyze_ozon_competitors");
@@ -639,136 +412,7 @@ function OperationsDiagnosisReport({
         <ContentDiagnosisOverview source={diagnosis} draftCount={draftCount} />
       ) : null}
       {presentation.showContentProducts ? <PriorityProducts source={diagnosis} onRun={onRun} /> : null}
-      {presentation.showCompetitorComparison ? <CompetitorBusinessComparison source={competitor} onRun={onRun} /> : null}
-    </div>
-  );
-}
-
-function CompetitorCards({ sample }: { sample: Record<string, unknown> }) {
-  const competitors = arrayValue(sample.competitors).map(asRecord).slice(0, 6);
-  if (!competitors.length) return null;
-  return (
-    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-      {competitors.map((item, index) => {
-        const competitorUrl = safeExternalUrl(item.url);
-        const content = (
-          <>
-          {stringValue(item.imageUrl) ? (
-            <img src={displayProductImageUrl(stringValue(item.imageUrl)!)} alt="" className="h-20 w-14 rounded-md border bg-white object-contain" />
-          ) : (
-            <div className="flex h-20 w-14 items-center justify-center rounded-md border border-dashed bg-gray-50 text-[10px] text-gray-400">无图</div>
-          )}
-          <div className="min-w-0">
-            <div className="line-clamp-2 text-xs font-bold text-gray-950">{stringValue(item.title) ?? "未命名竞品"}</div>
-            <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-gray-500">
-              <span>{rub(item.priceRub)}</span>
-              <span>{numberValue(item.rating) ? `评分 ${numberValue(item.rating)}` : "无评分"}</span>
-              <span>{numberValue(item.reviewCount) ? `评价 ${numberValue(item.reviewCount)}` : "无评价数"}</span>
-            </div>
-            <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-gray-600">
-              {stringValue(item.description) ?? "暂无简介摘要"}
-            </div>
-          </div>
-          </>
-        );
-        const className = "grid grid-cols-[58px_1fr] gap-2 rounded-lg border border-[#ccebe6] bg-white p-2";
-        return competitorUrl ? (
-          <a
-            key={`${competitorUrl}-${index}`}
-            href={competitorUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={`${className} hover:border-[#54cfc4]`}
-          >
-            {content}
-          </a>
-        ) : (
-          <div key={`competitor-${index}`} className={className}>{content}</div>
-        );
-      })}
-    </div>
-  );
-}
-
-function FieldComparison({ sample }: { sample: Record<string, unknown> }) {
-  const comparison = asRecord(sample.comparison);
-  const title = asRecord(comparison.title);
-  const mainImage = asRecord(comparison.mainImage);
-  const price = asRecord(comparison.price);
-  const heat = asRecord(comparison.heat);
-  const themes = asRecord(comparison.themes);
-  const description = asRecord(comparison.description);
-  const rows = [
-    ["标题", `自家 ${numberValue(title.ownLength) ?? "-"} 字`, `竞品中位 ${numberValue(title.competitorMedianLength) ?? "-"} 字`],
-    ["主图", `自家 ${numberValue(mainImage.ownImageCount) ?? 0} 张`, `竞品中位 ${numberValue(mainImage.competitorMedianImageCount) ?? "-"} 张`],
-    ["价格", rub(price.ownRub), `竞品中位 ${rub(price.competitorMedianRub)}`],
-    ["热度", `评价 ${numberValue(heat.ownReviewCount) ?? "-"}`, `竞品评价中位 ${numberValue(heat.competitorMedianReviewCount) ?? "-"}`],
-    ["主题词", termLabels(themes.titleTerms).join("、") || "-", termLabels(themes.descriptionTerms).join("、") || "-"],
-    ["简介", description.ownAvailable ? "已有简介" : "缺少简介", `竞品 ${numberValue(description.competitorAvailableCount) ?? 0} 个有简介`],
-  ];
-  return (
-    <div className="mt-3 overflow-hidden rounded-lg border border-[#ccebe6] bg-white">
-      {rows.map(([label, own, competitor]) => (
-        <div key={label} className="grid grid-cols-[64px_1fr_1fr] border-b border-[#edf7f5] last:border-b-0">
-          <div className="bg-[#f3fcfa] px-2 py-2 text-xs font-bold text-[#075e5a]">{label}</div>
-          <div className="px-2 py-2 text-xs text-gray-700">{own}</div>
-          <div className="px-2 py-2 text-xs text-gray-950">{competitor}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function VisionSummary({ source }: { source: AgentInsightSource }) {
-  const vision = asRecord(asRecord(source.contentDiagnosis).vision);
-  const analyses = arrayValue(vision.analyses).map(asRecord).slice(0, 4);
-  if (!analyses.length) {
-    const warning = stringValue(vision.warning);
-    return warning ? <div className="mt-3 border-l-4 border-[#f5c842] bg-white p-2 text-xs text-gray-600">{warning}</div> : null;
-  }
-  return (
-    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {analyses.map((item, index) => (
-        <div key={`${stringValue(item.imageUrl) ?? index}`} className="rounded-lg border border-[#dce8f5] bg-white p-2 text-xs">
-          <div className="font-bold text-gray-950">{stringValue(item.label) ?? `图片${index + 1}`} · {stringValue(item.imageType) ?? "未知"}</div>
-          <div className="mt-1 text-gray-600">
-            清晰度 {stringValue(item.clarity) ?? "unknown"}，商品突出度 {stringValue(item.productProminence) ?? "unknown"}，评分 {numberValue(item.mainImageScore) ?? "-"}
-          </div>
-          <div className="mt-1 text-gray-700">{stringValue(item.recommendationZh) ?? "需要人工复核"}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CompetitorInsight({ source }: { source: AgentInsightSource }) {
-  const sample = firstContentSample(source);
-  return (
-    <div className="rounded-xl border border-[#ccebe6] bg-[#f3fcfa] p-3">
-      <div className="flex items-center gap-2 font-bold text-[#075e5a]">
-        <ScanSearch className="h-4 w-4" aria-hidden="true" /> 同类竞品内容对比
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <Metric label="分析自家商品" value={source.analyzedProductCount ?? 0} accent="#087f78" />
-        <Metric label="有效竞品样本" value={source.competitorCount ?? 0} accent="#f5c842" />
-        <Metric label="搜索词覆盖" value={source.categories?.length ?? 0} accent="#d858a8" />
-      </div>
-      {source.categories?.length ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {[...new Set(source.categories)].map((category) => (
-            <span key={category} className="rounded-md border border-[#54cfc4] bg-white px-2 py-1 text-xs font-semibold text-[#075e5a]">
-              {category}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      {Object.keys(sample).length ? (
-        <>
-          <FieldComparison sample={sample} />
-          <VisionSummary source={source} />
-          <CompetitorCards sample={sample} />
-        </>
-      ) : null}
+      {presentation.showCompetitorComparison ? <CompetitorComparison source={competitor} actions={actions} activeStoreId={activeStoreId} onRun={onRun} onOpenDraft={onOpenDraft} /> : null}
     </div>
   );
 }
@@ -801,11 +445,15 @@ export function AgentInsightPanel({
   requestPrompt = "",
   actions = [],
   onRun,
+  onOpenDraft,
+  activeStoreId,
 }: {
   sources?: AgentInsightSource[];
   requestPrompt?: string;
   actions?: AgentInsightAction[];
   onRun?: (prompt: string) => void;
+  onOpenDraft?: (id: string) => void;
+  activeStoreId?: string;
 }) {
   if (!sources?.length) return null;
   const presentation = insightPresentationFor(requestPrompt, actions);
@@ -824,6 +472,8 @@ export function AgentInsightPanel({
         presentation={presentation}
         actions={actions}
         onRun={onRun}
+        onOpenDraft={onOpenDraft}
+        activeStoreId={activeStoreId}
       />
       {errorSources.map((source, index) => (
         <div key={`${source.toolName}-${source.at}-${index}`} className="flex items-start gap-2 border-l-4 border-red-500 bg-red-50 p-3 text-xs text-red-800">

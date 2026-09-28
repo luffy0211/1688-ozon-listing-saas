@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Loader2, X } from "lucide-react";
 import { validateContentDraftEdits } from "@/lib/agent/content-draft-edits";
 import { Badge, Button, cn } from "./ui";
@@ -158,9 +158,11 @@ function executableFieldLabels(action: DraftAction) {
 export function ContentDraftGroup({
   actions,
   onCommand,
+  focusRequest,
 }: {
   actions: DraftAction[];
   onCommand: DraftCommand;
+  focusRequest?: { actionId: string } | null;
 }) {
   const pendingIds = useMemo(() => initialSelectedDraftIds(actions), [actions]);
   const [selectedIds, setSelectedIds] = useState(() => new Set(pendingIds));
@@ -174,6 +176,14 @@ export function ContentDraftGroup({
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!focusRequest || !actions.some((action) => action.id === focusRequest.actionId)) return;
+    setActiveId(focusRequest.actionId);
+    sectionRef.current?.focus({ preventScroll: true });
+    sectionRef.current?.scrollIntoView({ block: "start" });
+  }, [focusRequest]);
 
   const activeAction = actions.find((action) => action.id === activeId) ?? actions[0];
   if (!activeAction) return null;
@@ -312,7 +322,7 @@ export function ContentDraftGroup({
   const statusNotice = contentDraftStatusNotice(activeAction);
 
   return (
-    <section className="mt-3 overflow-hidden rounded-xl border border-[#dce6f3] bg-white shadow-[0_8px_22px_rgba(49,78,122,0.07)]">
+    <section ref={sectionRef} tabIndex={-1} aria-label="商品修改草案" className="mt-3 scroll-mt-4 overflow-hidden rounded-xl border border-[#dce6f3] bg-white shadow-[0_8px_22px_rgba(49,78,122,0.07)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e3ebf5] bg-[#f8fbff] px-4 py-3">
         <div>
           <h3 className="text-sm font-bold text-[#17223d]">商品修改草案</h3>
