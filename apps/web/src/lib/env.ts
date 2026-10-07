@@ -15,9 +15,12 @@ for (const envPath of [resolve(process.cwd(), ".env"), resolve(process.cwd(), ".
 export const env = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
-  sessionSecret:
-    process.env.SESSION_SECRET ?? "dev-insecure-session-secret-change-me",
-  encryptionKey: process.env.APP_ENCRYPTION_KEY ?? "dev-insecure-encryption-key-change-me",
+  get sessionSecret() {
+    return process.env.SESSION_SECRET ?? (process.env.NODE_ENV === "production" ? "" : "dev-insecure-session-secret-change-me");
+  },
+  get encryptionKey() {
+    return process.env.APP_ENCRYPTION_KEY ?? (process.env.NODE_ENV === "production" ? "" : "dev-insecure-encryption-key-change-me");
+  },
   ozonApiBase: process.env.OZON_API_BASE ?? "https://api-seller.ozon.ru",
   enableRealOzonSubmit: process.env.ENABLE_REAL_OZON_SUBMIT === "true",
   openaiApiKey: process.env.OPENAI_API_KEY ?? "",
@@ -47,3 +50,22 @@ export const env = {
   xiangjiApiBase: process.env.XIANGJI_API_BASE ?? "https://api.tosoiot.com",
   xiangjiMock: process.env.XIANGJI_MOCK === "true",
 };
+
+/** Validate at authentication time, never during build-time module discovery. */
+export function assertProductionSecrets(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  const sessionSecret = env.sessionSecret.trim();
+  if (Buffer.byteLength(sessionSecret) < 32 || [
+    "dev-insecure-session-secret-change-me",
+    "dev-session-secret-change-before-production",
+  ].includes(sessionSecret)) {
+    throw new Error("Authentication configuration unavailable");
+  }
+  const raw = env.encryptionKey;
+  const hex = /^[0-9a-f]{64}$/i.test(raw);
+  const key = Buffer.from(raw, hex ? "hex" : "base64");
+  if (key.length !== 32 || (!hex && key.toString("base64").replace(/=+$/, "") !== raw.replace(/=+$/, ""))
+    || key.equals(Buffer.from("0123456789abcdef0123456789abcdef"))) {
+    throw new Error("Authentication configuration unavailable");
+  }
+}

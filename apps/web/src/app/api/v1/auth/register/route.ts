@@ -2,26 +2,24 @@ import type { NextRequest } from "next/server";
 import { prisma, type Role } from "@saas/db";
 import { ok, fail } from "@/lib/api";
 import { hashPassword, signSession, SESSION_COOKIE } from "@/lib/auth";
+import { z } from "zod";
+import { assertProductionSecrets } from "@/lib/env";
+import { readAuthBody } from "@/lib/auth-security";
 
 const WEEK = 60 * 60 * 24 * 7;
+const inputSchema = z.object({
+  email: z.string().trim().max(254).email().toLowerCase(),
+  password: z.string().min(8).max(1024),
+  name: z.string().trim().max(100).optional(),
+  inviteCode: z.string().trim().min(1).max(128),
+});
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null);
-    const email: string | undefined = body?.email?.trim().toLowerCase();
-    const password: string | undefined = body?.password;
-    const name: string | undefined = body?.name;
-    const inviteCode: string | undefined = body?.inviteCode?.trim();
-
-    if (!email || !password) {
-      return fail("validation_error", "缺少邮箱或密码");
-    }
-    if (password.length < 8) {
-      return fail("validation_error", "密码至少 8 位");
-    }
-    if (!inviteCode) {
-      return fail("validation_error", "缺少邀请码");
-    }
+    const parsed = inputSchema.safeParse(await readAuthBody(req));
+    if (!parsed.success) return fail("validation_error", "注册信息格式无效，密码至少 8 位");
+    const { email, password, name, inviteCode } = parsed.data;
+    assertProductionSecrets();
 
     const invite = await prisma.invite.findUnique({ where: { code: inviteCode } });
     if (!invite) {
@@ -86,6 +84,7 @@ export async function POST(req: NextRequest) {
     });
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: WEEK,
@@ -95,7 +94,7 @@ export async function POST(req: NextRequest) {
     if (error instanceof Error && error.message === "invite_claimed") {
       return fail("invalid_invite", "邀请码已被使用完");
     }
-    console.error("registration failed", error);
+    console.error("registration failed");
     return fail("service_unavailable", "注册失败，请稍后重试", [], 503);
   }
 }
