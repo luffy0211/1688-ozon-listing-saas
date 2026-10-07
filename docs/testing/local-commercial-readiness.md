@@ -1,5 +1,82 @@
 # Local Agent Commercial-Readiness Fixes
 
+## Recovery and GitHub Handoff: 2026-10-07
+
+This section supersedes the historical runtime and dependency-audit status below.
+It is a code handoff, not a production deployment or a claim that live operations
+have passed end to end.
+
+### Recovered Code
+
+- The former Temp worktree had an invalid Git reference and 319 of 320 tracked
+  files were missing. Its surviving Git objects recovered the complete `af9a887`
+  tree and history into a separate, non-Temp checkout. `git fsck --full
+  --no-reflogs` passes without using the old object's directory.
+- The surviving old tracked file matched the recovered commit. No additional
+  uncommitted source files survived in that worktree. The original directories
+  were not overwritten; the cause of the file loss was not established.
+- Earlier features already have open PRs through #19. The remaining work is
+  separated into the following dependent branches, retaining the original
+  commits without merging or rebasing:
+
+| Review Order | Branch | Scope |
+| --- | --- | --- |
+| After #19 | `fix/tenant-auth-hardening` | Tenant/session validation and login limits (`ddfab1d`) |
+| Next | `fix/agent-durable-execution` | Persisted jobs, write verification and billing safeguards (`2d7ebfa`) |
+| Next | `feat/local-competitor-comparison` | Inline comparison, exact draft links and targeted refresh (`af9a887`) |
+| Last | `fix/production-dependency-security` | Security patches and this handoff |
+
+The last branch contains the complete combined code. Review the dependency chain
+before merging; do not deploy an intermediate branch with the old dependency lock.
+No `.env`, API keys, cookies, database contents, logs or generated build output are
+part of the upload. A targeted credential-pattern scan found no matches in the
+59 newly changed Agent files; this is not a comprehensive historical secret audit.
+
+### Dependency Security
+
+The initial audit found one critical and three high vulnerabilities. The updated
+lock now resolves Next.js 16.3.6, source-map-js 1.2.2, sharp 0.35.5 and MCP client
+2.2.0 (including its matching core dependency), within existing transitive ranges.
+React and the OpenAI Agents SDK versions are unchanged.
+
+- [Next.js ImageResponse advisory](https://github.com/advisories/GHSA-vcvr-r3jv-pc5j)
+- [source-map-js advisory](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)
+- [sharp advisory](https://github.com/advisories/GHSA-wq5f-xc86-pv6w)
+- [MCP client advisory](https://github.com/advisories/GHSA-6qxp-vccf-f47h)
+
+### Verification Repeated on the Patched Version
+
+- `pnpm install --frozen-lockfile --ignore-scripts`: pass.
+- `pnpm test`: 72 files passed; 660 tests passed, 2 skipped.
+- `pnpm typecheck`: pass across the workspace.
+- `pnpm build`: extension, Web and worker pass. The Web build still reports
+  missing `DATABASE_URL` and Prisma tracing/CommonJS warnings.
+- `pnpm audit --prod --audit-level high`: no known vulnerabilities reported.
+- Isolated production HTTP smoke: `/login` returns 200, unauthenticated
+  `/agent/content` redirects with 307, and `/api/v1/stores/ozon` returns 401.
+  The temporary smoke-test server was stopped afterwards.
+- No paid collection, live model call, real Ozon write, database migration, seed,
+  import or restart was performed. Browser evidence below is from September 28,
+  not a newly repeated authenticated browser journey. Coverage was not measured.
+
+### Current Local Runtime Is Not Fully Restored
+
+The old port-3000 service still listened but `/login` returned HTTP 500 on October 7.
+Listening PostgreSQL/Redis ports do not establish database health or data recovery;
+neither database contents nor credentials were inspected during this handoff.
+The recovered checkout has no private runtime environment. Reconfigure approved
+local credentials before claiming the full Agent workflow is available.
+
+For a later local restart, use the project's existing scripts and a privately
+supplied `.env` or inherited environment. Preserve the encryption key used by
+existing store credentials. Keep `ENABLE_REAL_OZON_SUBMIT=false` and use the same
+isolated `AGENT_QUEUE_NAME` in Web and worker. Inspect old queues before starting
+the full worker, because its `listing` queue is shared. Do not run seed, db push or
+migrations as an automatic startup step. Fresh Apify collection needs a valid
+operator token; real Ozon mutation tests require separate explicit approval.
+
+## Historical Verification: 2026-09-28
+
 Date: 2026-09-28. Local changes only; no deployment, database migration,
 paid collection, or live Ozon write was performed.
 
