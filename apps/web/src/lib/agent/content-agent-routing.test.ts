@@ -6,9 +6,18 @@ import {
   allowedProductMutationTypesForPrompt,
   allowedProductMutationTypesForTask,
   shouldRunCompetitorAnalysisForDiagnosis,
+  shouldCreateFallbackContentDraft,
 } from "./content-agent";
 
 describe("content agent task routing", () => {
+  it("honors a negative content instruction and a stock-only task", () => {
+    for (const prompt of ["只诊断店铺库存，不做内容优化", "给店铺做库存诊断", "给店铺做完整诊断，但不要生成草案"]) {
+      expect(shouldCreateFallbackContentDraft(prompt, null)).toBe(false);
+    }
+    expect(shouldCreateFallbackContentDraft("帮我优化店铺内容", null)).toBe(true);
+    expect(shouldCreateFallbackContentDraft("只检查库存，但同时优化标题", "SKU-1")).toBe(true);
+    expect(shouldRunCompetitorAnalysisForDiagnosis("只查库存，不要分析竞品")).toBe(false);
+  });
   it("does not force competitor collection for store or inventory diagnosis", () => {
     expect(requiredOzonToolsForPrompt("检查店铺库存，不用竞品", null)).toEqual([
       "get_ozon_store_snapshot",

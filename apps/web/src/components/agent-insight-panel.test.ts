@@ -63,6 +63,12 @@ function renderPanel(requestPrompt: string, actions: Array<{ type: string }> = [
 }
 
 describe("agent insight presentation", () => {
+  it("does not render excluded content or competitor work", () => {
+    const view = insightPresentationFor("只诊断店铺库存，不做内容优化，不要分析竞品", []);
+    expect(view.showContentDiagnosis).toBe(false);
+    expect(view.showCompetitorComparison).toBe(false);
+    expect(insightPresentationFor("帮我优化店铺内容", []).showContentDiagnosis).toBe(true);
+  });
   it("shows the full store report only for broad store diagnosis", () => {
     expect(insightPresentationFor("帮我做一次店铺诊断", [])).toEqual({
       showStoreDiagnosis: true,

@@ -1,15 +1,25 @@
 import {
   buildCompetitorBenchmarks,
   inferOzonCategoryName,
-  isUsableCompetitorEvidence,
   ownOzonProduct,
   ozonCdnImageUrl,
   type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
 } from "./ozon-public-crawler";
+import { uniqueUsableIndexedCompetitors } from "./ozon-search-index";
 
 const ACTOR_URL = "https://api.apify.com/v2/acts/zen-studio~ozon-scraper-pro/run-sync-get-dataset-items";
+
+export type ApifyOzonCategoryResult = OzonCategoryCompetitorResult & {
+  collectionState: "complete" | "partial" | "no_results" | "provider_failed" | "unavailable";
+};
+
+export function validateCompetitorSampleLimit(limit: number) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+    throw new Error("competitor_sample_limit_invalid");
+  }
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -71,10 +81,11 @@ export async function searchOzonApifyCompetitors(params: {
   ownSkus: Set<string>;
   limitPerProduct: number;
   fetchImpl?: typeof fetch;
-}): Promise<OzonCategoryCompetitorResult[]> {
+}): Promise<ApifyOzonCategoryResult[]> {
+  validateCompetitorSampleLimit(params.limitPerProduct);
   if (!params.apiToken) throw new Error("apify_api_token_missing");
   const fetchImpl = params.fetchImpl ?? fetch;
-  const results: OzonCategoryCompetitorResult[] = [];
+  const results: ApifyOzonCategoryResult[] = [];
   for (const target of params.targets) {
     const categoryName = inferOzonCategoryName(target);
     const ownProduct = ownOzonProduct(target);
@@ -85,7 +96,7 @@ export async function searchOzonApifyCompetitors(params: {
       path: target.categoryPathRu?.length ? target.categoryPathRu : [categoryName],
     } : null;
     if (!category || !categoryName || !target.descriptionCategoryId || !target.typeId) {
-      results.push({ target, category: null, ownProduct, competitors: [], benchmarks: null, warnings: ["自家商品缺少官方二级类目"] });
+      results.push({ target, category: null, ownProduct, competitors: [], benchmarks: null, collectionState: "unavailable", warnings: ["自家商品缺少官方二级类目"] });
       continue;
     }
     try {
@@ -107,21 +118,27 @@ export async function searchOzonApifyCompetitors(params: {
       if (!response.ok) throw new Error(`Apify HTTP ${response.status}`);
       const items: unknown = await response.json();
       if (!Array.isArray(items)) throw new Error("Apify 返回格式不正确");
-      const competitors = items.flatMap((item, index) => parseApifyOzonProduct(item, index + 1) ?? [])
+      const hasProviderErrors = items.some((item) => Boolean(record(item).error));
+      const candidates = items.flatMap((item, index) => parseApifyOzonProduct(item, index + 1) ?? [])
         .filter((product) => {
           const type = product.attributes["Тип"]?.toLocaleLowerCase("ru-RU") ?? "";
           return type.includes(categoryName.toLocaleLowerCase("ru-RU")) &&
-            !params.ownSkus.has(product.sku) &&
-            isUsableCompetitorEvidence(product, target);
-        })
+            !params.ownSkus.has(product.sku);
+        });
+      const competitors = uniqueUsableIndexedCompetitors(candidates, target)
         .slice(0, params.limitPerProduct);
+      if (!competitors.length && hasProviderErrors) throw new Error("Apify 返回采集错误");
+      const collectionState = !competitors.length ? "no_results"
+        : competitors.length < params.limitPerProduct || hasProviderErrors ? "partial" : "complete";
       results.push({
         target,
         category,
         ownProduct,
         competitors,
+        collectionState,
         benchmarks: competitors.length ? buildCompetitorBenchmarks(ownProduct, competitors) : null,
-        warnings: competitors.length ? [] : ["Apify 未返回可用的同类目竞品"],
+        warnings: collectionState === "no_results" ? ["Apify 未返回可用的同类目竞品"]
+          : collectionState === "partial" ? [`Apify 仅返回部分可用竞品：${competitors.length}/${params.limitPerProduct}`] : [],
       });
     } catch (error) {
       results.push({
@@ -129,6 +146,7 @@ export async function searchOzonApifyCompetitors(params: {
         category,
         ownProduct,
         competitors: [],
+        collectionState: "provider_failed",
         benchmarks: null,
         warnings: [`Apify 采集失败：${error instanceof Error ? error.message : String(error)}`],
       });

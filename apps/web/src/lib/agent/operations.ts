@@ -19,12 +19,11 @@ import {
   isUsableCompetitorEvidence,
   ownOzonProduct,
   ozonCdnImageUrl,
-  type OzonCategoryCompetitorResult,
   type OzonCompetitorTarget,
   type OzonPublicProduct,
 } from "./ozon-public-crawler";
 import { uniqueUsableIndexedCompetitors } from "./ozon-search-index";
-import { searchOzonApifyCompetitors } from "./apify-ozon";
+import { searchOzonApifyCompetitors, validateCompetitorSampleLimit, type ApifyOzonCategoryResult } from "./apify-ozon";
 import { analyzeProductImagesWithVision } from "./image-vision";
 import { buildProductInvestigationEvidence } from "./product-investigation";
 
@@ -1149,8 +1148,12 @@ export async function analyzeOzonCompetitors(params: {
   competitorsPerCategory: number;
   refreshEvidence?: boolean;
   targetCategory?: { descriptionCategoryId: number; typeId: number } | null;
+  // Both callbacks are required for billable work; the caller owns idempotent credit transactions.
   onBillableCategories?: (count: number) => Promise<void>;
+  // Once before a successful return. Thrown errors still require the caller's full-refund path.
+  onFailedCategories?: (count: number) => Promise<void>;
 }) {
+  validateCompetitorSampleLimit(params.competitorsPerCategory);
   const store = await resolveStore(params.tenantId, params.storeId);
   const client = clientFor(store);
   const now = new Date();
@@ -1210,9 +1213,14 @@ export async function analyzeOzonCompetitors(params: {
   }
 
   const billableCount = countBillableCompetitorCategories(reports, pending, Boolean(env.apifyApiToken));
-  if (billableCount) await params.onBillableCategories?.(billableCount);
+  if (billableCount) {
+    if (!params.onBillableCategories || !params.onFailedCategories) {
+      throw new Error("competitor_billing_callbacks_required");
+    }
+    await params.onBillableCategories(billableCount);
+  }
 
-  let crawled: OzonCategoryCompetitorResult[] = [];
+  let crawled: ApifyOzonCategoryResult[] = [];
   if (pending.length && env.apifyApiToken) {
     const ownSkus = new Set(
       summary.products.map((item) => item.publicSku).filter((sku): sku is string => Boolean(sku)),
@@ -1232,7 +1240,7 @@ export async function analyzeOzonCompetitors(params: {
     warnings.push(...result.warnings.map((warning) => `${result.target.offerId}：${warning}`));
     const competitors = result.competitors;
     if (!result.category || !competitors.length) {
-      reports.push({ ...result, cached: false });
+      reports.push({ ...result, source: resultSource, cached: false });
       continue;
     }
     const competitorIds = [];
@@ -1294,6 +1302,7 @@ export async function analyzeOzonCompetitors(params: {
         createdBy: params.userId,
         reportJson: {
           source: resultSource,
+          collectionState: result.collectionState,
           detailScope: COMPETITOR_DETAIL_SCOPE,
           competitorsPerCategory: params.competitorsPerCategory,
           storeId: store.id,
@@ -1309,6 +1318,7 @@ export async function analyzeOzonCompetitors(params: {
     });
     reports.push({
       source: resultSource,
+      collectionState: result.collectionState,
       detailScope: COMPETITOR_DETAIL_SCOPE,
       competitorsPerCategory: params.competitorsPerCategory,
       target: result.target,
@@ -1342,7 +1352,7 @@ export async function analyzeOzonCompetitors(params: {
       ? "本地 Ozon 纯 HTTP 采集器"
       : "Tavily / Ozon 搜索引擎收录页面";
   const combinedWarnings = [...warnings, ...playbooks.warnings];
-  return {
+  const result = {
     store: { id: store.id, name: store.name },
     periodDays: 30,
     competitorsPerCategory: params.competitorsPerCategory,
@@ -1361,4 +1371,14 @@ export async function analyzeOzonCompetitors(params: {
     }),
     warnings: combinedWarnings,
   };
+  const usableCategories = new Set(crawled
+    .filter((item) => item.category && item.competitors.length)
+    .map((item) => competitorCategoryKey(item.target)));
+  const failedCount = countBillableCompetitorCategories(
+    [],
+    pending.filter((target) => !usableCategories.has(competitorCategoryKey(target))),
+    Boolean(env.apifyApiToken),
+  );
+  if (failedCount) await params.onFailedCategories!(failedCount);
+  return result;
 }

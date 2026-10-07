@@ -1,4 +1,5 @@
 import { Agent, OpenAIProvider, Runner, tool } from "@openai/agents";
+import { contentOptimizationRequested, contentWorkExcluded, competitorWorkExcluded, operationalTaskOnly } from "./task-scope";
 import {
   AgentActionType,
   AgentRiskLevel,
@@ -17,6 +18,7 @@ import { env } from "@/lib/env";
 import { CREDIT_USAGE_FEATURES, consumeTenantCredits, refundTenantCredits, type CreditUsageFeature } from "@/lib/credits";
 import { createAgentActions } from "./actions";
 import { extractOfferId } from "./chat-input";
+import { mutationTarget } from "./mutation-target";
 import { redactSensitiveText } from "./policy";
 import { getAgentStoreSnapshot } from "./snapshot";
 import {
@@ -436,33 +438,6 @@ const diagnosisFindingSchema = z.object({
   neededEvidence: z.array(z.string().min(1).max(300)).max(10),
 });
 
-function titleFromPrompt(prompt: string) {
-  const trimmed = prompt.trim().replace(/\s+/g, " ");
-  return trimmed.length > 36 ? `${trimmed.slice(0, 36)}...` : trimmed || "Ozon Content Agent";
-}
-
-async function ensureSession(params: {
-  tenantId: string;
-  userId: string;
-  sessionId?: string | null;
-  prompt: string;
-}) {
-  if (params.sessionId) {
-    const existing = await prisma.agentSession.findFirst({
-      where: { id: params.sessionId, tenantId: params.tenantId, status: "OPEN" },
-    });
-    if (existing) return existing;
-  }
-
-  return prisma.agentSession.create({
-    data: {
-      tenantId: params.tenantId,
-      title: titleFromPrompt(params.prompt),
-      createdBy: params.userId,
-    },
-  });
-}
-
 export function optionalStoreId(value: string | null | undefined) {
   const trimmed = value?.trim();
   return trimmed && !["null", "undefined"].includes(trimmed.toLowerCase()) ? trimmed : null;
@@ -540,8 +515,10 @@ function lowRatingSourceProducts(value: unknown) {
 
 export function competitorMemoryContextFromReports(
   reports: Array<{ title: string; reportJson: unknown; createdAt: Date }>,
+  storeId?: string,
 ) {
-  const playbooks = reports.flatMap((report) => {
+  const scopedReports = storeId ? reports.filter((report) => rawRecord(report.reportJson).storeId === storeId) : reports;
+  const playbooks = scopedReports.flatMap((report) => {
     const payload = rawRecord(report.reportJson);
     if (payload.kind !== "category_attribute_playbook") return [];
     const attributes = Array.isArray(payload.attributes) ? payload.attributes : [];
@@ -564,9 +541,9 @@ export function competitorMemoryContextFromReports(
     }];
   });
 
-  const competitorReports = reports.flatMap((report) => {
+  const competitorReports = scopedReports.flatMap((report) => {
     const payload = rawRecord(report.reportJson);
-    if (!["ozon_search_index", "ozon_http_crawler"].includes(String(payload.source))) return [];
+    if (!["ozon_search_index", "ozon_http_crawler", "apify_ozon_scraper"].includes(String(payload.source))) return [];
     const competitors = Array.isArray(payload.competitors) ? payload.competitors : [];
     const target = rawRecord(payload.target);
     const category = rawRecord(payload.category);
@@ -596,10 +573,12 @@ export function competitorMemoryContextFromReports(
   return lines.join("\n");
 }
 
-async function loadCompetitorMemoryContext(tenantId: string) {
+async function loadCompetitorMemoryContext(tenantId: string, storeId: string | null) {
+  if (!storeId) return "";
   const reports = await prisma.competitorContentReport.findMany({
     where: {
       tenantId,
+      reportJson: { path: ["storeId"], equals: storeId },
       OR: [
         { title: { startsWith: "类目属性经验 v" } },
         { title: { startsWith: "竞品分析：" } },
@@ -609,7 +588,7 @@ async function loadCompetitorMemoryContext(tenantId: string) {
     take: 40,
     select: { title: true, reportJson: true, createdAt: true },
   });
-  return competitorMemoryContextFromReports(reports);
+  return competitorMemoryContextFromReports(reports, storeId);
 }
 
 function statusFrom(info: OzonProductInfoItem | null | undefined) {
@@ -817,10 +796,11 @@ function ownStoreDataIntent(prompt: string) {
 }
 
 function contentOptimizationIntent(prompt: string) {
-  return /(内容优化|优化内容|优化商品|优化标题|标题优化|优化描述|描述优化|优化关键词|关键词优化|(?:修改|改|重写|完善)(?:店铺)?(?:商品)?(?:标题|描述|简介|关键词|文案)|生成草案|生成草稿|修改草案|修改草稿|内容草案|内容草稿|content|listing|draft)/i.test(prompt);
+  return contentOptimizationRequested(prompt);
 }
 
 function competitorAnalysisIntent(prompt: string) {
+  if (competitorWorkExcluded(prompt)) return false;
   return /(?:竞品|竞争对手|同款).{0,20}(?:分析|对比|搜索|查找)|(?:分析|对比).{0,20}(?:竞品|竞争对手)/i.test(prompt);
 }
 
@@ -939,11 +919,12 @@ export function allowedProductMutationTypesForTask(prompt: string, taskContext: 
 }
 
 function shouldRequireContentDraft(prompt: string, offerId: string | null) {
-  if (!offerId) return false;
+  if (!offerId || contentWorkExcluded(prompt) || operationalTaskOnly(prompt)) return false;
   return contentOptimizationIntent(prompt) || /(优化|改标题|标题|关键词|描述|属性|文案|内容|草稿)/i.test(prompt);
 }
 
 export function shouldCreateFallbackContentDraft(prompt: string, offerId: string | null) {
+  if (contentWorkExcluded(prompt) || operationalTaskOnly(prompt)) return false;
   return shouldRequireContentDraft(prompt, offerId) ||
     (!offerId && (contentOptimizationIntent(prompt) ||
       (storeDiagnosisIntent(prompt) && !/(?:只|仅|单独).{0,12}(?:库存|可见性|订单|物流|发货|活动)/.test(prompt))));
@@ -1198,53 +1179,14 @@ export async function runOzonContentAgent(params: {
   sessionId?: string | null;
   storeId?: string | null;
   onStarted?: (snapshot: AgentRunProgressSnapshot) => void;
+  preparedRun?: import("./content-agent-prepare").PreparedContentAgentRun;
 }) {
-  const prompt = redactSensitiveText(params.prompt);
+  const { beginContentAgentRun } = await import("./content-agent-prepare");
+  const prepared = await beginContentAgentRun(params);
+  const { session, userMessage, runRecord, prompt } = prepared;
+  params = { ...params, prompt, sessionId: session.id, storeId: prepared.storeId };
   const offerId = extractOfferId(prompt);
   const competitorsPerCategory = competitorsPerCategoryFromPrompt(prompt);
-  const session = await ensureSession({
-    tenantId: params.tenantId,
-    userId: params.userId,
-    sessionId: params.sessionId,
-    prompt,
-  });
-
-  const userMessage = await prisma.agentMessage.create({
-    data: {
-      tenantId: params.tenantId,
-      sessionId: session.id,
-      role: "USER",
-      content: prompt,
-      metaJson: {
-        storeId: params.storeId,
-        offerId,
-        agent: "ozon_content_v1",
-      } as never,
-    },
-  });
-
-  await chargeContentAgentFeature({
-    tenantId: params.tenantId,
-    userId: params.userId,
-    feature: "agent_message",
-    referenceType: "agent_message",
-    referenceId: userMessage.id,
-    idempotencyKey: `agent-message:${userMessage.id}`,
-  });
-
-  const runRecord = await prisma.agentRun.create({
-    data: {
-      tenantId: params.tenantId,
-      sessionId: session.id,
-      requestedBy: params.userId,
-      status: AgentRunStatus.RUNNING,
-      model:
-        !env.openaiApiKey || !env.openaiAgentModel || env.openaiAgentMock
-          ? "unconfigured"
-          : env.openaiAgentModel,
-      input: prompt,
-    },
-  });
 
   const toolCalls: ToolCallLog[] = [];
   const requiredToolNames = requiredOzonToolsForPrompt(prompt, offerId);
@@ -1341,6 +1283,7 @@ export async function runOzonContentAgent(params: {
     let targetedProductReadCount = 0;
     let latestLowContentOfferId: string | null = null;
     let latestCompetitorReports: unknown[] = [];
+    let competitorAnalysisStarted = false;
     const listedPromotionIds = new Set<number>();
     let latestPromotionCandidateActionId: number | null = null;
     let preloadedContext = "";
@@ -1425,6 +1368,11 @@ export async function runOzonContentAgent(params: {
       storeId: string | null;
       throwOnError: boolean;
     }) {
+      if (competitorAnalysisStarted) throw new Error("本轮竞品分析已经处理，请复用本轮证据，不要重复采集和扣费。");
+      if (competitorWorkExcluded(prompt) || operationalTaskOnly(prompt)) {
+        throw new Error("本次任务不包含竞品采集。");
+      }
+      competitorAnalysisStarted = true;
       const at = new Date().toISOString();
       const creditKey = `agent-tool:${runRecord.id}:analyze_ozon_competitors`;
       let chargedAmount = 0;
@@ -1453,6 +1401,20 @@ export async function runOzonContentAgent(params: {
               idempotencyKey: creditKey,
             });
             chargedAmount = amount;
+          },
+          onFailedCategories: async (count) => {
+            const amount = Math.min(chargedAmount, competitorAnalysisCreditCost(count));
+            if (!amount) return;
+            await refundContentAgentFeature({
+              tenantId: params.tenantId,
+              userId: params.userId,
+              feature: "competitor_analysis",
+              amount,
+              referenceType: "agent_run_tool",
+              referenceId: `${runRecord.id}:analyze_ozon_competitors`,
+              idempotencyKey: `refund:${creditKey}:empty-categories`,
+            });
+            chargedAmount -= amount;
           },
         });
         latestCompetitorReports = result.reports;
@@ -2032,6 +1994,9 @@ export async function runOzonContentAgent(params: {
         suggestions: z.array(contentSuggestionSchema).min(1).max(8),
       }),
       execute: async (draft) => {
+        if (contentWorkExcluded(prompt) || operationalTaskOnly(prompt)) {
+          throw new Error("本次任务不包含内容修改，请先完成用户指定的任务。");
+        }
         const productContent = productContentForDraft(readProductsByOfferId, draft.offerId);
         if (!productContent) {
           throw new Error("必须先成功读取自家 Ozon 商品信息，才能创建 CONTENT_DRAFT。");
@@ -2135,10 +2100,10 @@ export async function runOzonContentAgent(params: {
             rationale: action.rationale,
             riskLevel: (action.riskLevel ?? AgentRiskLevel.MEDIUM) as AgentRiskLevel,
             storeId: store.id,
-            offerId: action.offerId ?? action.payload?.offerId ?? action.payload?.offer_id
-              ?? latestProductContent?.offerId ?? null,
-            productId: action.productId ?? action.payload?.productId ?? action.payload?.product_id
-              ?? latestProductContent?.productId ?? null,
+            ...mutationTarget({
+              offerId: action.offerId ?? action.payload?.offerId ?? action.payload?.offer_id,
+              productId: action.productId ?? action.payload?.productId ?? action.payload?.product_id,
+            }, [...readProductsByOfferId.values()], action.type === "BULK_PRODUCT_UPDATE" ? null : latestProductContent),
             payload: {
               agentVersion: "ozon_content_v1",
               ...(action.payload ?? {}),
@@ -2206,10 +2171,11 @@ export async function runOzonContentAgent(params: {
     const activeTaskContext = inventoryTargetFromPrompt(prompt) || /(?:库存|补货|只处理第|第\s*[一二三四五六七八九十\d]+\s*款)/.test(prompt)
       ? previousTaskContext
       : null;
-    const competitorMemoryContext = await loadCompetitorMemoryContext(params.tenantId);
+    const competitorMemoryContext = await loadCompetitorMemoryContext(params.tenantId, runStoreId ?? contextStoreId);
     const needsContentEvidence = shouldRequireContentDraft(prompt, offerId) ||
       (!offerId && contentOptimizationIntent(prompt)) ||
       /生成待确认优化方案/.test(prompt);
+    const competitorsAllowed = !competitorWorkExcluded(prompt) && !operationalTaskOnly(prompt);
     const planContext = [
       "本次任务必须按以下计划执行；涉及真实店铺、竞品、商品、活动和 Ozon 写操作时，必须调用对应工具，不允许猜测。",
       ...agentPlan.map((item, index) => `${index + 1}. ${item.title}：${item.description}`),
@@ -2221,7 +2187,7 @@ export async function runOzonContentAgent(params: {
       const contentTarget = prepareContentDraft && latestLowContentOfferId
         ? await readProductContent(latestLowContentOfferId, diagnosis.store.id).catch(() => null)
         : null;
-      const competitors = contentTarget?.found && !contentTarget.archived && contentDraftCategoryFromProduct(contentTarget)
+      const competitors = competitorsAllowed && contentTarget?.found && !contentTarget.archived && contentDraftCategoryFromProduct(contentTarget)
         ? await runCompetitorAnalysis({ storeId: diagnosis.store.id, throwOnError: false })
         : null;
       if (!prepareContentDraft) {
@@ -2293,7 +2259,7 @@ export async function runOzonContentAgent(params: {
       ].filter(Boolean).join("\n");
     } else if (requiredToolName === "get_ozon_product_content" && offerId) {
       const product = await readProductContent(offerId, params.storeId);
-      const competitors = needsContentEvidence && product.found && !product.archived && contentDraftCategoryFromProduct(product)
+      const competitors = competitorsAllowed && needsContentEvidence && product.found && !product.archived && contentDraftCategoryFromProduct(product)
         ? await runCompetitorAnalysis({ storeId: product.storeId, throwOnError: false })
         : null;
       if (needsContentEvidence) {
@@ -2352,7 +2318,9 @@ export async function runOzonContentAgent(params: {
       listWarehousesTool,
       proposeDraftTool,
       proposeProductMutationTool,
-    ].filter((agentTool) => !preloadedToolNames.has(agentTool.name));
+    ].filter((agentTool) => !preloadedToolNames.has(agentTool.name)
+      && !(agentTool.name === "propose_content_draft" && (contentWorkExcluded(prompt) || operationalTaskOnly(prompt)))
+      && !(agentTool.name === "analyze_ozon_competitors" && (competitorWorkExcluded(prompt) || operationalTaskOnly(prompt))));
 
     const agent = new Agent({
       name: "Ozon Operations Agent",

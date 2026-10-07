@@ -1,18 +1,16 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@saas/db";
 import {
-  ContentAgentConfigurationError,
-  ContentAgentInputError,
   contentAgentDataSourcesFromToolCalls,
-  runOzonContentAgent,
   serializeContentAgentAction,
-  serializeContentAgentResult,
 } from "@/lib/agent/content-agent";
-import { fail, forbidden, notFound, ok, unauthorized } from "@/lib/api";
-import { CreditAdjustmentError } from "@/lib/credits";
+import { forbidden, notFound, ok, unauthorized } from "@/lib/api";
 import { sessionFromRequest } from "@/lib/request-session";
 
 export const runtime = "nodejs";
+
+// POST now uses the 202 queued-run contract; GET retains the conversation history contract.
+export { POST } from "./start/route";
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -194,44 +192,4 @@ export async function GET(req: NextRequest, props: { params: Promise<{ id: strin
         }
       : null,
   });
-}
-
-export async function POST(req: NextRequest, props: { params: Promise<{ id: string }> }) {
-  const params = await props.params;
-  const requestSession = await sessionFromRequest(req);
-  if (!requestSession) return unauthorized();
-  if (!requestSession.tenantId) return forbidden();
-
-  const body = await req.json().catch(() => ({}));
-  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  if (!prompt) {
-    return fail("invalid_prompt", "请输入要让内容 Agent 处理的消息。");
-  }
-
-  try {
-    const result = await runOzonContentAgent({
-      tenantId: requestSession.tenantId,
-      userId: requestSession.userId,
-      prompt,
-      sessionId: params.id === "new" ? null : params.id,
-      storeId: typeof body.storeId === "string" ? body.storeId : null,
-    });
-    return ok(serializeContentAgentResult(result));
-  } catch (error) {
-    if (error instanceof ContentAgentConfigurationError) {
-      return fail(error.code, error.message, [], error.status);
-    }
-    if (error instanceof ContentAgentInputError) {
-      return fail(error.code, error.message, [], error.status);
-    }
-    if (error instanceof CreditAdjustmentError) {
-      return fail(error.code, error.message, [], error.status);
-    }
-    return fail(
-      "content_agent_run_failed",
-      error instanceof Error ? error.message : String(error),
-      [],
-      500,
-    );
-  }
 }
