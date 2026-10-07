@@ -775,6 +775,7 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
     const titleTerms = topTerms(competitors.map((product) => product.title), 8);
     const descriptionTerms = topTerms(competitors.map((product) => product.description ?? ""), 8);
     return [{
+      storeId: textField(item.storeId),
       offerId: textField(target.offerId) ?? ownProduct?.sku ?? null,
       descriptionCategoryId: Number(target.descriptionCategoryId) || null,
       typeId: Number(target.typeId) || null,
@@ -788,6 +789,10 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
         rating: ownProduct.rating,
         reviewCount: ownProduct.reviewCount,
         description: descriptionSummary(ownProduct.description),
+        fullDescription: ownProduct.description,
+        descriptionIsSummary: true,
+        extractedKeywords: topTerms([ownProduct.title, ownProduct.description ?? ""], 8),
+        keywordsAreOfficialTags: false,
       } : {
         title: textField(target.title),
         imageUrl: null,
@@ -796,8 +801,12 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
         rating: null,
         reviewCount: null,
         description: null,
+        fullDescription: null,
+        descriptionIsSummary: true,
+        extractedKeywords: topTerms([textField(target.title) ?? ""], 8),
+        keywordsAreOfficialTags: false,
       },
-      competitors: competitors.slice(0, 6).map((product) => ({
+      competitors: competitors.map((product) => ({
         sku: product.sku,
         url: product.url,
         title: product.title,
@@ -808,6 +817,10 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
         reviewCount: product.reviewCount,
         categoryPosition: product.categoryPosition ?? null,
         description: descriptionSummary(product.description),
+        fullDescription: product.description,
+        descriptionIsSummary: true,
+        extractedKeywords: topTerms([product.title, product.description ?? ""], 8),
+        keywordsAreOfficialTags: false,
       })),
       comparison: {
         title: {
@@ -849,20 +862,36 @@ export async function buildCompetitorContentDiagnosis(reports: unknown[]) {
   });
 
   const first = samples[0];
-  const vision = first
-    ? await analyzeProductImagesWithVision([
+  const visionInputs = first
+    ? [
         { label: `自家 ${first.offerId ?? ""}`.trim(), imageUrl: first.own.imageUrl },
         ...first.competitors.slice(0, 3).map((item, index) => ({
           label: `竞品${index + 1}`,
           imageUrl: item.imageUrl,
         })),
-      ])
+      ]
+    : [];
+  const vision = first
+    ? await analyzeProductImagesWithVision(visionInputs)
     : { enabled: false, model: "", analyses: [], warning: "没有可分析竞品图片。" };
+  const imageAnalysis = (sampleIndex: number, imageIndex: number) => {
+    const input = sampleIndex === 0 ? visionInputs[imageIndex] : null;
+    return input?.imageUrl
+      ? vision.analyses.find((analysis) => analysis.imageUrl === input.imageUrl && analysis.label === input.label) ?? null
+      : null;
+  };
 
   return {
     kind: "competitor_content_diagnosis",
     heatProxyNotice: "Ozon 未返回真实销量；系统使用评分、评价数和搜索位置作为热度代理。",
-    samples,
+    samples: samples.map((sample, sampleIndex) => ({
+      ...sample,
+      own: { ...sample.own, imageAnalysis: imageAnalysis(sampleIndex, 0) },
+      competitors: sample.competitors.map((product, index) => ({
+        ...product,
+        imageAnalysis: imageAnalysis(sampleIndex, index + 1),
+      })),
+    })),
     vision,
   };
 }
@@ -1240,7 +1269,7 @@ export async function analyzeOzonCompetitors(params: {
     warnings.push(...result.warnings.map((warning) => `${result.target.offerId}：${warning}`));
     const competitors = result.competitors;
     if (!result.category || !competitors.length) {
-      reports.push({ ...result, source: resultSource, cached: false });
+      reports.push({ ...result, storeId: store.id, source: resultSource, cached: false });
       continue;
     }
     const competitorIds = [];
@@ -1317,6 +1346,7 @@ export async function analyzeOzonCompetitors(params: {
       },
     });
     reports.push({
+      storeId: store.id,
       source: resultSource,
       collectionState: result.collectionState,
       detailScope: COMPETITOR_DETAIL_SCOPE,

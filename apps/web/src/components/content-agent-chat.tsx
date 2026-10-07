@@ -1007,6 +1007,10 @@ function SessionSidebar({
   );
 }
 
+export function isConversationNearBottom(container: { scrollHeight: number; scrollTop: number; clientHeight: number }) {
+  return container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+}
+
 export function ContentAgentChat({
   stores,
   sessions,
@@ -1031,6 +1035,8 @@ export function ContentAgentChat({
   const [archiveError, setArchiveError] = useState("");
   const [archivingSessionIds, setArchivingSessionIds] = useState<Set<string>>(() => new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const followLatestRef = useRef(true);
+  const [draftFocus, setDraftFocus] = useState<{ messageId: string; actionId: string } | null>(null);
   const selectedSessionIdRef = useRef(selectedSessionId);
   const sessionListRef = useRef(sessionList);
   const activeRunRef = useRef<{ sessionId: string; runId: string } | null>(null);
@@ -1097,7 +1103,12 @@ export function ContentAgentChat({
           : "已连接，可以发送";
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ block: "end" });
+    followLatestRef.current = true;
+    setDraftFocus(null);
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (followLatestRef.current) scrollRef.current?.scrollIntoView({ block: "end" });
   }, [messages, running, loadingHistory]);
 
   useEffect(() => {
@@ -1268,6 +1279,7 @@ export function ContentAgentChat({
   async function sendPrompt(value: string) {
     const content = value.trim();
     if (!content || running || loadingHistory) return;
+    followLatestRef.current = true;
     const requestSessionId = selectedSessionId;
 
     setMessages((current) => [
@@ -1485,7 +1497,7 @@ export function ContentAgentChat({
           </div>
         ) : null}
 
-        <div className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(240,247,255,0.75),rgba(248,251,255,0.35))] px-4 py-4 pr-3 md:px-5">
+        <div onScroll={(event) => { followLatestRef.current = isConversationNearBottom(event.currentTarget); }} className="flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(240,247,255,0.75),rgba(248,251,255,0.35))] px-4 py-4 pr-3 md:px-5">
           <div className="w-full space-y-4 pb-4">
             {messages.map((message) => {
               const hasReport = message.dataSources?.some((source) =>
@@ -1509,19 +1521,25 @@ export function ContentAgentChat({
                       )}
                     >
                       <div className="whitespace-pre-wrap break-words">{message.content}</div>
-                      {message.role === "assistant" ? (
-                        <AgentInsightPanel
-                          sources={message.dataSources}
-                          requestPrompt={message.requestPrompt}
-                          actions={message.actions}
-                          onRun={(nextPrompt) => void sendPrompt(nextPrompt)}
-                        />
-                      ) : null}
                     </div>
+                    {message.role === "assistant" ? (
+                      <AgentInsightPanel
+                        sources={message.dataSources}
+                        requestPrompt={message.requestPrompt}
+                        actions={message.actions}
+                        activeStoreId={selectedStoreId}
+                        onOpenDraft={(actionId) => {
+                          followLatestRef.current = false;
+                          setDraftFocus({ messageId: message.id, actionId });
+                        }}
+                        onRun={(nextPrompt) => void sendPrompt(nextPrompt)}
+                      />
+                    ) : null}
                     {message.actions?.some((action) => action.type === "CONTENT_DRAFT") ? (
                       <ContentDraftGroup
                         actions={message.actions.filter((action) => action.type === "CONTENT_DRAFT")}
                         onCommand={updateAction}
+                        focusRequest={draftFocus?.messageId === message.id ? draftFocus : null}
                       />
                     ) : null}
                     {message.actions?.filter((action) => action.type !== "CONTENT_DRAFT").map((action) => (

@@ -1380,12 +1380,20 @@ export async function runOzonContentAgent(params: {
       try {
         const requestedStoreId =
           optionalStoreId(params.storeId) ?? optionalStoreId(paramsForRun.storeId);
-        const focusProduct = readProductsByOfferId.get(offerId ?? latestLowContentOfferId ?? "");
+        const focusProduct = offerId
+          ? await readProductContent(offerId, requestedStoreId)
+          : readProductsByOfferId.get(latestLowContentOfferId ?? "");
+        if (offerId && (!focusProduct?.found || focusProduct.offerId !== offerId)) {
+          throw new Error("指定自家商品读取失败或货号不匹配，已停止竞品分析，未采集或扣费。");
+        }
         const targetCategory = focusProduct ? contentDraftCategoryFromProduct(focusProduct) : null;
+        if (offerId && !targetCategory) {
+          throw new Error("Ozon 未返回指定商品的完整官方类目，已停止竞品分析，未采集或扣费。");
+        }
         const result = await analyzeOzonCompetitors({
           tenantId: params.tenantId,
           userId: params.userId,
-          storeId: requestedStoreId,
+          storeId: focusProduct?.storeId ?? requestedStoreId,
           competitorsPerCategory: competitorsPerCategory ?? 1,
           refreshEvidence: shouldRefreshCompetitorEvidence(prompt),
           targetCategory,
